@@ -357,7 +357,6 @@ emulator-5554\tdevice product:sdk_gphone_x86`;
       mockExecSync
         .mockReturnValueOnce(Buffer.from('Android Debug Bridge version 1.0.41')) // ADB version check
         .mockReturnValueOnce(Buffer.from(deviceListOutput)) // devices -l call
-        .mockReturnValueOnce(Buffer.from('Android Debug Bridge version 1.0.41')) // ADB version check
         .mockReturnValueOnce(Buffer.from('Success')); // install output
 
       try {
@@ -479,7 +478,7 @@ emulator-5554\tdevice product:sdk_gphone_x86`;
       const deviceListOutput = `List of devices attached
 emulator-5554\tdevice product:sdk_gphone_x86`;
       const dumpsysOutput =
-        'mCurrentFocus=Window{123 u0 com.example.app/.MainActivity}';
+        'topResumedActivity=ActivityRecord{123 u0 com.example.app/.MainActivity}';
 
       mockExecSync
         .mockReturnValueOnce(Buffer.from('Android Debug Bridge version 1.0.41')) // ADB version check

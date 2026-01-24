@@ -348,34 +348,43 @@ export function getCurrentActivity(deviceId?: string): {
   component?: string;
   raw: string;
 } {
-  const { deviceId: targetDeviceId, output: windowOutput } = executeADBCommandOnDevice(
-    'shell dumpsys window windows',
+  const { deviceId: targetDeviceId, output: activityOutput } = executeADBCommandOnDevice(
+    'shell dumpsys activity activities',
     deviceId,
     { timeout: 8000 }
   );
 
   let rawLine =
-    windowOutput
+    activityOutput
       .split('\n')
       .map(line => line.trim())
-      .find(line => line.includes('mCurrentFocus') || line.includes('mFocusedApp')) ?? '';
+      .find(
+        line =>
+          line.includes('topResumedActivity') ||
+          line.includes('mTopResumedActivity') ||
+          line.includes('ResumedActivity') ||
+          line.includes('mResumedActivity') ||
+          line.includes('mFocusedApp') ||
+          line.includes('mFocusedActivity') ||
+          line.includes('mTopActivity')
+      ) ?? '';
 
   if (!rawLine) {
-    const { output: activityOutput } = executeADBCommandOnDevice(
-      'shell dumpsys activity activities',
+    const { output: windowOutput } = executeADBCommandOnDevice(
+      'shell dumpsys window windows',
       targetDeviceId,
       { timeout: 8000 }
     );
 
     rawLine =
-      activityOutput
+      windowOutput
         .split('\n')
         .map(line => line.trim())
         .find(
           line =>
-            line.includes('mResumedActivity') ||
-            line.includes('mFocusedActivity') ||
-            line.includes('mTopActivity')
+            line.includes('mCurrentFocus') ||
+            line.includes('mFocusedApp') ||
+            line.includes('mFocusedWindow')
         ) ?? '';
   }
 
@@ -510,12 +519,36 @@ export function installApk(
     .filter(Boolean)
     .join(' ');
   const timeout = options.timeoutMs ?? INSTALL_TIMEOUT_MS;
-  const { deviceId: targetDeviceId, output } = executeADBCommandOnDevice(
-    installArgs,
-    deviceId,
-    { timeout }
-  );
-  const trimmed = output.trim();
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const execOptions: ExecSyncOptions = {
+    stdio: 'pipe',
+    timeout,
+    maxBuffer: DEFAULT_BINARY_MAX_BUFFER,
+  };
+
+  let trimmed = '';
+  try {
+    const result = execSync(`adb -s ${targetDeviceId} ${installArgs}`, execOptions);
+    trimmed = result.toString('utf-8').trim();
+  } catch (error: any) {
+    const stdout = error?.stdout ? error.stdout.toString('utf-8') : '';
+    const stderr = error?.stderr ? error.stderr.toString('utf-8') : '';
+    const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n').trim();
+    const suggestion = /INSTALL_FAILED_NO_MATCHING_ABIS/i.test(combined)
+      ? 'The APK ABI does not match the device. Build a compatible APK (e.g., arm64 for device or x86_64 for emulator).'
+      : undefined;
+    throw new ADBCommandError(
+      'APK_INSTALL_FAILED',
+      `APK install failed: ${combined || error.message}`,
+      {
+        output: combined,
+        apkPath: resolvedApkPath,
+        deviceId: targetDeviceId,
+      },
+      suggestion
+    );
+  }
+
   const success = /success/i.test(trimmed);
 
   if (!success) {
