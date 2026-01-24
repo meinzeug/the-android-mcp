@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The Android MCP GUI</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div>
+          <h1>The Android MCP</h1>
+          <p>Device control console for Codex-driven Android workflows.</p>
+        </div>
+        <div class="status" id="status">Disconnected</div>
+      </header>
+
+      <main class="grid">
+        <section class="card devices">
+          <div class="card-head">
+            <h2>Devices</h2>
+            <button class="btn" id="refreshDevices">Refresh</button>
+          </div>
+          <div class="device-list" id="deviceList"></div>
+        </section>
+
+        <section class="card screen">
+          <div class="card-head">
+            <h2>Live Screen</h2>
+            <div class="toolbar">
+              <button class="btn" id="shotBtn">Screenshot</button>
+              <button class="btn ghost" id="tapToggle">Tap Mode</button>
+            </div>
+          </div>
+          <div class="screen-wrap">
+            <img id="screenImg" alt="Device screenshot" />
+            <div class="screen-overlay" id="screenOverlay">Click to send tap</div>
+          </div>
+          <div class="screen-meta" id="screenMeta">No screenshot yet</div>
+        </section>
+
+        <section class="card actions">
+          <div class="card-head">
+            <h2>App Control</h2>
+          </div>
+          <div class="field">
+            <label>Package</label>
+            <input id="packageName" value="com.famyos.androidapp" />
+          </div>
+          <div class="field">
+            <label>Activity</label>
+            <input id="activityName" value="com.famyos.androidapp.ui.MainActivity" />
+          </div>
+          <div class="row">
+            <button class="btn" id="startApp">Start</button>
+            <button class="btn ghost" id="stopApp">Stop</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="field">
+            <label>Install APK (URL)</label>
+            <input id="apkUrl" placeholder="https://example.com/app.apk" />
+          </div>
+          <div class="row">
+            <button class="btn" id="installApk">Install from URL</button>
+            <button class="btn ghost" id="installLocal">Install local APK</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="field">
+            <label>Input Text</label>
+            <input id="inputText" placeholder="Type into focused field" />
+          </div>
+          <button class="btn" id="sendText">Send Text</button>
+
+          <div class="field">
+            <label>Keyevent</label>
+            <input id="keyevent" value="4" />
+          </div>
+          <button class="btn ghost" id="sendKeyevent">Send Keyevent</button>
+        </section>
+
+        <section class="card telemetry">
+          <div class="card-head">
+            <h2>Telemetry</h2>
+            <button class="btn" id="refreshTelemetry">Refresh</button>
+          </div>
+          <div class="telemetry-grid">
+            <div>
+              <div class="label">Current Activity</div>
+              <div class="value" id="currentActivity">–</div>
+            </div>
+            <div>
+              <div class="label">Window Size</div>
+              <div class="value" id="windowSize">–</div>
+            </div>
+          </div>
+          <div class="field">
+            <label>UI Hierarchy (XML)</label>
+            <textarea id="uiDump" rows="6"></textarea>
+          </div>
+          <button class="btn ghost" id="dumpUi">Dump UI</button>
+        </section>
+
+        <section class="card logs">
+          <div class="card-head">
+            <h2>Event Log</h2>
+            <button class="btn ghost" id="clearLog">Clear</button>
+          </div>
+          <div class="log" id="log"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>

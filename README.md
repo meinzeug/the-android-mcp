@@ -46,6 +46,7 @@ See the MCP server in action with real-time Android UI analysis and control:
 
 - [AI Agent Configuration](#ai-agent-configuration)
 - [Installation](#installation)
+- [GUI App (Linux)](#gui-app-linux)
 - [Development Workflow](#development-workflow)
 - [Prerequisites](#prerequisites)
 - [Development Environment Setup](#development-environment-setup)
@@ -153,6 +154,27 @@ the-android-mcp --version
 # For npm installation
 npx the-android-mcp --version
 ```
+
+## GUI App (Linux)
+
+Lightweight Electron GUI that talks to the MCP server over stdio and gives you a visual control surface for devices.
+
+```bash
+# build MCP server first
+npm run build
+
+# start the GUI
+cd apps/gui
+npm install
+npm run dev
+```
+
+The GUI auto-launches the MCP server from `dist/index.js` and exposes:
+- device list + selection
+- screenshots + tap overlay
+- app install/start/stop
+- text input + keyevents
+- current activity, window size, UI hierarchy dump
 
 ## Development Workflow
 

@@ -1,0 +1,17 @@
+{
+  "name": "the-android-mcp-gui",
+  "private": true,
+  "version": "0.0.1",
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.2"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0"
+  }
+}

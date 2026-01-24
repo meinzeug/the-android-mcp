@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - APK install from URL (`apkUrl`) with automatic download.
 - New tools: current activity, window size, and UI hierarchy dump.
 
+## [0.1.3] - 2026-01-24
+### Added
+- Linux GUI app (Electron) under `apps/gui` for visual MCP control.
+
 ## [0.1.1] - 2026-01-24
 ### Added
 - Auto-register Codex MCP config on install (writes `~/.codex/config.toml` if present).
