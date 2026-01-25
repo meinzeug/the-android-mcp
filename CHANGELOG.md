@@ -33,6 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Improved
 - Submit detection now resolves clickable containers around submit text (e.g. Compose buttons).
 
+## [2.0.3] - 2026-01-25
+### Added
+- GitHub issue creation tool (`create_github_issue`) for bug/enhancement reporting.
+- Smart gesture helpers (`smart_swipe`, `smart_scroll`) and swipe+shot tool.
+
+### Improved
+- Screenshot throttling for faster repeated captures.
+- README now includes an efficiency playbook for coding AIs.
+
 ## [2.0.0] - 2026-01-25
 ### Added
 - Smart login tools (`smart_login`, `detect_login_fields`, `smart_login_fast`).

@@ -74,6 +74,7 @@ jest.mock('../../src/types', () => {
     TakeScreenshotInputSchema: z.object({
       deviceId: z.string().optional(),
       format: z.enum(['png']).default('png'),
+      throttleMs: z.number().optional(),
     }),
     ListDevicesInputSchema: z.object({}),
     FindApkInputSchema: z.object({
@@ -163,6 +164,31 @@ jest.mock('../../src/types', () => {
       endX: z.number(),
       endY: z.number(),
       durationMs: z.number().optional(),
+    }),
+    SwipeAndScreenshotInputSchema: z.object({
+      deviceId: z.string().optional(),
+      startX: z.number(),
+      startY: z.number(),
+      endX: z.number(),
+      endY: z.number(),
+      durationMs: z.number().optional(),
+      postSwipeWaitMs: z.number().optional(),
+      screenshotThrottleMs: z.number().optional(),
+    }),
+    SmartSwipeInputSchema: z.object({
+      deviceId: z.string().optional(),
+      startX: z.number(),
+      startY: z.number(),
+      endX: z.number(),
+      endY: z.number(),
+      durationMs: z.number().optional(),
+      postSwipeWaitMs: z.number().optional(),
+      waitForUiStable: z.boolean().optional(),
+      stableIterations: z.number().optional(),
+      intervalMs: z.number().optional(),
+      timeoutMs: z.number().optional(),
+      captureScreenshot: z.boolean().optional(),
+      screenshotThrottleMs: z.number().optional(),
     }),
     InputTextInputSchema: z.object({
       deviceId: z.string().optional(),
@@ -311,6 +337,19 @@ jest.mock('../../src/types', () => {
       distancePercent: z.number().optional(),
       durationMs: z.number().optional(),
       startXPercent: z.number().optional(),
+    }),
+    SmartScrollInputSchema: z.object({
+      deviceId: z.string().optional(),
+      direction: z.string(),
+      distancePercent: z.number().optional(),
+      profile: z.string().optional(),
+      durationMs: z.number().optional(),
+      waitForUiStable: z.boolean().optional(),
+      stableIterations: z.number().optional(),
+      intervalMs: z.number().optional(),
+      timeoutMs: z.number().optional(),
+      captureScreenshot: z.boolean().optional(),
+      screenshotThrottleMs: z.number().optional(),
     }),
     ScrollHorizontalInputSchema: z.object({
       deviceId: z.string().optional(),
@@ -523,6 +562,13 @@ jest.mock('../../src/types', () => {
       playProtectAction: z.string().optional(),
       playProtectMaxWaitMs: z.number().optional(),
     }),
+    CreateIssueInputSchema: z.object({
+      repo: z.string().optional(),
+      title: z.string(),
+      body: z.string().optional(),
+      labels: z.array(z.string()).optional(),
+      assignees: z.array(z.string()).optional(),
+    }),
 
     // Tool output schemas
     TakeScreenshotOutputSchema: z.object({
@@ -656,6 +702,17 @@ jest.mock('../../src/types', () => {
       endY: z.number(),
       durationMs: z.number().optional(),
       output: z.string(),
+    }),
+    SwipeAndScreenshotOutputSchema: z.object({
+      deviceId: z.string(),
+      swipe: z.any(),
+      screenshot: z.any(),
+    }),
+    SmartSwipeOutputSchema: z.object({
+      deviceId: z.string(),
+      swipe: z.any(),
+      uiStable: z.any().optional(),
+      screenshot: z.any().optional(),
     }),
     InputTextOutputSchema: z.object({
       deviceId: z.string(),
@@ -827,6 +884,13 @@ jest.mock('../../src/types', () => {
       deviceId: z.string(),
       direction: z.string(),
       output: z.string(),
+    }),
+    SmartScrollOutputSchema: z.object({
+      deviceId: z.string(),
+      direction: z.string(),
+      output: z.string(),
+      uiStable: z.any().optional(),
+      screenshot: z.any().optional(),
     }),
     ScrollHorizontalOutputSchema: z.object({
       deviceId: z.string(),
@@ -1048,6 +1112,12 @@ jest.mock('../../src/types', () => {
       start: z.any().optional(),
       playProtect: z.any().optional(),
     }),
+    CreateIssueOutputSchema: z.object({
+      repo: z.string(),
+      title: z.string(),
+      url: z.string(),
+      output: z.string(),
+    }),
 
     // MCP Tool schemas
     TakeScreenshotToolSchema: {
@@ -1232,6 +1302,39 @@ jest.mock('../../src/types', () => {
         endX: { type: 'number' },
         endY: { type: 'number' },
         durationMs: { type: 'number' },
+      },
+      required: ['startX', 'startY', 'endX', 'endY'],
+    },
+    SwipeAndScreenshotToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        startX: { type: 'number' },
+        startY: { type: 'number' },
+        endX: { type: 'number' },
+        endY: { type: 'number' },
+        durationMs: { type: 'number' },
+        postSwipeWaitMs: { type: 'number' },
+        screenshotThrottleMs: { type: 'number' },
+      },
+      required: ['startX', 'startY', 'endX', 'endY'],
+    },
+    SmartSwipeToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        startX: { type: 'number' },
+        startY: { type: 'number' },
+        endX: { type: 'number' },
+        endY: { type: 'number' },
+        durationMs: { type: 'number' },
+        postSwipeWaitMs: { type: 'number' },
+        waitForUiStable: { type: 'boolean' },
+        stableIterations: { type: 'number' },
+        intervalMs: { type: 'number' },
+        timeoutMs: { type: 'number' },
+        captureScreenshot: { type: 'boolean' },
+        screenshotThrottleMs: { type: 'number' },
       },
       required: ['startX', 'startY', 'endX', 'endY'],
     },
@@ -1472,6 +1575,23 @@ jest.mock('../../src/types', () => {
         distancePercent: { type: 'number' },
         durationMs: { type: 'number' },
         startXPercent: { type: 'number' },
+      },
+      required: ['direction'],
+    },
+    SmartScrollToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        direction: { type: 'string' },
+        distancePercent: { type: 'number' },
+        profile: { type: 'string' },
+        durationMs: { type: 'number' },
+        waitForUiStable: { type: 'boolean' },
+        stableIterations: { type: 'number' },
+        intervalMs: { type: 'number' },
+        timeoutMs: { type: 'number' },
+        captureScreenshot: { type: 'boolean' },
+        screenshotThrottleMs: { type: 'number' },
       },
       required: ['direction'],
     },
@@ -1830,6 +1950,17 @@ jest.mock('../../src/types', () => {
       },
       required: ['packageName'],
     },
+    CreateIssueToolSchema: {
+      type: 'object',
+      properties: {
+        repo: { type: 'string' },
+        title: { type: 'string' },
+        body: { type: 'string' },
+        labels: { type: 'array' },
+        assignees: { type: 'array' },
+      },
+      required: ['title'],
+    },
 
     // Type exports
     TakeScreenshotInput: {},
@@ -2006,6 +2137,8 @@ describe('MCP Server Integration Tests', () => {
         expect(toolNames).toContain('install_android_apk');
         expect(toolNames).toContain('tap_android_screen');
         expect(toolNames).toContain('batch_android_actions');
+        expect(toolNames).toContain('swipe_and_screenshot');
+        expect(toolNames).toContain('smart_swipe');
         expect(toolNames).toContain('pm2_start_hot_mode');
         expect(toolNames).toContain('pm2_stop_app');
         expect(toolNames).toContain('pm2_list');
@@ -2026,6 +2159,7 @@ describe('MCP Server Integration Tests', () => {
         expect(toolNames).toContain('tap_relative');
         expect(toolNames).toContain('swipe_relative');
         expect(toolNames).toContain('scroll_vertical');
+        expect(toolNames).toContain('smart_scroll');
         expect(toolNames).toContain('scroll_horizontal');
         expect(toolNames).toContain('tap_center');
         expect(toolNames).toContain('long_press');
@@ -2054,6 +2188,7 @@ describe('MCP Server Integration Tests', () => {
         expect(toolNames).toContain('get_android_logcat');
         expect(toolNames).toContain('list_android_activities');
         expect(toolNames).toContain('hot_reload_android_app');
+        expect(toolNames).toContain('create_github_issue');
 
         // Check tool descriptions
         const screenshotTool = response.tools.find(

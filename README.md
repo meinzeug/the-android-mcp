@@ -72,6 +72,49 @@ the-android-mcp
 - Prefer `scroll_until_*` over manual scroll loops.
 - For login screens, use `smart_login_fast` with ADB keyboard enabled.
 
+## Efficiency Playbook (for Coding AIs)
+
+Use this when you want **maximum speed** and **minimum ADB round‑trips**.
+
+### 1) Prefer “one‑call” flows
+- Use `fast_flow` or `run_flow_plan` to combine taps, text, waits, and screenshots in **one call**.
+- Use `smart_swipe` / `smart_scroll` to **swipe + stabilize + (optional) screenshot** in one call.
+- Use `swipe_and_screenshot` when you just need a fast swipe + capture.
+
+### 2) Reduce screenshots to only what you need
+- Use `take_android_screenshot` with `throttleMs` to reuse the last capture.
+- Prefer **UI dumps** (`dump_android_ui_hierarchy`) for logic, and screenshots only for visual confirmation.
+
+### 3) Use ADB keyboard for fast input
+- `smart_login_fast` with `useAdbKeyboard=true` is the fastest login path.
+- For manual input: `adb_keyboard_input` or `adb_keyboard_input_chars`.
+
+### 4) Always wait for stability before tapping
+- If a screen is changing, use `wait_for_ui_stable` or `smart_swipe` / `smart_scroll`.
+- Avoid immediate taps after navigation without a wait; it causes flakiness.
+
+### 5) Favor selector‑based taps over coordinates
+- Use `tap_by_text`, `tap_by_id`, `tap_by_desc`, or `query_ui` + `tap_by_selector_index`.
+- Coordinates are a fallback when no stable selectors exist.
+
+### 6) Use scroll‑until helpers
+- `scroll_until_text`, `scroll_until_id`, `scroll_until_desc` are faster and less flaky than manual loops.
+
+### 7) Capture bug reports immediately
+- When a flow fails, use `create_github_issue` with repro steps + logs/screenshots.
+
+### Example: Fast login + submit + verify in one flow
+```json
+{
+  "steps": [
+    { "type": "wait_for_ui_stable", "stableIterations": 2 },
+    { "type": "smart_login_fast", "email": "user@example.com", "password": "secret", "useAdbKeyboard": true },
+    { "type": "wait_for_activity_change", "timeoutMs": 8000 }
+  ],
+  "stopOnFailure": true
+}
+```
+
 ADB-powered Model Context Protocol server that lets AI coding agents install, launch, and control Android apps, capture screenshots, and wire hot-reload ports. Built for iterative UI refinement, automated test flows, and hands-on app navigation with Expo, React Native, Flutter, and native Android projects.
 
 Based on the original project: [infiniV/Android-Ui-MCP](https://github.com/infiniV/Android-Ui-MCP).
@@ -388,7 +431,7 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 
 | Tool                      | Description                               | Parameters                                                                 |
 | ------------------------- | ----------------------------------------- | -------------------------------------------------------------------------- |
-| `take_android_screenshot` | Captures device screenshot                | `deviceId` (optional)                                                      |
+| `take_android_screenshot` | Captures device screenshot                | `deviceId` (optional), `throttleMs` (optional)                             |
 | `list_android_devices`    | Lists connected devices                   | None                                                                       |
 | `set_device_alias`        | Set a device alias                        | `alias`, `deviceId` (optional)                                             |
 | `resolve_device_alias`    | Resolve device alias                      | `alias`                                                                    |
@@ -424,6 +467,8 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `clear_android_app_data`  | Clears app data                           | `packageName`, `deviceId` (optional)                                       |
 | `tap_android_screen`      | Sends a tap event                         | `x`, `y`, `deviceId` (optional)                                            |
 | `swipe_android_screen`    | Sends a swipe gesture                     | `startX`, `startY`, `endX`, `endY`, `durationMs` (optional), `deviceId`    |
+| `swipe_and_screenshot`    | Swipe + screenshot in one call            | `startX`, `startY`, `endX`, `endY`, `postSwipeWaitMs` (optional)           |
+| `smart_swipe`             | Swipe + auto-wait + optional screenshot   | `startX`, `startY`, `endX`, `endY`, `waitForUiStable`, `captureScreenshot` |
 | `input_android_text`      | Types text into focused input             | `text`, `deviceId` (optional)                                              |
 | `send_android_keyevent`   | Sends an Android keyevent                 | `keyCode`, `deviceId` (optional)                                           |
 | `batch_android_actions`   | Runs multiple input actions in one call   | `actions`, `preActionWaitMs` (optional), `deviceId` (optional), `captureBefore`/`captureAfter` (optional), `timeoutMs` |
@@ -448,6 +493,7 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `swipe_relative`          | Swipe using percentage coordinates        | `startXPercent`, `startYPercent`, `endXPercent`, `endYPercent`, `durationMs`|
 | `scroll_vertical`         | Scroll vertically via percentage swipe    | `direction`, `distancePercent` (optional), `deviceId` (optional)           |
 | `scroll_horizontal`       | Scroll horizontally via percentage swipe  | `direction`, `distancePercent` (optional), `deviceId` (optional)           |
+| `smart_scroll`            | Scroll + auto-wait + optional screenshot  | `direction`, `profile`, `waitForUiStable`, `captureScreenshot`             |
 | `tap_center`              | Tap the center of the screen              | `deviceId` (optional)                                                      |
 | `long_press`              | Long-press on coordinate                  | `x`, `y`, `durationMs` (optional), `deviceId` (optional)                   |
 | `double_tap`              | Double-tap on coordinate                  | `x`, `y`, `intervalMs` (optional), `deviceId` (optional)                   |
@@ -467,6 +513,7 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `get_android_logcat`      | Fetch recent logcat output                | `lines` (optional), filters, `deviceId` (optional)                         |
 | `list_android_activities` | List activities for a package             | `packageName`, `deviceId` (optional)                                       |
 | `hot_reload_android_app`  | Reverse ports + install/start for hot dev | `packageName`, `reversePorts`, install/start options, Play Protect handling, `deviceId` (optional)|
+| `create_github_issue`     | Create a GitHub issue                     | `title`, `body` (optional), `labels` (optional), `assignees` (optional)     |
 
 ### Tool Schemas (selected)
 

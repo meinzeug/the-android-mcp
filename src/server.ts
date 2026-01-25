@@ -68,6 +68,12 @@ import {
   SwipeInputSchema,
   SwipeOutputSchema,
   SwipeToolSchema,
+  SwipeAndScreenshotInputSchema,
+  SwipeAndScreenshotOutputSchema,
+  SwipeAndScreenshotToolSchema,
+  SmartSwipeInputSchema,
+  SmartSwipeOutputSchema,
+  SmartSwipeToolSchema,
   InputTextInputSchema,
   InputTextOutputSchema,
   InputTextToolSchema,
@@ -137,6 +143,9 @@ import {
   ScrollVerticalInputSchema,
   ScrollVerticalOutputSchema,
   ScrollVerticalToolSchema,
+  SmartScrollInputSchema,
+  SmartScrollOutputSchema,
+  SmartScrollToolSchema,
   ScrollHorizontalInputSchema,
   ScrollHorizontalOutputSchema,
   ScrollHorizontalToolSchema,
@@ -246,6 +255,9 @@ import {
   HotReloadSetupInputSchema,
   HotReloadSetupOutputSchema,
   HotReloadSetupToolSchema,
+  CreateIssueInputSchema,
+  CreateIssueOutputSchema,
+  CreateIssueToolSchema,
 } from './types.js';
 import { captureScreenshotResponse } from './utils/screenshot.js';
 import {
@@ -324,6 +336,7 @@ import {
 import { listPm2Apps, startPm2HotMode, stopPm2App } from './utils/pm2.js';
 import { downloadApkFromUrl } from './utils/download.js';
 import { formatErrorForResponse } from './utils/error.js';
+import { createGitHubIssue } from './utils/github.js';
 
 class AndroidMcpServer {
   private server: Server;
@@ -338,7 +351,7 @@ class AndroidMcpServer {
     this.server = new Server(
       {
         name: 'the-android-mcp',
-        version: '2.0.2',
+        version: '2.0.3',
       },
       {
         capabilities: {
@@ -537,6 +550,16 @@ class AndroidMcpServer {
           inputSchema: SwipeToolSchema,
         },
         {
+          name: 'swipe_and_screenshot',
+          description: 'Swipe and capture a screenshot in one call',
+          inputSchema: SwipeAndScreenshotToolSchema,
+        },
+        {
+          name: 'smart_swipe',
+          description: 'Swipe with auto-wait for UI stability and optional screenshot',
+          inputSchema: SmartSwipeToolSchema,
+        },
+        {
           name: 'input_android_text',
           description: 'Type text into the focused input field',
           inputSchema: InputTextToolSchema,
@@ -652,6 +675,11 @@ class AndroidMcpServer {
           inputSchema: ScrollVerticalToolSchema,
         },
         {
+          name: 'smart_scroll',
+          description: 'Scroll with auto-wait for UI stability and optional screenshot',
+          inputSchema: SmartScrollToolSchema,
+        },
+        {
           name: 'scroll_horizontal',
           description: 'Scroll horizontally using percentage swipe',
           inputSchema: ScrollHorizontalToolSchema,
@@ -750,6 +778,11 @@ class AndroidMcpServer {
           name: 'hot_reload_android_app',
           description: 'Reverse ports, install (optional), and start an app for hot reload',
           inputSchema: HotReloadSetupToolSchema,
+        },
+        {
+          name: 'create_github_issue',
+          description: 'Create a GitHub issue in meinzeug/the-android-mcp (or any repo)',
+          inputSchema: CreateIssueToolSchema,
         },
       ];
 
@@ -1233,6 +1266,30 @@ class AndroidMcpServer {
               ],
             };
           }
+          case 'swipe_and_screenshot': {
+            const input = SwipeAndScreenshotInputSchema.parse(args);
+            const result = await this.swipeAndScreenshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+          case 'smart_swipe': {
+            const input = SmartSwipeInputSchema.parse(args);
+            const result = await this.smartSwipe(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
 
           case 'input_android_text': {
             const input = InputTextInputSchema.parse(args);
@@ -1617,6 +1674,18 @@ class AndroidMcpServer {
               ],
             };
           }
+          case 'smart_scroll': {
+            const input = SmartScrollInputSchema.parse(args);
+            const result = await this.smartScroll(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
 
           case 'scroll_horizontal': {
             const input = ScrollHorizontalInputSchema.parse(args);
@@ -1877,6 +1946,18 @@ class AndroidMcpServer {
               ],
             };
           }
+          case 'create_github_issue': {
+            const input = CreateIssueInputSchema.parse(args);
+            const result = await this.createGitHubIssue(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
 
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -1898,7 +1979,8 @@ class AndroidMcpServer {
   private async takeScreenshot(
     input: z.infer<typeof TakeScreenshotInputSchema>
   ): Promise<z.infer<typeof TakeScreenshotOutputSchema>> {
-    const screenshot = await captureScreenshotResponse(input.deviceId);
+    const deviceId = resolveDeviceId(input.deviceId);
+    const screenshot = await this.getScreenshotWithThrottle(deviceId, input.throttleMs);
 
     const result = {
       data: screenshot.data,
@@ -2299,6 +2381,67 @@ class AndroidMcpServer {
     return SwipeOutputSchema.parse(result);
   }
 
+  private async swipeAndScreenshot(
+    input: z.infer<typeof SwipeAndScreenshotInputSchema>
+  ): Promise<z.infer<typeof SwipeAndScreenshotOutputSchema>> {
+    const swipe = adbSwipeScreen(
+      input.startX,
+      input.startY,
+      input.endX,
+      input.endY,
+      input.durationMs,
+      input.deviceId
+    );
+    if (input.postSwipeWaitMs && input.postSwipeWaitMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, input.postSwipeWaitMs));
+    }
+    const screenshot = await this.getScreenshotWithThrottle(
+      swipe.deviceId,
+      input.screenshotThrottleMs
+    );
+    return SwipeAndScreenshotOutputSchema.parse({
+      deviceId: swipe.deviceId,
+      swipe,
+      screenshot,
+    });
+  }
+
+  private async smartSwipe(
+    input: z.infer<typeof SmartSwipeInputSchema>
+  ): Promise<z.infer<typeof SmartSwipeOutputSchema>> {
+    const swipe = adbSwipeScreen(
+      input.startX,
+      input.startY,
+      input.endX,
+      input.endY,
+      input.durationMs,
+      input.deviceId
+    );
+
+    if (input.postSwipeWaitMs && input.postSwipeWaitMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, input.postSwipeWaitMs));
+    }
+
+    const uiStable = input.waitForUiStable
+      ? adbWaitForUiStable(swipe.deviceId, {
+          stableIterations: input.stableIterations,
+          intervalMs: input.intervalMs,
+          timeoutMs: input.timeoutMs,
+        })
+      : undefined;
+
+    const screenshot = input.captureScreenshot
+      ? await this.getScreenshotWithThrottle(swipe.deviceId, input.screenshotThrottleMs)
+      : undefined;
+
+    return SmartSwipeOutputSchema.parse({
+      deviceId: swipe.deviceId,
+      swipe,
+      uiStable,
+      screenshot,
+    });
+  }
+
   private async inputText(
     input: z.infer<typeof InputTextInputSchema>
   ): Promise<z.infer<typeof InputTextOutputSchema>> {
@@ -2633,6 +2776,45 @@ class AndroidMcpServer {
     return ScrollVerticalOutputSchema.parse(result);
   }
 
+  private async smartScroll(
+    input: z.infer<typeof SmartScrollInputSchema>
+  ): Promise<z.infer<typeof SmartScrollOutputSchema>> {
+    const profile = input.profile ?? 'normal';
+    const durationMs =
+      typeof input.durationMs === 'number'
+        ? input.durationMs
+        : profile === 'fast'
+          ? 180
+          : profile === 'safe'
+            ? 420
+            : 280;
+
+    const scroll = adbScrollVertical(input.direction, input.deviceId, {
+      distancePercent: input.distancePercent,
+      durationMs,
+    });
+
+    const uiStable = input.waitForUiStable
+      ? adbWaitForUiStable(scroll.deviceId, {
+          stableIterations: input.stableIterations,
+          intervalMs: input.intervalMs,
+          timeoutMs: input.timeoutMs,
+        })
+      : undefined;
+
+    const screenshot = input.captureScreenshot
+      ? await this.getScreenshotWithThrottle(scroll.deviceId, input.screenshotThrottleMs)
+      : undefined;
+
+    return SmartScrollOutputSchema.parse({
+      deviceId: scroll.deviceId,
+      direction: scroll.direction,
+      output: scroll.output,
+      uiStable,
+      screenshot,
+    });
+  }
+
   private async scrollHorizontal(
     input: z.infer<typeof ScrollHorizontalInputSchema>
   ): Promise<z.infer<typeof ScrollHorizontalOutputSchema>> {
@@ -2845,6 +3027,19 @@ class AndroidMcpServer {
       playProtectMaxWaitMs: input.playProtectMaxWaitMs,
     });
     return HotReloadSetupOutputSchema.parse(result);
+  }
+
+  private async createGitHubIssue(
+    input: z.infer<typeof CreateIssueInputSchema>
+  ): Promise<z.infer<typeof CreateIssueOutputSchema>> {
+    const result = createGitHubIssue({
+      repo: input.repo,
+      title: input.title,
+      body: input.body,
+      labels: input.labels,
+      assignees: input.assignees,
+    });
+    return CreateIssueOutputSchema.parse(result);
   }
 
   async run(): Promise<void> {

@@ -139,6 +139,12 @@ export const TakeScreenshotInputSchema = z.object({
     .enum(['png'])
     .default('png')
     .describe('The image format for the screenshot. Currently only PNG is supported.'),
+  throttleMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Reuse cached screenshots within this window (milliseconds).'),
 });
 
 export const ListDevicesInputSchema = z.object({});
@@ -717,6 +723,72 @@ export const SwipeOutputSchema = z.object({
   output: z.string().describe('Raw ADB output'),
 });
 
+export const SwipeAndScreenshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  startX: z.number().describe('Start X coordinate'),
+  startY: z.number().describe('Start Y coordinate'),
+  endX: z.number().describe('End X coordinate'),
+  endY: z.number().describe('End Y coordinate'),
+  durationMs: z.number().int().min(0).optional().describe('Swipe duration in milliseconds'),
+  postSwipeWaitMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Optional delay after swipe before capturing screenshot.'),
+  screenshotThrottleMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Reuse cached screenshots within this window (milliseconds).'),
+});
+
+export const SwipeAndScreenshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  swipe: SwipeOutputSchema,
+  screenshot: TakeScreenshotOutputSchema,
+});
+
+export const SmartSwipeInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  startX: z.number().describe('Start X coordinate'),
+  startY: z.number().describe('Start Y coordinate'),
+  endX: z.number().describe('End X coordinate'),
+  endY: z.number().describe('End Y coordinate'),
+  durationMs: z.number().int().min(0).optional().describe('Optional swipe duration in milliseconds'),
+  postSwipeWaitMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Optional delay after swipe before stabilization/screenshot.'),
+  waitForUiStable: z.boolean().default(true).describe('Wait for UI to stabilize after swipe.'),
+  stableIterations: z.number().int().min(1).optional().describe('Stable dump count for UI stability.'),
+  intervalMs: z.number().int().min(0).optional().describe('Polling interval for UI stability.'),
+  timeoutMs: z.number().int().positive().optional().describe('Max wait time for UI stability.'),
+  captureScreenshot: z.boolean().default(false).describe('Capture screenshot after swipe.'),
+  screenshotThrottleMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Reuse cached screenshots within this window (milliseconds).'),
+});
+
+export const SmartSwipeOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  swipe: SwipeOutputSchema,
+  uiStable: z.any().optional(),
+  screenshot: TakeScreenshotOutputSchema.optional(),
+});
+
 export const InputTextOutputSchema = z.object({
   deviceId: z.string().describe('Target device ID'),
   text: z.string().describe('Input text'),
@@ -1094,6 +1166,44 @@ export const ScrollVerticalOutputSchema = z.object({
   deviceId: z.string().describe('Target device ID'),
   direction: z.string().describe('Scroll direction'),
   output: z.string().describe('Raw ADB output'),
+});
+
+export const SmartScrollInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  direction: z.enum(['up', 'down']).describe('Scroll direction (screen swipe).'),
+  distancePercent: z
+    .number()
+    .min(10)
+    .max(90)
+    .optional()
+    .describe('Swipe distance percentage (10-90).'),
+  profile: z
+    .enum(['fast', 'normal', 'safe'])
+    .default('normal')
+    .describe('Gesture timing profile.'),
+  durationMs: z.number().int().min(0).optional().describe('Optional swipe duration in ms.'),
+  waitForUiStable: z.boolean().default(true).describe('Wait for UI to stabilize after swipe.'),
+  stableIterations: z.number().int().min(1).optional().describe('Stable dump count for UI stability.'),
+  intervalMs: z.number().int().min(0).optional().describe('Polling interval for UI stability.'),
+  timeoutMs: z.number().int().positive().optional().describe('Max wait time for UI stability.'),
+  captureScreenshot: z.boolean().default(false).describe('Capture screenshot after swipe.'),
+  screenshotThrottleMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Reuse cached screenshots within this window (milliseconds).'),
+});
+
+export const SmartScrollOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  direction: z.string().describe('Scroll direction'),
+  output: z.string().describe('Raw ADB output'),
+  uiStable: z.any().optional(),
+  screenshot: TakeScreenshotOutputSchema.optional(),
 });
 
 export const ScrollHorizontalInputSchema = z.object({
@@ -1947,6 +2057,21 @@ export const HotReloadSetupOutputSchema = z.object({
     .describe('Play Protect prompt handling result (if attempted)'),
 });
 
+export const CreateIssueInputSchema = z.object({
+  repo: z.string().optional().describe('GitHub repo in owner/name format.'),
+  title: z.string().min(1).describe('Issue title.'),
+  body: z.string().optional().describe('Issue body/description.'),
+  labels: z.array(z.string()).optional().describe('Issue labels.'),
+  assignees: z.array(z.string()).optional().describe('Issue assignees.'),
+});
+
+export const CreateIssueOutputSchema = z.object({
+  repo: z.string().describe('GitHub repo in owner/name format.'),
+  title: z.string().describe('Issue title.'),
+  url: z.string().describe('Created issue URL.'),
+  output: z.string().describe('Raw gh output.'),
+});
+
 // MCP Tool schemas
 export const TakeScreenshotToolSchema = {
   type: 'object' as const,
@@ -1961,6 +2086,10 @@ export const TakeScreenshotToolSchema = {
       enum: ['png'],
       default: 'png',
       description: 'The image format for the screenshot. Currently only PNG is supported.',
+    },
+    throttleMs: {
+      type: 'number' as const,
+      description: 'Reuse cached screenshots within this window (milliseconds).',
     },
   },
   required: [] as string[],
@@ -2182,6 +2311,18 @@ export const PasteClipboardToolSchema = {
   required: [] as string[],
 };
 
+export const CreateIssueToolSchema = {
+  type: 'object' as const,
+  properties: {
+    repo: { type: 'string' as const, description: 'GitHub repo in owner/name format.' },
+    title: { type: 'string' as const, description: 'Issue title.' },
+    body: { type: 'string' as const, description: 'Issue body/description.' },
+    labels: { type: 'array' as const, description: 'Issue labels.' },
+    assignees: { type: 'array' as const, description: 'Issue assignees.' },
+  },
+  required: ['title'] as string[],
+};
+
 export const DumpUiToolSchema = {
   type: 'object' as const,
   properties: {
@@ -2273,6 +2414,68 @@ export const SwipeToolSchema = {
       type: 'number' as const,
       description: 'Optional swipe duration in milliseconds.',
     },
+  },
+  required: ['startX', 'startY', 'endX', 'endY'] as string[],
+};
+
+export const SwipeAndScreenshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    startX: {
+      type: 'number' as const,
+      description: 'Start X coordinate in pixels.',
+    },
+    startY: {
+      type: 'number' as const,
+      description: 'Start Y coordinate in pixels.',
+    },
+    endX: {
+      type: 'number' as const,
+      description: 'End X coordinate in pixels.',
+    },
+    endY: {
+      type: 'number' as const,
+      description: 'End Y coordinate in pixels.',
+    },
+    durationMs: {
+      type: 'number' as const,
+      description: 'Optional swipe duration in milliseconds.',
+    },
+    postSwipeWaitMs: {
+      type: 'number' as const,
+      description: 'Optional delay after swipe before screenshot.',
+    },
+    screenshotThrottleMs: {
+      type: 'number' as const,
+      description: 'Reuse cached screenshots within this window (milliseconds).',
+    },
+  },
+  required: ['startX', 'startY', 'endX', 'endY'] as string[],
+};
+
+export const SmartSwipeToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    startX: { type: 'number' as const, description: 'Start X coordinate in pixels.' },
+    startY: { type: 'number' as const, description: 'Start Y coordinate in pixels.' },
+    endX: { type: 'number' as const, description: 'End X coordinate in pixels.' },
+    endY: { type: 'number' as const, description: 'End Y coordinate in pixels.' },
+    durationMs: { type: 'number' as const, description: 'Optional swipe duration in milliseconds.' },
+    postSwipeWaitMs: { type: 'number' as const, description: 'Optional delay after swipe before stabilization/screenshot.' },
+    waitForUiStable: { type: 'boolean' as const, description: 'Wait for UI to stabilize after swipe.' },
+    stableIterations: { type: 'number' as const, description: 'Stable dump count for UI stability.' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval for UI stability.' },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time for UI stability.' },
+    captureScreenshot: { type: 'boolean' as const, description: 'Capture screenshot after swipe.' },
+    screenshotThrottleMs: { type: 'number' as const, description: 'Reuse cached screenshots within this window (milliseconds).' },
   },
   required: ['startX', 'startY', 'endX', 'endY'] as string[],
 };
@@ -2843,6 +3046,27 @@ export const ScrollVerticalToolSchema = {
     distancePercent: { type: 'number' as const, description: 'Swipe distance percent.' },
     durationMs: { type: 'number' as const, description: 'Optional swipe duration in ms.' },
     startXPercent: { type: 'number' as const, description: 'Optional X percent for swipe.' },
+  },
+  required: ['direction'] as string[],
+};
+
+export const SmartScrollToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    direction: { type: 'string' as const, enum: ['up', 'down'], description: 'Scroll direction.' },
+    distancePercent: { type: 'number' as const, description: 'Swipe distance percent.' },
+    profile: { type: 'string' as const, enum: ['fast', 'normal', 'safe'], description: 'Gesture timing profile.' },
+    durationMs: { type: 'number' as const, description: 'Optional swipe duration in ms.' },
+    waitForUiStable: { type: 'boolean' as const, description: 'Wait for UI to stabilize after swipe.' },
+    stableIterations: { type: 'number' as const, description: 'Stable dump count for UI stability.' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval for UI stability.' },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time for UI stability.' },
+    captureScreenshot: { type: 'boolean' as const, description: 'Capture screenshot after swipe.' },
+    screenshotThrottleMs: { type: 'number' as const, description: 'Reuse cached screenshots within this window (milliseconds).' },
   },
   required: ['direction'] as string[],
 };
@@ -3469,6 +3693,10 @@ export type TapInput = z.infer<typeof TapInputSchema>;
 export type TapOutput = z.infer<typeof TapOutputSchema>;
 export type SwipeInput = z.infer<typeof SwipeInputSchema>;
 export type SwipeOutput = z.infer<typeof SwipeOutputSchema>;
+export type SwipeAndScreenshotInput = z.infer<typeof SwipeAndScreenshotInputSchema>;
+export type SwipeAndScreenshotOutput = z.infer<typeof SwipeAndScreenshotOutputSchema>;
+export type SmartSwipeInput = z.infer<typeof SmartSwipeInputSchema>;
+export type SmartSwipeOutput = z.infer<typeof SmartSwipeOutputSchema>;
 export type InputTextInput = z.infer<typeof InputTextInputSchema>;
 export type InputTextOutput = z.infer<typeof InputTextOutputSchema>;
 export type KeyeventInput = z.infer<typeof KeyeventInputSchema>;
@@ -3516,6 +3744,8 @@ export type SwipeRelativeInput = z.infer<typeof SwipeRelativeInputSchema>;
 export type SwipeRelativeOutput = z.infer<typeof SwipeRelativeOutputSchema>;
 export type ScrollVerticalInput = z.infer<typeof ScrollVerticalInputSchema>;
 export type ScrollVerticalOutput = z.infer<typeof ScrollVerticalOutputSchema>;
+export type SmartScrollInput = z.infer<typeof SmartScrollInputSchema>;
+export type SmartScrollOutput = z.infer<typeof SmartScrollOutputSchema>;
 export type ScrollHorizontalInput = z.infer<typeof ScrollHorizontalInputSchema>;
 export type ScrollHorizontalOutput = z.infer<typeof ScrollHorizontalOutputSchema>;
 export type TapCenterInput = z.infer<typeof TapCenterInputSchema>;
@@ -3590,3 +3820,5 @@ export type ListActivitiesInput = z.infer<typeof ListActivitiesInputSchema>;
 export type ListActivitiesOutput = z.infer<typeof ListActivitiesOutputSchema>;
 export type HotReloadSetupInput = z.infer<typeof HotReloadSetupInputSchema>;
 export type HotReloadSetupOutput = z.infer<typeof HotReloadSetupOutputSchema>;
+export type CreateIssueInput = z.infer<typeof CreateIssueInputSchema>;
+export type CreateIssueOutput = z.infer<typeof CreateIssueOutputSchema>;
