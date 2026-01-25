@@ -196,17 +196,24 @@ function toggleTapMode() {
   tapMode = !tapMode;
   tapToggleBtn.classList.toggle('active', tapMode);
   screenOverlay.classList.toggle('active', tapMode);
+  document.body.classList.toggle('tap-active', tapMode);
 }
 
-screenImg.addEventListener('click', async event => {
-  if (!tapMode || !selectedDevice || !screenMetrics.width || !screenMetrics.height) return;
+async function handleTap(event) {
+  if (!tapMode) return;
+  if (!selectedDevice) return log('Select a device first');
+  if (!screenMetrics.width || !screenMetrics.height) return log('Take a screenshot first');
   const rect = screenImg.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
   const x = Math.round(((event.clientX - rect.left) / rect.width) * screenMetrics.width);
   const y = Math.round(((event.clientY - rect.top) / rect.height) * screenMetrics.height);
   const result = await window.mcp.tap({ deviceId: selectedDevice.id, x, y });
   if (!result.ok) return log(result.error || 'Tap failed');
   log(`Tap at ${x}, ${y}`);
-});
+}
+
+screenImg.addEventListener('click', handleTap);
+screenOverlay.addEventListener('click', handleTap);
 
 refreshDevicesBtn.addEventListener('click', refreshDevices);
 screenshotBtn.addEventListener('click', takeScreenshot);

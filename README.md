@@ -11,10 +11,6 @@ Based on the original project: [infiniV/Android-Ui-MCP](https://github.com/infin
 
 **Keywords:** android mcp server, adb automation, android app testing, hot reload, android ui control, ai agent android, expo, react native, flutter
 
-## Quick Demo
-
-See the MCP server in action with real-time Android UI analysis and control.
-
 ## Features
 
 **Real-Time Development Workflow**
@@ -158,9 +154,25 @@ the-android-mcp --version
 npx the-android-mcp --version
 ```
 
+Optional GUI launch:
+
+```bash
+the-android-mcp-gui
+```
+
 ## GUI App (Linux)
 
 Lightweight Electron GUI that talks to the MCP server over stdio and gives you a visual control surface for devices.
+
+### Global GUI (recommended)
+
+```bash
+the-android-mcp-gui
+```
+
+This uses the GUI bundled with the npm package and launches the MCP server automatically.
+
+### Local GUI (development)
 
 ```bash
 # build MCP server first
@@ -172,7 +184,7 @@ npm install
 npm run dev
 ```
 
-**Linux sandbox note:** The GUI launcher auto-disables the Electron sandbox if `chrome-sandbox` isn’t correctly configured. To enforce sandboxing, set `THE_ANDROID_MCP_FORCE_SANDBOX=1` and fix permissions on `apps/gui/node_modules/electron/dist/chrome-sandbox` (requires root).
+**Linux sandbox note:** The GUI launcher auto-disables the Electron sandbox if `chrome-sandbox` isn’t correctly configured. To enforce sandboxing, set `THE_ANDROID_MCP_FORCE_SANDBOX=1` and fix permissions on your Electron install (for global installs, this is typically under `$(npm root -g)/the-android-mcp/node_modules/electron/dist/chrome-sandbox`).
 
 The GUI auto-launches the MCP server from `dist/index.js` and exposes:
 - device list + selection
@@ -300,8 +312,6 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 
 ## Available Tools
 
-![MCP Tools Available](preview/tools.png)
-
 | Tool                      | Description                               | Parameters                                                                 |
 | ------------------------- | ----------------------------------------- | -------------------------------------------------------------------------- |
 | `take_android_screenshot` | Captures device screenshot                | `deviceId` (optional)                                                      |
@@ -325,7 +335,9 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `list_android_activities` | List activities for a package             | `packageName`, `deviceId` (optional)                                       |
 | `hot_reload_android_app`  | Reverse ports + install/start for hot dev | `packageName`, `reversePorts`, install/start options, `deviceId` (optional)|
 
-### Tool Schemas
+### Tool Schemas (selected)
+
+Full schemas are exported via the MCP server and live in `src/types.ts`.
 
 **take_android_screenshot**
 
@@ -338,7 +350,11 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
     "properties": {
       "deviceId": {
         "type": "string",
-        "description": "Optional device ID. If not provided, uses the first available device"
+        "description": "Optional device ID. If not provided, uses the first available device."
+      },
+      "format": {
+        "type": "string",
+        "description": "Image format (png)."
       }
     }
   }
@@ -385,17 +401,21 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
   "inputSchema": {
     "type": "object",
     "properties": {
+      "deviceId": {
+        "type": "string",
+        "description": "Optional device ID"
+      },
       "apkPath": {
         "type": "string",
-        "description": "Path to APK (optional; auto-detects if omitted)"
+        "description": "Path to APK to install (optional; auto-detects if omitted)"
       },
       "apkUrl": {
         "type": "string",
         "description": "Optional URL to download an APK before installing"
       },
-      "deviceId": {
+      "projectRoot": {
         "type": "string",
-        "description": "Optional device ID"
+        "description": "Optional project root to search for APKs when apkPath is omitted"
       },
       "reinstall": {
         "type": "boolean",
@@ -404,6 +424,44 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
       "grantPermissions": {
         "type": "boolean",
         "description": "Grant runtime permissions at install time (-g)"
+      },
+      "allowTestPackages": {
+        "type": "boolean",
+        "description": "Allow installing test-only APKs (-t)"
+      },
+      "allowDowngrade": {
+        "type": "boolean",
+        "description": "Allow version downgrade (-d)"
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "Optional timeout in milliseconds for install"
+      }
+    }
+  }
+}
+```
+
+**uninstall_android_app**
+
+```json
+{
+  "name": "uninstall_android_app",
+  "description": "Uninstall an app by package name",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "packageName": {
+        "type": "string",
+        "description": "Android application package name"
+      },
+      "deviceId": {
+        "type": "string",
+        "description": "Optional device ID"
+      },
+      "keepData": {
+        "type": "boolean",
+        "description": "Whether to keep app data and cache directories (-k)"
       }
     }
   }
@@ -426,6 +484,50 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
       "activity": {
         "type": "string",
         "description": "Optional activity to launch"
+      },
+      "deviceId": {
+        "type": "string",
+        "description": "Optional device ID"
+      }
+    }
+  }
+}
+```
+
+**stop_android_app**
+
+```json
+{
+  "name": "stop_android_app",
+  "description": "Force-stop an app",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "packageName": {
+        "type": "string",
+        "description": "Android application package name"
+      },
+      "deviceId": {
+        "type": "string",
+        "description": "Optional device ID"
+      }
+    }
+  }
+}
+```
+
+**clear_android_app_data**
+
+```json
+{
+  "name": "clear_android_app_data",
+  "description": "Clear app data",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "packageName": {
+        "type": "string",
+        "description": "Android application package name"
       },
       "deviceId": {
         "type": "string",
@@ -520,6 +622,88 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 }
 ```
 
+**swipe_android_screen**
+
+```json
+{
+  "name": "swipe_android_screen",
+  "description": "Send a swipe gesture to the device screen",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "startX": {
+        "type": "number",
+        "description": "Start X coordinate in pixels"
+      },
+      "startY": {
+        "type": "number",
+        "description": "Start Y coordinate in pixels"
+      },
+      "endX": {
+        "type": "number",
+        "description": "End X coordinate in pixels"
+      },
+      "endY": {
+        "type": "number",
+        "description": "End Y coordinate in pixels"
+      },
+      "durationMs": {
+        "type": "number",
+        "description": "Optional swipe duration in milliseconds"
+      },
+      "deviceId": {
+        "type": "string",
+        "description": "Optional device ID"
+      }
+    }
+  }
+}
+```
+
+**input_android_text**
+
+```json
+{
+  "name": "input_android_text",
+  "description": "Type text into the focused input field",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "Text to input into the focused field"
+      },
+      "deviceId": {
+        "type": "string",
+        "description": "Optional device ID"
+      }
+    }
+  }
+}
+```
+
+**send_android_keyevent**
+
+```json
+{
+  "name": "send_android_keyevent",
+  "description": "Send an Android keyevent",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "keyCode": {
+        "type": "string",
+        "description": "Android keycode (e.g., 3 for HOME, 4 for BACK, KEYCODE_ENTER)"
+      },
+      "deviceId": {
+        "type": "string",
+        "description": "Optional device ID"
+      }
+    }
+  }
+}
+```
+
 **reverse_android_port**
 
 ```json
@@ -546,6 +730,32 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 }
 ```
 
+**forward_android_port**
+
+```json
+{
+  "name": "forward_android_port",
+  "description": "Forward TCP port from host to device",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "devicePort": {
+        "type": "number",
+        "description": "Device port to forward to (tcp)"
+      },
+      "hostPort": {
+        "type": "number",
+        "description": "Host port to forward from (tcp)"
+      },
+      "deviceId": {
+        "type": "string",
+        "description": "Optional device ID"
+      }
+    }
+  }
+}
+```
+
 **get_android_logcat**
 
 ```json
@@ -559,17 +769,29 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
         "type": "number",
         "description": "Number of log lines to return"
       },
+      "since": {
+        "type": "string",
+        "description": "Optional time filter (e.g., \"1m\", \"2024-01-01 00:00:00.000\")"
+      },
       "tag": {
         "type": "string",
         "description": "Optional log tag filter"
       },
       "priority": {
         "type": "string",
-        "description": "Minimum priority (V/D/I/W/E/F/S)"
+        "description": "Optional minimum priority (V/D/I/W/E/F/S)"
+      },
+      "pid": {
+        "type": "number",
+        "description": "Optional PID to filter logs by"
       },
       "packageName": {
         "type": "string",
         "description": "Optional package name to filter by running PID"
+      },
+      "format": {
+        "type": "string",
+        "description": "Logcat output format (time, threadtime, brief, raw)"
       },
       "deviceId": {
         "type": "string",
@@ -611,9 +833,25 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
   "inputSchema": {
     "type": "object",
     "properties": {
+      "deviceId": {
+        "type": "string",
+        "description": "Optional device ID"
+      },
       "packageName": {
         "type": "string",
         "description": "Android application package name"
+      },
+      "activity": {
+        "type": "string",
+        "description": "Optional activity to launch"
+      },
+      "apkPath": {
+        "type": "string",
+        "description": "Optional APK path to install before starting"
+      },
+      "projectRoot": {
+        "type": "string",
+        "description": "Optional project root used to auto-detect APKs"
       },
       "reversePorts": {
         "type": "array",
@@ -627,9 +865,29 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
         "type": "boolean",
         "description": "Whether to start the app after setup"
       },
-      "deviceId": {
-        "type": "string",
-        "description": "Optional device ID"
+      "stopBeforeStart": {
+        "type": "boolean",
+        "description": "Whether to force-stop the app before starting"
+      },
+      "reinstall": {
+        "type": "boolean",
+        "description": "Reinstall if already installed (-r)"
+      },
+      "grantPermissions": {
+        "type": "boolean",
+        "description": "Grant runtime permissions at install (-g)"
+      },
+      "allowTestPackages": {
+        "type": "boolean",
+        "description": "Allow installing test-only APKs (-t)"
+      },
+      "allowDowngrade": {
+        "type": "boolean",
+        "description": "Allow version downgrade (-d)"
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "Optional timeout in milliseconds for install"
       }
     }
   }
@@ -707,11 +965,16 @@ npm run format    # Code formatting
 src/
 ├── server.ts         # MCP server implementation
 ├── types.ts          # Type definitions
+├── gui.ts            # Global GUI launcher entry
+├── postinstall.ts    # Codex auto-config hook
 ├── utils/
 │   ├── adb.ts        # ADB command utilities
 │   ├── screenshot.ts # Screenshot processing
 │   └── error.ts      # Error handling
 └── index.ts          # Entry point
+
+apps/gui/             # Electron GUI app
+bin/                  # CLI launchers
 ```
 
 ## Performance

@@ -210,6 +210,11 @@ textarea {
 
 .screen-overlay.active {
   display: flex;
+  cursor: crosshair;
+}
+
+.tap-active .screen-wrap img {
+  cursor: crosshair;
 }
 
 .screen-meta {
