@@ -331,6 +331,18 @@ jest.mock('../../src/types', () => {
       imeId: z.string().optional(),
       hideKeyboard: z.boolean().optional(),
     }),
+    DetectLoginFieldsInputSchema: z.object({
+      deviceId: z.string().optional(),
+      submitLabels: z.array(z.string()).optional(),
+    }),
+    SmartLoginFastInputSchema: z.object({
+      deviceId: z.string().optional(),
+      email: z.string(),
+      password: z.string(),
+      submitLabels: z.array(z.string()).optional(),
+      hideKeyboard: z.boolean().optional(),
+      useAdbKeyboard: z.boolean().optional(),
+    }),
     ReversePortInputSchema: z.object({
       deviceId: z.string().optional(),
       devicePort: z.number(),
@@ -709,6 +721,20 @@ jest.mock('../../src/types', () => {
       output: z.string(),
     }),
     SmartLoginOutputSchema: z.object({
+      deviceId: z.string(),
+      emailFieldFound: z.boolean(),
+      passwordFieldFound: z.boolean(),
+      submitFound: z.boolean(),
+      usedIme: z.boolean(),
+      output: z.array(z.string()),
+    }),
+    DetectLoginFieldsOutputSchema: z.object({
+      deviceId: z.string(),
+      emailField: z.any().optional(),
+      passwordField: z.any().optional(),
+      submitButton: z.any().optional(),
+    }),
+    SmartLoginFastOutputSchema: z.object({
       deviceId: z.string(),
       emailFieldFound: z.boolean(),
       passwordFieldFound: z.boolean(),
@@ -1223,6 +1249,26 @@ jest.mock('../../src/types', () => {
       },
       required: ['email', 'password'],
     },
+    DetectLoginFieldsToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        submitLabels: { type: 'array' },
+      },
+      required: [],
+    },
+    SmartLoginFastToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        email: { type: 'string' },
+        password: { type: 'string' },
+        submitLabels: { type: 'array' },
+        hideKeyboard: { type: 'boolean' },
+        useAdbKeyboard: { type: 'boolean' },
+      },
+      required: ['email', 'password'],
+    },
     ReversePortToolSchema: {
       type: 'object',
       properties: {
@@ -1387,6 +1433,10 @@ jest.mock('../../src/types', () => {
     SetAdbKeyboardModeOutput: {},
     SmartLoginInput: {},
     SmartLoginOutput: {},
+    DetectLoginFieldsInput: {},
+    DetectLoginFieldsOutput: {},
+    SmartLoginFastInput: {},
+    SmartLoginFastOutput: {},
     ReversePortInput: {},
     ReversePortOutput: {},
     ForwardPortInput: {},
@@ -1448,6 +1498,8 @@ describe('MCP Server Integration Tests', () => {
         expect(toolNames).toContain('adb_keyboard_input');
         expect(toolNames).toContain('set_adb_keyboard_mode');
         expect(toolNames).toContain('smart_login');
+        expect(toolNames).toContain('detect_login_fields');
+        expect(toolNames).toContain('smart_login_fast');
         expect(toolNames).toContain('install_android_apk');
         expect(toolNames).toContain('tap_android_screen');
         expect(toolNames).toContain('batch_android_actions');

@@ -159,6 +159,12 @@ import {
   SmartLoginInputSchema,
   SmartLoginOutputSchema,
   SmartLoginToolSchema,
+  DetectLoginFieldsInputSchema,
+  DetectLoginFieldsOutputSchema,
+  DetectLoginFieldsToolSchema,
+  SmartLoginFastInputSchema,
+  SmartLoginFastOutputSchema,
+  SmartLoginFastToolSchema,
   ReversePortInputSchema,
   ReversePortOutputSchema,
   ReversePortToolSchema,
@@ -223,6 +229,8 @@ import {
   adbKeyboardInput as adbKeyboardInput,
   getCurrentIme as adbGetCurrentIme,
   smartLogin as adbSmartLogin,
+  detectLoginFields as adbDetectLoginFields,
+  smartLoginFast as adbSmartLoginFast,
   uninstallApp as adbUninstallApp,
 } from './utils/adb.js';
 import { listPm2Apps, startPm2HotMode, stopPm2App } from './utils/pm2.js';
@@ -242,7 +250,7 @@ class AndroidMcpServer {
     this.server = new Server(
       {
         name: 'the-android-mcp',
-        version: '0.1.16',
+        version: '2.0.0',
       },
       {
         capabilities: {
@@ -319,6 +327,16 @@ class AndroidMcpServer {
           name: 'smart_login',
           description: 'Auto-fill login screen quickly (email/password/submit)',
           inputSchema: SmartLoginToolSchema,
+        },
+        {
+          name: 'detect_login_fields',
+          description: 'Detect login-related fields and submit buttons',
+          inputSchema: DetectLoginFieldsToolSchema,
+        },
+        {
+          name: 'smart_login_fast',
+          description: 'Fast login with single UI dump + batch actions',
+          inputSchema: SmartLoginFastToolSchema,
         },
         {
           name: 'find_android_apk',
@@ -696,6 +714,32 @@ class AndroidMcpServer {
           case 'smart_login': {
             const input = SmartLoginInputSchema.parse(args);
             const result = await this.smartLogin(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'detect_login_fields': {
+            const input = DetectLoginFieldsInputSchema.parse(args);
+            const result = await this.detectLoginFields(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'smart_login_fast': {
+            const input = SmartLoginFastInputSchema.parse(args);
+            const result = await this.smartLoginFast(input);
             return {
               content: [
                 {
@@ -1533,6 +1577,30 @@ class AndroidMcpServer {
       hideKeyboard: input.hideKeyboard,
     });
     return SmartLoginOutputSchema.parse(result);
+  }
+
+  private async detectLoginFields(
+    input: z.infer<typeof DetectLoginFieldsInputSchema>
+  ): Promise<z.infer<typeof DetectLoginFieldsOutputSchema>> {
+    const result = adbDetectLoginFields({
+      deviceId: input.deviceId,
+      submitLabels: input.submitLabels,
+    });
+    return DetectLoginFieldsOutputSchema.parse(result);
+  }
+
+  private async smartLoginFast(
+    input: z.infer<typeof SmartLoginFastInputSchema>
+  ): Promise<z.infer<typeof SmartLoginFastOutputSchema>> {
+    const result = adbSmartLoginFast({
+      deviceId: input.deviceId,
+      email: input.email,
+      password: input.password,
+      submitLabels: input.submitLabels,
+      hideKeyboard: input.hideKeyboard,
+      useAdbKeyboard: input.useAdbKeyboard,
+    });
+    return SmartLoginFastOutputSchema.parse(result);
   }
 
   private async getScreenshotWithThrottle(

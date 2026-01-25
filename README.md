@@ -333,6 +333,8 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `adb_keyboard_input`      | Input text via ADB Keyboard IME           | `text`, `imeId` (optional), `setIme` (optional)                            |
 | `set_adb_keyboard_mode`   | Enable/disable ADB keyboard mode          | `enable` (optional), `imeId` (optional)                                    |
 | `smart_login`             | Auto-fill login screen quickly            | `email`, `password`, `submitLabels` (optional)                             |
+| `detect_login_fields`     | Detect login fields and submit button     | `submitLabels` (optional), `deviceId` (optional)                           |
+| `smart_login_fast`        | Fast login (single dump + batch actions)  | `email`, `password`, `useAdbKeyboard` (optional)                           |
 | `find_android_apk`        | Finds the most recent APK in a project    | `projectRoot` (optional)                                                   |
 | `install_android_apk`     | Installs an APK on a device               | `apkPath`/`apkUrl` (optional), `deviceId` (optional), install flags, `timeoutMs` |
 | `uninstall_android_app`   | Uninstalls an app by package name         | `packageName`, `deviceId` (optional), `keepData` (optional)                |

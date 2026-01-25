@@ -363,6 +363,43 @@ function pickBest(nodes: UiNode[], predicate: (node: UiNode) => boolean): UiNode
   })[0];
 }
 
+function pickLargest(nodes: UiNode[], predicate: (node: UiNode) => boolean): UiNode | undefined {
+  const candidates = nodes.filter(node => node.bounds && predicate(node));
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  return candidates.sort((a, b) => {
+    const areaA =
+      a.bounds ? Math.abs(a.bounds.x2 - a.bounds.x1) * Math.abs(a.bounds.y2 - a.bounds.y1) : 0;
+    const areaB =
+      b.bounds ? Math.abs(b.bounds.x2 - b.bounds.x1) * Math.abs(b.bounds.y2 - b.bounds.y1) : 0;
+    return areaB - areaA;
+  })[0];
+}
+
+export function detectLoginFields(options: {
+  deviceId?: string;
+  submitLabels?: string[];
+}): {
+  deviceId: string;
+  emailField?: UiNode;
+  passwordField?: UiNode;
+  submitButton?: UiNode;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const { xml } = dumpUiHierarchy(targetDeviceId);
+  const nodes = extractUiNodes(xml);
+  const submitLabels =
+    options.submitLabels ?? ['anmelden', 'login', 'sign in', 'weiter', 'continue'];
+
+  const emailField = pickBest(nodes, isEmailCandidate);
+  const passwordField = pickBest(nodes, isPasswordCandidate);
+  const submitButton = pickLargest(nodes, node => isSubmitCandidate(node, submitLabels));
+
+  return { deviceId: targetDeviceId, emailField, passwordField, submitButton };
+}
+
 export function smartLogin(options: {
   deviceId?: string;
   email: string;
@@ -372,15 +409,11 @@ export function smartLogin(options: {
   hideKeyboard?: boolean;
 }): SmartLoginResult {
   const targetDeviceId = resolveDeviceId(options.deviceId);
-  const { xml } = dumpUiHierarchy(targetDeviceId);
-  const nodes = extractUiNodes(xml);
   const output: string[] = [];
-  const submitLabels =
-    options.submitLabels ?? ['anmelden', 'login', 'sign in', 'weiter', 'continue'];
-
-  const emailField = pickBest(nodes, isEmailCandidate);
-  const passwordField = pickBest(nodes, isPasswordCandidate);
-  const submitButton = pickBest(nodes, node => isSubmitCandidate(node, submitLabels));
+  const { emailField, passwordField, submitButton } = detectLoginFields({
+    deviceId: targetDeviceId,
+    submitLabels: options.submitLabels,
+  });
 
   let usedIme = false;
 
@@ -421,6 +454,86 @@ export function smartLogin(options: {
   }
 
   if (submitButton) {
+    tapUiNode(targetDeviceId, submitButton);
+  }
+
+  return {
+    deviceId: targetDeviceId,
+    emailFieldFound: Boolean(emailField),
+    passwordFieldFound: Boolean(passwordField),
+    submitFound: Boolean(submitButton),
+    usedIme,
+    output,
+  };
+}
+
+export function smartLoginFast(options: {
+  deviceId?: string;
+  email: string;
+  password: string;
+  submitLabels?: string[];
+  hideKeyboard?: boolean;
+  useAdbKeyboard?: boolean;
+}): SmartLoginResult {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const { emailField, passwordField, submitButton } = detectLoginFields({
+    deviceId: targetDeviceId,
+    submitLabels: options.submitLabels,
+  });
+
+  const output: string[] = [];
+  let usedIme = false;
+
+  if (options.useAdbKeyboard) {
+    if (emailField) {
+      tapUiNode(targetDeviceId, emailField);
+      const imeResult = adbKeyboardInput(options.email, targetDeviceId, {
+        setIme: true,
+        useBase64: true,
+      });
+      usedIme = true;
+      output.push(imeResult.output);
+    }
+    if (passwordField) {
+      tapUiNode(targetDeviceId, passwordField);
+      const imeResult = adbKeyboardInput(options.password, targetDeviceId, {
+        setIme: true,
+        useBase64: true,
+      });
+      usedIme = true;
+      output.push(imeResult.output);
+    }
+  } else {
+    const actions: BatchAction[] = [];
+    if (emailField?.bounds) {
+      const { x, y } = centerOfBounds(emailField.bounds);
+      actions.push({ type: 'tap', x, y });
+      actions.push({ type: 'text', text: options.email });
+    }
+    if (passwordField?.bounds) {
+      const { x, y } = centerOfBounds(passwordField.bounds);
+      actions.push({ type: 'tap', x, y });
+      actions.push({ type: 'text', text: options.password });
+    }
+    if (options.hideKeyboard !== false) {
+      actions.push({ type: 'keyevent', keyCode: '4' });
+    }
+    if (submitButton?.bounds) {
+      const { x, y } = centerOfBounds(submitButton.bounds);
+      actions.push({ type: 'tap', x, y });
+    }
+
+    if (actions.length > 0) {
+      const result = batchInputActions(actions, targetDeviceId);
+      output.push(result.output);
+    }
+  }
+
+  if (!options.useAdbKeyboard && options.hideKeyboard !== false && !submitButton?.bounds) {
+    sendKeyevent('4', targetDeviceId);
+  }
+
+  if (submitButton && options.useAdbKeyboard) {
     tapUiNode(targetDeviceId, submitButton);
   }
 

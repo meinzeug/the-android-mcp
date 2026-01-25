@@ -1446,6 +1446,35 @@ export const SmartLoginOutputSchema = z.object({
   output: z.array(z.string()).describe('Raw ADB outputs'),
 });
 
+export const DetectLoginFieldsInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  submitLabels: z.array(z.string()).optional().describe('Custom submit labels.'),
+});
+
+export const DetectLoginFieldsOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  emailField: z.any().optional().describe('Matched email field node'),
+  passwordField: z.any().optional().describe('Matched password field node'),
+  submitButton: z.any().optional().describe('Matched submit button node'),
+});
+
+export const SmartLoginFastInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  email: z.string().min(1).describe('Email/login value.'),
+  password: z.string().min(1).describe('Password value.'),
+  submitLabels: z.array(z.string()).optional().describe('Custom submit labels.'),
+  hideKeyboard: z.boolean().default(true).describe('Hide keyboard before submit.'),
+  useAdbKeyboard: z.boolean().default(false).describe('Use ADB Keyboard instead of batch input.'),
+});
+
+export const SmartLoginFastOutputSchema = SmartLoginOutputSchema;
+
 export const ReversePortOutputSchema = z.object({
   deviceId: z.string().describe('Target device ID'),
   devicePort: z.number().describe('Device port (tcp)'),
@@ -2436,6 +2465,28 @@ export const SmartLoginToolSchema = {
   required: ['email', 'password'] as string[],
 };
 
+export const DetectLoginFieldsToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: { type: 'string' as const, description: 'Optional device ID.' },
+    submitLabels: { type: 'array' as const, description: 'Custom submit labels.' },
+  },
+  required: [] as string[],
+};
+
+export const SmartLoginFastToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: { type: 'string' as const, description: 'Optional device ID.' },
+    email: { type: 'string' as const, description: 'Email/login value.' },
+    password: { type: 'string' as const, description: 'Password value.' },
+    submitLabels: { type: 'array' as const, description: 'Custom submit labels.' },
+    hideKeyboard: { type: 'boolean' as const, description: 'Hide keyboard before submit.' },
+    useAdbKeyboard: { type: 'boolean' as const, description: 'Use ADB Keyboard instead of batch input.' },
+  },
+  required: ['email', 'password'] as string[],
+};
+
 export const ReversePortToolSchema = {
   type: 'object' as const,
   properties: {
@@ -2724,6 +2775,10 @@ export type SetAdbKeyboardModeInput = z.infer<typeof SetAdbKeyboardModeInputSche
 export type SetAdbKeyboardModeOutput = z.infer<typeof SetAdbKeyboardModeOutputSchema>;
 export type SmartLoginInput = z.infer<typeof SmartLoginInputSchema>;
 export type SmartLoginOutput = z.infer<typeof SmartLoginOutputSchema>;
+export type DetectLoginFieldsInput = z.infer<typeof DetectLoginFieldsInputSchema>;
+export type DetectLoginFieldsOutput = z.infer<typeof DetectLoginFieldsOutputSchema>;
+export type SmartLoginFastInput = z.infer<typeof SmartLoginFastInputSchema>;
+export type SmartLoginFastOutput = z.infer<typeof SmartLoginFastOutputSchema>;
 export type ReversePortInput = z.infer<typeof ReversePortInputSchema>;
 export type ReversePortOutput = z.infer<typeof ReversePortOutputSchema>;
 export type ForwardPortInput = z.infer<typeof ForwardPortInputSchema>;
