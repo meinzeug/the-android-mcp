@@ -7,16 +7,13 @@
 
 ADB-powered Model Context Protocol server that lets AI coding agents install, launch, and control Android apps, capture screenshots, and wire hot-reload ports. Built for iterative UI refinement, automated test flows, and hands-on app navigation with Expo, React Native, Flutter, and native Android projects.
 
+Based on the original project: [infiniV/Android-Ui-MCP](https://github.com/infiniV/Android-Ui-MCP).
+
 **Keywords:** android mcp server, adb automation, android app testing, hot reload, android ui control, ai agent android, expo, react native, flutter
 
 ## Quick Demo
 
-See the MCP server in action with real-time Android UI analysis and control:
-
-| MCP Server Status                   | Live Development Workflow                  |
-| ----------------------------------- | ------------------------------------------ |
-| ![Tools](preview/tools.png)         | ![Usage](preview/usage.png)                |
-| Server ready with many tools        | AI agent analyzing Android UI in real-time |
+See the MCP server in action with real-time Android UI analysis and control.
 
 ## Features
 
@@ -632,8 +629,6 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 ```
 
 ## Usage Examples
-
-![Real-Time Development Workflow](preview/usage.png)
 
 _Example: AI agent listing devices, capturing screenshots, and providing detailed UI analysis in real-time_
 
