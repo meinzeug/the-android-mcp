@@ -5,8 +5,8 @@
   "main": "main.js",
   "type": "commonjs",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron ."
+    "start": "node scripts/start-electron.js",
+    "dev": "node scripts/start-electron.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.18.2"

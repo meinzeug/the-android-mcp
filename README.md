@@ -166,7 +166,7 @@ npm install
 npm run dev
 ```
 
-**Linux sandbox note:** If Electron complains about `chrome-sandbox`, the GUI will auto-disable sandboxing. To enforce sandboxing, set `THE_ANDROID_MCP_FORCE_SANDBOX=1` and fix permissions on `apps/gui/node_modules/electron/dist/chrome-sandbox` (requires root).
+**Linux sandbox note:** The GUI launcher auto-disables the Electron sandbox if `chrome-sandbox` isn’t correctly configured. To enforce sandboxing, set `THE_ANDROID_MCP_FORCE_SANDBOX=1` and fix permissions on `apps/gui/node_modules/electron/dist/chrome-sandbox` (requires root).
 
 The GUI auto-launches the MCP server from `dist/index.js` and exposes:
 - device list + selection
