@@ -762,6 +762,10 @@ export const SmartSwipeInputSchema = z.object({
   startY: z.number().describe('Start Y coordinate'),
   endX: z.number().describe('End X coordinate'),
   endY: z.number().describe('End Y coordinate'),
+  profile: z
+    .enum(['fast', 'normal', 'safe'])
+    .default('normal')
+    .describe('Gesture timing profile.'),
   durationMs: z.number().int().min(0).optional().describe('Optional swipe duration in milliseconds'),
   postSwipeWaitMs: z
     .number()
@@ -769,10 +773,28 @@ export const SmartSwipeInputSchema = z.object({
     .min(0)
     .optional()
     .describe('Optional delay after swipe before stabilization/screenshot.'),
-  waitForUiStable: z.boolean().default(true).describe('Wait for UI to stabilize after swipe.'),
-  stableIterations: z.number().int().min(1).optional().describe('Stable dump count for UI stability.'),
-  intervalMs: z.number().int().min(0).optional().describe('Polling interval for UI stability.'),
-  timeoutMs: z.number().int().positive().optional().describe('Max wait time for UI stability.'),
+  waitForUiStable: z
+    .boolean()
+    .optional()
+    .describe('Wait for UI to stabilize after swipe (defaults by profile).'),
+  stableIterations: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe('Stable dump count for UI stability (defaults by profile).'),
+  intervalMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Polling interval for UI stability (defaults by profile).'),
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Max wait time for UI stability (defaults by profile).'),
   captureScreenshot: z.boolean().default(false).describe('Capture screenshot after swipe.'),
   screenshotThrottleMs: z
     .number()
@@ -1174,6 +1196,12 @@ export const SmartScrollInputSchema = z.object({
     .optional()
     .describe('Optional device ID. If not provided, uses the first available device.'),
   direction: z.enum(['up', 'down']).describe('Scroll direction (screen swipe).'),
+  startXPercent: z
+    .number()
+    .min(0)
+    .max(100)
+    .optional()
+    .describe('Optional X percent for swipe.'),
   distancePercent: z
     .number()
     .min(10)
@@ -1185,10 +1213,28 @@ export const SmartScrollInputSchema = z.object({
     .default('normal')
     .describe('Gesture timing profile.'),
   durationMs: z.number().int().min(0).optional().describe('Optional swipe duration in ms.'),
-  waitForUiStable: z.boolean().default(true).describe('Wait for UI to stabilize after swipe.'),
-  stableIterations: z.number().int().min(1).optional().describe('Stable dump count for UI stability.'),
-  intervalMs: z.number().int().min(0).optional().describe('Polling interval for UI stability.'),
-  timeoutMs: z.number().int().positive().optional().describe('Max wait time for UI stability.'),
+  waitForUiStable: z
+    .boolean()
+    .optional()
+    .describe('Wait for UI to stabilize after swipe (defaults by profile).'),
+  stableIterations: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe('Stable dump count for UI stability (defaults by profile).'),
+  intervalMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Polling interval for UI stability (defaults by profile).'),
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Max wait time for UI stability (defaults by profile).'),
   captureScreenshot: z.boolean().default(false).describe('Capture screenshot after swipe.'),
   screenshotThrottleMs: z
     .number()
@@ -2063,13 +2109,16 @@ export const CreateIssueInputSchema = z.object({
   body: z.string().optional().describe('Issue body/description.'),
   labels: z.array(z.string()).optional().describe('Issue labels.'),
   assignees: z.array(z.string()).optional().describe('Issue assignees.'),
+  dryRun: z.boolean().optional().describe('Skip creation and return the gh command.'),
 });
 
 export const CreateIssueOutputSchema = z.object({
   repo: z.string().describe('GitHub repo in owner/name format.'),
   title: z.string().describe('Issue title.'),
-  url: z.string().describe('Created issue URL.'),
+  url: z.string().optional().describe('Created issue URL (if created).'),
   output: z.string().describe('Raw gh output.'),
+  command: z.string().describe('Rendered gh command that was executed.'),
+  dryRun: z.boolean().optional().describe('Whether this was a dry run.'),
 });
 
 // MCP Tool schemas
@@ -2319,6 +2368,7 @@ export const CreateIssueToolSchema = {
     body: { type: 'string' as const, description: 'Issue body/description.' },
     labels: { type: 'array' as const, description: 'Issue labels.' },
     assignees: { type: 'array' as const, description: 'Issue assignees.' },
+    dryRun: { type: 'boolean' as const, description: 'Skip creation and return the gh command.' },
   },
   required: ['title'] as string[],
 };
@@ -2468,12 +2518,16 @@ export const SmartSwipeToolSchema = {
     startY: { type: 'number' as const, description: 'Start Y coordinate in pixels.' },
     endX: { type: 'number' as const, description: 'End X coordinate in pixels.' },
     endY: { type: 'number' as const, description: 'End Y coordinate in pixels.' },
+    profile: { type: 'string' as const, enum: ['fast', 'normal', 'safe'], description: 'Gesture timing profile.' },
     durationMs: { type: 'number' as const, description: 'Optional swipe duration in milliseconds.' },
     postSwipeWaitMs: { type: 'number' as const, description: 'Optional delay after swipe before stabilization/screenshot.' },
-    waitForUiStable: { type: 'boolean' as const, description: 'Wait for UI to stabilize after swipe.' },
-    stableIterations: { type: 'number' as const, description: 'Stable dump count for UI stability.' },
-    intervalMs: { type: 'number' as const, description: 'Polling interval for UI stability.' },
-    timeoutMs: { type: 'number' as const, description: 'Max wait time for UI stability.' },
+    waitForUiStable: {
+      type: 'boolean' as const,
+      description: 'Wait for UI to stabilize after swipe (defaults by profile).',
+    },
+    stableIterations: { type: 'number' as const, description: 'Stable dump count for UI stability (defaults by profile).' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval for UI stability (defaults by profile).' },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time for UI stability (defaults by profile).' },
     captureScreenshot: { type: 'boolean' as const, description: 'Capture screenshot after swipe.' },
     screenshotThrottleMs: { type: 'number' as const, description: 'Reuse cached screenshots within this window (milliseconds).' },
   },
@@ -3058,13 +3112,17 @@ export const SmartScrollToolSchema = {
       description: 'Optional device ID. If not provided, uses the first available device.',
     },
     direction: { type: 'string' as const, enum: ['up', 'down'], description: 'Scroll direction.' },
+    startXPercent: { type: 'number' as const, description: 'Optional X percent for swipe.' },
     distancePercent: { type: 'number' as const, description: 'Swipe distance percent.' },
     profile: { type: 'string' as const, enum: ['fast', 'normal', 'safe'], description: 'Gesture timing profile.' },
     durationMs: { type: 'number' as const, description: 'Optional swipe duration in ms.' },
-    waitForUiStable: { type: 'boolean' as const, description: 'Wait for UI to stabilize after swipe.' },
-    stableIterations: { type: 'number' as const, description: 'Stable dump count for UI stability.' },
-    intervalMs: { type: 'number' as const, description: 'Polling interval for UI stability.' },
-    timeoutMs: { type: 'number' as const, description: 'Max wait time for UI stability.' },
+    waitForUiStable: {
+      type: 'boolean' as const,
+      description: 'Wait for UI to stabilize after swipe (defaults by profile).',
+    },
+    stableIterations: { type: 'number' as const, description: 'Stable dump count for UI stability (defaults by profile).' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval for UI stability (defaults by profile).' },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time for UI stability (defaults by profile).' },
     captureScreenshot: { type: 'boolean' as const, description: 'Capture screenshot after swipe.' },
     screenshotThrottleMs: { type: 'number' as const, description: 'Reuse cached screenshots within this window (milliseconds).' },
   },

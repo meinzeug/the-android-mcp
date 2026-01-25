@@ -181,6 +181,7 @@ jest.mock('../../src/types', () => {
       startY: z.number(),
       endX: z.number(),
       endY: z.number(),
+      profile: z.string().optional(),
       durationMs: z.number().optional(),
       postSwipeWaitMs: z.number().optional(),
       waitForUiStable: z.boolean().optional(),
@@ -341,6 +342,7 @@ jest.mock('../../src/types', () => {
     SmartScrollInputSchema: z.object({
       deviceId: z.string().optional(),
       direction: z.string(),
+      startXPercent: z.number().optional(),
       distancePercent: z.number().optional(),
       profile: z.string().optional(),
       durationMs: z.number().optional(),
@@ -568,6 +570,7 @@ jest.mock('../../src/types', () => {
       body: z.string().optional(),
       labels: z.array(z.string()).optional(),
       assignees: z.array(z.string()).optional(),
+      dryRun: z.boolean().optional(),
     }),
 
     // Tool output schemas
@@ -1115,8 +1118,10 @@ jest.mock('../../src/types', () => {
     CreateIssueOutputSchema: z.object({
       repo: z.string(),
       title: z.string(),
-      url: z.string(),
       output: z.string(),
+      url: z.string().optional(),
+      command: z.string(),
+      dryRun: z.boolean().optional(),
     }),
 
     // MCP Tool schemas
@@ -1327,6 +1332,7 @@ jest.mock('../../src/types', () => {
         startY: { type: 'number' },
         endX: { type: 'number' },
         endY: { type: 'number' },
+        profile: { type: 'string' },
         durationMs: { type: 'number' },
         postSwipeWaitMs: { type: 'number' },
         waitForUiStable: { type: 'boolean' },
@@ -1583,6 +1589,7 @@ jest.mock('../../src/types', () => {
       properties: {
         deviceId: { type: 'string' },
         direction: { type: 'string' },
+        startXPercent: { type: 'number' },
         distancePercent: { type: 'number' },
         profile: { type: 'string' },
         durationMs: { type: 'number' },
@@ -1958,6 +1965,7 @@ jest.mock('../../src/types', () => {
         body: { type: 'string' },
         labels: { type: 'array' },
         assignees: { type: 'array' },
+        dryRun: { type: 'boolean' },
       },
       required: ['title'],
     },

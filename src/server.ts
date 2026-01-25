@@ -2409,24 +2409,70 @@ class AndroidMcpServer {
   private async smartSwipe(
     input: z.infer<typeof SmartSwipeInputSchema>
   ): Promise<z.infer<typeof SmartSwipeOutputSchema>> {
+    const profile = input.profile ?? 'normal';
+    const defaults =
+      profile === 'fast'
+        ? {
+            durationMs: 160,
+            postSwipeWaitMs: 0,
+            waitForUiStable: false,
+            stableIterations: 1,
+            intervalMs: 120,
+            timeoutMs: 1500,
+          }
+        : profile === 'safe'
+          ? {
+              durationMs: 420,
+              postSwipeWaitMs: 120,
+              waitForUiStable: true,
+              stableIterations: 3,
+              intervalMs: 300,
+              timeoutMs: 6000,
+            }
+          : {
+              durationMs: 260,
+              postSwipeWaitMs: 60,
+              waitForUiStable: true,
+              stableIterations: 2,
+              intervalMs: 200,
+              timeoutMs: 3500,
+            };
+    const durationMs =
+      typeof input.durationMs === 'number' ? input.durationMs : defaults.durationMs;
+    const postSwipeWaitMs =
+      typeof input.postSwipeWaitMs === 'number'
+        ? input.postSwipeWaitMs
+        : defaults.postSwipeWaitMs;
+    const waitForUiStable =
+      typeof input.waitForUiStable === 'boolean'
+        ? input.waitForUiStable
+        : defaults.waitForUiStable;
+    const stableIterations =
+      typeof input.stableIterations === 'number'
+        ? input.stableIterations
+        : defaults.stableIterations;
+    const intervalMs =
+      typeof input.intervalMs === 'number' ? input.intervalMs : defaults.intervalMs;
+    const timeoutMs =
+      typeof input.timeoutMs === 'number' ? input.timeoutMs : defaults.timeoutMs;
     const swipe = adbSwipeScreen(
       input.startX,
       input.startY,
       input.endX,
       input.endY,
-      input.durationMs,
+      durationMs,
       input.deviceId
     );
 
-    if (input.postSwipeWaitMs && input.postSwipeWaitMs > 0) {
-      await new Promise(resolve => setTimeout(resolve, input.postSwipeWaitMs));
+    if (postSwipeWaitMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, postSwipeWaitMs));
     }
 
-    const uiStable = input.waitForUiStable
+    const uiStable = waitForUiStable
       ? adbWaitForUiStable(swipe.deviceId, {
-          stableIterations: input.stableIterations,
-          intervalMs: input.intervalMs,
-          timeoutMs: input.timeoutMs,
+          stableIterations,
+          intervalMs,
+          timeoutMs,
         })
       : undefined;
 
@@ -2780,25 +2826,57 @@ class AndroidMcpServer {
     input: z.infer<typeof SmartScrollInputSchema>
   ): Promise<z.infer<typeof SmartScrollOutputSchema>> {
     const profile = input.profile ?? 'normal';
+    const defaults =
+      profile === 'fast'
+        ? {
+            durationMs: 180,
+            waitForUiStable: false,
+            stableIterations: 1,
+            intervalMs: 140,
+            timeoutMs: 1500,
+          }
+        : profile === 'safe'
+          ? {
+              durationMs: 420,
+              waitForUiStable: true,
+              stableIterations: 3,
+              intervalMs: 300,
+              timeoutMs: 6000,
+            }
+          : {
+              durationMs: 280,
+              waitForUiStable: true,
+              stableIterations: 2,
+              intervalMs: 220,
+              timeoutMs: 3500,
+            };
+
     const durationMs =
-      typeof input.durationMs === 'number'
-        ? input.durationMs
-        : profile === 'fast'
-          ? 180
-          : profile === 'safe'
-            ? 420
-            : 280;
+      typeof input.durationMs === 'number' ? input.durationMs : defaults.durationMs;
+    const waitForUiStable =
+      typeof input.waitForUiStable === 'boolean'
+        ? input.waitForUiStable
+        : defaults.waitForUiStable;
+    const stableIterations =
+      typeof input.stableIterations === 'number'
+        ? input.stableIterations
+        : defaults.stableIterations;
+    const intervalMs =
+      typeof input.intervalMs === 'number' ? input.intervalMs : defaults.intervalMs;
+    const timeoutMs =
+      typeof input.timeoutMs === 'number' ? input.timeoutMs : defaults.timeoutMs;
 
     const scroll = adbScrollVertical(input.direction, input.deviceId, {
       distancePercent: input.distancePercent,
       durationMs,
+      startXPercent: input.startXPercent,
     });
 
-    const uiStable = input.waitForUiStable
+    const uiStable = waitForUiStable
       ? adbWaitForUiStable(scroll.deviceId, {
-          stableIterations: input.stableIterations,
-          intervalMs: input.intervalMs,
-          timeoutMs: input.timeoutMs,
+          stableIterations,
+          intervalMs,
+          timeoutMs,
         })
       : undefined;
 
@@ -3038,6 +3116,7 @@ class AndroidMcpServer {
       body: input.body,
       labels: input.labels,
       assignees: input.assignees,
+      dryRun: input.dryRun,
     });
     return CreateIssueOutputSchema.parse(result);
   }

@@ -64,6 +64,7 @@ the-android-mcp
 | Robust waits | `wait_for_*`, `wait_for_*_disappear`, `wait_for_ui_stable` |
 | Navigation | `tap_*`, `swipe_*`, `scroll_*`, `scroll_until_*` |
 | App ops | `install_android_apk`, `start_android_app`, `hot_reload_android_app` |
+| Issue reporting | `create_github_issue` |
 
 ## Performance Tips (Real‑World)
 
@@ -71,6 +72,7 @@ the-android-mcp
 - Use `wait_for_ui_stable` to avoid flaky taps during transitions.
 - Prefer `scroll_until_*` over manual scroll loops.
 - For login screens, use `smart_login_fast` with ADB keyboard enabled.
+- Use `smart_swipe` / `smart_scroll` profiles (`fast`, `normal`, `safe`) to trade speed vs stability.
 
 ## Efficiency Playbook (for Coding AIs)
 
@@ -102,6 +104,20 @@ Use this when you want **maximum speed** and **minimum ADB round‑trips**.
 
 ### 7) Capture bug reports immediately
 - When a flow fails, use `create_github_issue` with repro steps + logs/screenshots.
+
+## Issue Reporting (GitHub)
+
+The `create_github_issue` tool uses the GitHub CLI (`gh`). Make sure you're authenticated (`gh auth login`).
+Use `dryRun` to verify the command without creating an issue.
+
+```json
+{
+  "title": "Login submit button not detected on Pixel 7",
+  "body": "Steps: open app -> login screen -> submit not tapped. Logs attached.",
+  "labels": ["bug", "login"],
+  "dryRun": true
+}
+```
 
 ### Example: Fast login + submit + verify in one flow
 ```json
@@ -468,7 +484,7 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `tap_android_screen`      | Sends a tap event                         | `x`, `y`, `deviceId` (optional)                                            |
 | `swipe_android_screen`    | Sends a swipe gesture                     | `startX`, `startY`, `endX`, `endY`, `durationMs` (optional), `deviceId`    |
 | `swipe_and_screenshot`    | Swipe + screenshot in one call            | `startX`, `startY`, `endX`, `endY`, `postSwipeWaitMs` (optional)           |
-| `smart_swipe`             | Swipe + auto-wait + optional screenshot   | `startX`, `startY`, `endX`, `endY`, `waitForUiStable`, `captureScreenshot` |
+| `smart_swipe`             | Swipe + auto-wait + optional screenshot   | `startX`, `startY`, `endX`, `endY`, `profile`, `waitForUiStable`           |
 | `input_android_text`      | Types text into focused input             | `text`, `deviceId` (optional)                                              |
 | `send_android_keyevent`   | Sends an Android keyevent                 | `keyCode`, `deviceId` (optional)                                           |
 | `batch_android_actions`   | Runs multiple input actions in one call   | `actions`, `preActionWaitMs` (optional), `deviceId` (optional), `captureBefore`/`captureAfter` (optional), `timeoutMs` |
@@ -493,7 +509,7 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `swipe_relative`          | Swipe using percentage coordinates        | `startXPercent`, `startYPercent`, `endXPercent`, `endYPercent`, `durationMs`|
 | `scroll_vertical`         | Scroll vertically via percentage swipe    | `direction`, `distancePercent` (optional), `deviceId` (optional)           |
 | `scroll_horizontal`       | Scroll horizontally via percentage swipe  | `direction`, `distancePercent` (optional), `deviceId` (optional)           |
-| `smart_scroll`            | Scroll + auto-wait + optional screenshot  | `direction`, `profile`, `waitForUiStable`, `captureScreenshot`             |
+| `smart_scroll`            | Scroll + auto-wait + optional screenshot  | `direction`, `profile`, `startXPercent`, `waitForUiStable`                 |
 | `tap_center`              | Tap the center of the screen              | `deviceId` (optional)                                                      |
 | `long_press`              | Long-press on coordinate                  | `x`, `y`, `durationMs` (optional), `deviceId` (optional)                   |
 | `double_tap`              | Double-tap on coordinate                  | `x`, `y`, `intervalMs` (optional), `deviceId` (optional)                   |
@@ -513,7 +529,7 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `get_android_logcat`      | Fetch recent logcat output                | `lines` (optional), filters, `deviceId` (optional)                         |
 | `list_android_activities` | List activities for a package             | `packageName`, `deviceId` (optional)                                       |
 | `hot_reload_android_app`  | Reverse ports + install/start for hot dev | `packageName`, `reversePorts`, install/start options, Play Protect handling, `deviceId` (optional)|
-| `create_github_issue`     | Create a GitHub issue                     | `title`, `body` (optional), `labels` (optional), `assignees` (optional)     |
+| `create_github_issue`     | Create a GitHub issue                     | `title`, `body` (optional), `labels` (optional), `assignees` (optional), `dryRun` (optional) |
 
 ### Tool Schemas (selected)
 
@@ -1206,6 +1222,10 @@ With your development environment running (Expo, React Native, Flutter, etc.), i
 - Check USB debugging permissions on device
 
 ## Development
+
+## Roadmap
+
+See `docs/ROADMAP.md` for the concrete plan toward v3.0.
 
 ### Build Commands
 

@@ -15,7 +15,8 @@ export function createGitHubIssue(options: {
   body?: string;
   labels?: string[];
   assignees?: string[];
-}): { repo: string; title: string; url: string; output: string } {
+  dryRun?: boolean;
+}): { repo: string; title: string; url?: string; output: string; command: string; dryRun?: boolean } {
   const repo = options.repo ?? 'meinzeug/the-android-mcp';
   const title = options.title.trim();
   const body = options.body?.trim() ?? '';
@@ -47,7 +48,11 @@ export function createGitHubIssue(options: {
   }
 
   const command = args.map(escapeShellArg).join(' ');
+  if (options.dryRun) {
+    return { repo, title, output: 'dryRun', command, dryRun: true };
+  }
+
   const output = execSync(command, { encoding: 'utf8' }).trim();
 
-  return { repo, title, url: output.split('\n').pop() ?? output, output };
+  return { repo, title, url: output.split('\n').pop() ?? output, output, command };
 }
