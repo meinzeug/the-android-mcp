@@ -18,12 +18,12 @@
 
 ```mermaid
 flowchart LR
-  Dev[Code Changes] -->|git/save| Agent[AI Agent]
-  Agent -->|MCP tools| MCP[the-android-mcp]
-  MCP -->|ADB| Device[Android Device]
-  Device -->|UI + State| MCP
-  MCP -->|Screenshots/UI dump| Agent
-  Agent -->|Fixes/Iterations| Dev
+  Dev[Code Changes] --> Agent[AI Agent]
+  Agent --> MCP[MCP Server]
+  MCP --> Device[Android Device]
+  Device --> MCP
+  MCP --> Agent
+  Agent --> Dev
 ```
 
 ```mermaid
@@ -31,10 +31,10 @@ sequenceDiagram
   participant A as AI Agent
   participant M as MCP Server
   participant D as Android Device
-  A->>M: smart_login_fast(email, password)
-  M->>D: UI dump + ADB input (IME)
+  A->>M: smart_login_fast
+  M->>D: UI dump and ADB input
   D-->>M: Updated UI state
-  M->>D: Tap submit (container-aware)
+  M->>D: Tap submit
   M-->>A: Result (fields found, submit tapped)
 ```
 
