@@ -254,6 +254,33 @@ jest.mock('../../src/types', () => {
       timeoutMs: z.number().optional(),
       intervalMs: z.number().optional(),
     }),
+    RunFlowPlanInputSchema: z.object({
+      deviceId: z.string().optional(),
+      steps: z.array(z.any()),
+      stopOnFailure: z.boolean().optional(),
+    }),
+    QueryUiInputSchema: z.object({
+      deviceId: z.string().optional(),
+      selector: z.any(),
+      maxResults: z.number().optional(),
+    }),
+    WaitForNodeCountInputSchema: z.object({
+      deviceId: z.string().optional(),
+      selector: z.any(),
+      count: z.number(),
+      comparator: z.string().optional(),
+      timeoutMs: z.number().optional(),
+      intervalMs: z.number().optional(),
+    }),
+    TapBySelectorIndexInputSchema: z.object({
+      deviceId: z.string().optional(),
+      selector: z.any(),
+      index: z.number().optional(),
+    }),
+    UiDumpCachedInputSchema: z.object({
+      deviceId: z.string().optional(),
+      maxChars: z.number().optional(),
+    }),
     ReversePortInputSchema: z.object({
       deviceId: z.string().optional(),
       devicePort: z.number(),
@@ -550,6 +577,42 @@ jest.mock('../../src/types', () => {
       found: z.boolean(),
       elapsedMs: z.number(),
       current: z.string().optional(),
+    }),
+    RunFlowPlanOutputSchema: z.object({
+      deviceId: z.string(),
+      steps: z.array(z.any()),
+    }),
+    QueryUiOutputSchema: z.object({
+      deviceId: z.string(),
+      selector: z.any(),
+      count: z.number(),
+      nodes: z.array(z.any()),
+    }),
+    WaitForNodeCountOutputSchema: z.object({
+      deviceId: z.string(),
+      selector: z.any(),
+      count: z.number(),
+      comparator: z.string(),
+      found: z.boolean(),
+      elapsedMs: z.number(),
+      matchCount: z.number(),
+    }),
+    TapBySelectorIndexOutputSchema: z.object({
+      deviceId: z.string(),
+      selector: z.any(),
+      index: z.number(),
+      found: z.boolean(),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      output: z.string().optional(),
+    }),
+    UiDumpCachedOutputSchema: z.object({
+      deviceId: z.string(),
+      xml: z.string(),
+      length: z.number(),
+      truncated: z.boolean().optional(),
+      filePath: z.string(),
+      ageMs: z.number(),
     }),
     ReversePortOutputSchema: z.object({
       deviceId: z.string(),
@@ -921,6 +984,53 @@ jest.mock('../../src/types', () => {
       },
       required: ['packageName'],
     },
+    RunFlowPlanToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        steps: { type: 'array' },
+        stopOnFailure: { type: 'boolean' },
+      },
+      required: ['steps'],
+    },
+    QueryUiToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        selector: { type: 'object' },
+        maxResults: { type: 'number' },
+      },
+      required: ['selector'],
+    },
+    WaitForNodeCountToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        selector: { type: 'object' },
+        count: { type: 'number' },
+        comparator: { type: 'string' },
+        timeoutMs: { type: 'number' },
+        intervalMs: { type: 'number' },
+      },
+      required: ['selector', 'count'],
+    },
+    TapBySelectorIndexToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        selector: { type: 'object' },
+        index: { type: 'number' },
+      },
+      required: ['selector'],
+    },
+    UiDumpCachedToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        maxChars: { type: 'number' },
+      },
+      required: [],
+    },
     ReversePortToolSchema: {
       type: 'object',
       properties: {
@@ -1055,6 +1165,16 @@ jest.mock('../../src/types', () => {
     GetScreenHashOutput: {},
     WaitForPackageInput: {},
     WaitForPackageOutput: {},
+    RunFlowPlanInput: {},
+    RunFlowPlanOutput: {},
+    QueryUiInput: {},
+    QueryUiOutput: {},
+    WaitForNodeCountInput: {},
+    WaitForNodeCountOutput: {},
+    TapBySelectorIndexInput: {},
+    TapBySelectorIndexOutput: {},
+    UiDumpCachedInput: {},
+    UiDumpCachedOutput: {},
     ReversePortInput: {},
     ReversePortOutput: {},
     ForwardPortInput: {},
@@ -1128,6 +1248,11 @@ describe('MCP Server Integration Tests', () => {
         expect(toolNames).toContain('wait_for_ui_stable');
         expect(toolNames).toContain('get_screen_hash');
         expect(toolNames).toContain('wait_for_package');
+        expect(toolNames).toContain('run_flow_plan');
+        expect(toolNames).toContain('query_ui');
+        expect(toolNames).toContain('wait_for_node_count');
+        expect(toolNames).toContain('tap_by_selector_index');
+        expect(toolNames).toContain('ui_dump_cached');
         expect(toolNames).toContain('get_android_current_activity');
         expect(toolNames).toContain('get_android_window_size');
         expect(toolNames).toContain('dump_android_ui_hierarchy');

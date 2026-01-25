@@ -356,6 +356,11 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `wait_for_ui_stable`      | Wait for UI dump to stabilize             | `stableIterations`, `intervalMs`, `timeoutMs` (optional)                   |
 | `get_screen_hash`         | Get UI hash from current dump             | `deviceId` (optional)                                                      |
 | `wait_for_package`        | Wait for package in foreground            | `packageName`, `timeoutMs`/`intervalMs` (optional)                         |
+| `run_flow_plan`           | Execute a multi-step UI plan quickly      | `steps`, `stopOnFailure` (optional), `deviceId` (optional)                 |
+| `query_ui`                | Query UI nodes by selector                | `selector`, `maxResults` (optional), `deviceId` (optional)                 |
+| `wait_for_node_count`     | Wait for selector match count             | `selector`, `count`, `comparator` (optional)                               |
+| `tap_by_selector_index`   | Tap selector match by index               | `selector`, `index` (optional), `deviceId` (optional)                      |
+| `ui_dump_cached`          | Return last cached UI dump                | `deviceId` (optional), `maxChars` (optional)                               |
 | `reverse_android_port`    | Reverse TCP port (device → host)          | `devicePort`, `hostPort` (optional), `deviceId` (optional)                 |
 | `forward_android_port`    | Forward TCP port (host → device)          | `devicePort`, `hostPort`, `deviceId` (optional)                            |
 | `get_android_logcat`      | Fetch recent logcat output                | `lines` (optional), filters, `deviceId` (optional)                         |

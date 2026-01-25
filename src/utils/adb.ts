@@ -26,6 +26,8 @@ const APK_SEARCH_DIRS = [
   'build/outputs/flutter-apk',
 ];
 
+const UI_DUMP_CACHE: Record<string, { xml: string; timestamp: number; filePath: string }> = {};
+
 function escapeShellArg(value: string): string {
   if (process.platform === 'win32') {
     const escaped = value.replace(/"/g, '\\"');
@@ -311,6 +313,19 @@ export function dumpUiHierarchy(
     );
   }
 
+  const fullRecord = {
+    deviceId: targetDeviceId,
+    xml,
+    length: xml.length,
+    filePath,
+  };
+
+  UI_DUMP_CACHE[targetDeviceId] = {
+    xml,
+    timestamp: Date.now(),
+    filePath,
+  };
+
   if (options.maxChars && xml.length > options.maxChars) {
     return {
       deviceId: targetDeviceId,
@@ -321,12 +336,7 @@ export function dumpUiHierarchy(
     };
   }
 
-  return {
-    deviceId: targetDeviceId,
-    xml,
-    length: xml.length,
-    filePath,
-  };
+  return fullRecord;
 }
 
 // Get device information
@@ -1119,6 +1129,13 @@ function centerOfBounds(bounds: { x1: number; y1: number; x2: number; y2: number
 }
 
 type MatchMode = 'exact' | 'contains' | 'regex';
+type SelectorField = 'text' | 'resourceId' | 'contentDesc';
+
+type UiSelector = {
+  field: SelectorField;
+  value: string;
+  matchMode: MatchMode;
+};
 
 function matchesValue(value: string, target: string, mode: MatchMode): boolean {
   switch (mode) {
@@ -1143,6 +1160,10 @@ function findNodesBy(
   mode: MatchMode
 ): UiNode[] {
   return nodes.filter(node => matchesValue(node[field], target, mode));
+}
+
+function queryNodes(nodes: UiNode[], selector: UiSelector): UiNode[] {
+  return findNodesBy(nodes, selector.field, selector.value, selector.matchMode);
 }
 
 function tapUiNode(deviceId: string, node: UiNode): { x: number; y: number; output: string } {
@@ -1569,6 +1590,334 @@ function hashString(value: string): string {
     hash |= 0;
   }
   return Math.abs(hash).toString(16);
+}
+
+export function runFlowPlan(
+  steps: Array<{ type: string; [key: string]: any }>,
+  deviceId?: string,
+  options: { stopOnFailure?: boolean } = {}
+): { deviceId: string; steps: Array<{ id?: string; type: string; ok: boolean; message?: string; elapsedMs?: number }> } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const stopOnFailure = options.stopOnFailure !== false;
+  const results: Array<{ id?: string; type: string; ok: boolean; message?: string; elapsedMs?: number }> = [];
+
+  for (const step of steps) {
+    const start = Date.now();
+    try {
+      switch (step.type) {
+        case 'tap':
+          tapScreen(step.x, step.y, targetDeviceId);
+          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
+          break;
+        case 'tap_relative':
+          tapRelative(step.xPercent, step.yPercent, targetDeviceId);
+          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
+          break;
+        case 'tap_center':
+          tapCenter(targetDeviceId);
+          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
+          break;
+        case 'swipe':
+          swipeScreen(step.startX, step.startY, step.endX, step.endY, step.durationMs, targetDeviceId);
+          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
+          break;
+        case 'swipe_relative':
+          swipeRelative(
+            step.startXPercent,
+            step.startYPercent,
+            step.endXPercent,
+            step.endYPercent,
+            targetDeviceId,
+            step.durationMs
+          );
+          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
+          break;
+        case 'text':
+          inputText(step.text, targetDeviceId);
+          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
+          break;
+        case 'keyevent':
+          sendKeyevent(step.keyCode, targetDeviceId);
+          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
+          break;
+        case 'sleep':
+          executeADBCommand(`-s ${targetDeviceId} shell sleep ${step.durationMs / 1000}`);
+          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
+          break;
+        case 'tap_by_text': {
+          const res = tapByText(step.text, targetDeviceId, {
+            matchMode: step.matchMode,
+            index: step.index,
+          });
+          results.push({
+            id: step.id,
+            type: step.type,
+            ok: res.found,
+            message: res.found ? undefined : 'No matching text',
+            elapsedMs: Date.now() - start,
+          });
+          break;
+        }
+        case 'tap_by_id': {
+          const res = tapById(step.resourceId, targetDeviceId, { index: step.index });
+          results.push({
+            id: step.id,
+            type: step.type,
+            ok: res.found,
+            message: res.found ? undefined : 'No matching resource-id',
+            elapsedMs: Date.now() - start,
+          });
+          break;
+        }
+        case 'tap_by_desc': {
+          const res = tapByDesc(step.contentDesc, targetDeviceId, {
+            matchMode: step.matchMode,
+            index: step.index,
+          });
+          results.push({
+            id: step.id,
+            type: step.type,
+            ok: res.found,
+            message: res.found ? undefined : 'No matching content-desc',
+            elapsedMs: Date.now() - start,
+          });
+          break;
+        }
+        case 'type_by_id': {
+          const res = typeById(step.resourceId, step.text, targetDeviceId, {
+            matchMode: step.matchMode,
+            index: step.index,
+          });
+          results.push({
+            id: step.id,
+            type: step.type,
+            ok: res.found,
+            message: res.found ? undefined : 'No matching resource-id',
+            elapsedMs: Date.now() - start,
+          });
+          break;
+        }
+        case 'wait_for_text': {
+          const res = waitForText(step.text, targetDeviceId, {
+            matchMode: step.matchMode,
+            timeoutMs: step.timeoutMs,
+            intervalMs: step.intervalMs,
+          });
+          results.push({
+            id: step.id,
+            type: step.type,
+            ok: res.found,
+            message: res.found ? undefined : 'Text not found',
+            elapsedMs: Date.now() - start,
+          });
+          break;
+        }
+        case 'wait_for_id': {
+          const res = waitForId(step.resourceId, targetDeviceId, {
+            matchMode: step.matchMode,
+            timeoutMs: step.timeoutMs,
+            intervalMs: step.intervalMs,
+          });
+          results.push({
+            id: step.id,
+            type: step.type,
+            ok: res.found,
+            message: res.found ? undefined : 'Resource-id not found',
+            elapsedMs: Date.now() - start,
+          });
+          break;
+        }
+        case 'wait_for_desc': {
+          const res = waitForDesc(step.contentDesc, targetDeviceId, {
+            matchMode: step.matchMode,
+            timeoutMs: step.timeoutMs,
+            intervalMs: step.intervalMs,
+          });
+          results.push({
+            id: step.id,
+            type: step.type,
+            ok: res.found,
+            message: res.found ? undefined : 'Content-desc not found',
+            elapsedMs: Date.now() - start,
+          });
+          break;
+        }
+        case 'wait_for_activity': {
+          const res = waitForActivity(step.activity, targetDeviceId, {
+            matchMode: step.matchMode,
+            timeoutMs: step.timeoutMs,
+            intervalMs: step.intervalMs,
+          });
+          results.push({
+            id: step.id,
+            type: step.type,
+            ok: res.found,
+            message: res.found ? undefined : 'Activity not reached',
+            elapsedMs: Date.now() - start,
+          });
+          break;
+        }
+        case 'wait_for_package': {
+          const res = waitForPackage(step.packageName, targetDeviceId, {
+            timeoutMs: step.timeoutMs,
+            intervalMs: step.intervalMs,
+          });
+          results.push({
+            id: step.id,
+            type: step.type,
+            ok: res.found,
+            message: res.found ? undefined : 'Package not in foreground',
+            elapsedMs: Date.now() - start,
+          });
+          break;
+        }
+        case 'press_key_sequence': {
+          pressKeySequence(step.keyCodes, targetDeviceId, { intervalMs: step.intervalMs });
+          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
+          break;
+        }
+        default:
+          results.push({ id: step.id, type: step.type, ok: false, message: 'Unknown step type' });
+      }
+    } catch (error: any) {
+      results.push({
+        id: step.id,
+        type: step.type,
+        ok: false,
+        message: error?.message ?? String(error),
+        elapsedMs: Date.now() - start,
+      });
+    }
+
+    if (stopOnFailure && results[results.length - 1] && !results[results.length - 1].ok) {
+      break;
+    }
+  }
+
+  return { deviceId: targetDeviceId, steps: results };
+}
+
+export function getCachedUiDump(
+  deviceId?: string,
+  options: { maxChars?: number } = {}
+): { deviceId: string; xml: string; length: number; truncated?: boolean; filePath: string; ageMs: number } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const cached = UI_DUMP_CACHE[targetDeviceId];
+  if (!cached) {
+    throw new ADBCommandError('UI_DUMP_CACHE_MISS', 'No cached UI dump for device', {
+      deviceId: targetDeviceId,
+    });
+  }
+
+  const ageMs = Date.now() - cached.timestamp;
+  const xml = cached.xml;
+  if (options.maxChars && xml.length > options.maxChars) {
+    return {
+      deviceId: targetDeviceId,
+      xml: xml.slice(0, options.maxChars),
+      length: options.maxChars,
+      truncated: true,
+      filePath: cached.filePath,
+      ageMs,
+    };
+  }
+
+  return {
+    deviceId: targetDeviceId,
+    xml,
+    length: xml.length,
+    filePath: cached.filePath,
+    ageMs,
+  };
+}
+
+export function queryUi(
+  selector: UiSelector,
+  deviceId?: string,
+  options: { maxResults?: number } = {}
+): { deviceId: string; selector: UiSelector; count: number; nodes: UiNode[] } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { xml } = dumpUiHierarchy(targetDeviceId);
+  const nodes = extractUiNodes(xml);
+  const matches = queryNodes(nodes, selector);
+  const maxResults = options.maxResults ?? matches.length;
+  return {
+    deviceId: targetDeviceId,
+    selector,
+    count: matches.length,
+    nodes: matches.slice(0, maxResults),
+  };
+}
+
+export function waitForNodeCount(
+  selector: UiSelector,
+  count: number,
+  comparator: 'eq' | 'gte' | 'lte',
+  deviceId?: string,
+  options: { timeoutMs?: number; intervalMs?: number } = {}
+): { deviceId: string; selector: UiSelector; count: number; comparator: string; found: boolean; elapsedMs: number; matchCount: number } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const intervalMs = options.intervalMs ?? 300;
+  const start = Date.now();
+
+  while (Date.now() - start <= timeoutMs) {
+    const { xml } = dumpUiHierarchy(targetDeviceId);
+    const nodes = extractUiNodes(xml);
+    const matches = queryNodes(nodes, selector);
+    const matchCount = matches.length;
+    const ok =
+      comparator === 'eq'
+        ? matchCount === count
+        : comparator === 'gte'
+          ? matchCount >= count
+          : matchCount <= count;
+
+    if (ok) {
+      return {
+        deviceId: targetDeviceId,
+        selector,
+        count,
+        comparator,
+        found: true,
+        elapsedMs: Date.now() - start,
+        matchCount,
+      };
+    }
+    executeADBCommand(`-s ${targetDeviceId} shell sleep ${intervalMs / 1000}`);
+  }
+
+  const { xml } = dumpUiHierarchy(targetDeviceId);
+  const nodes = extractUiNodes(xml);
+  const matches = queryNodes(nodes, selector);
+  return {
+    deviceId: targetDeviceId,
+    selector,
+    count,
+    comparator,
+    found: false,
+    elapsedMs: Date.now() - start,
+    matchCount: matches.length,
+  };
+}
+
+export function tapBySelectorIndex(
+  selector: UiSelector,
+  index: number,
+  deviceId?: string
+): { deviceId: string; selector: UiSelector; index: number; found: boolean; x?: number; y?: number; output?: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { xml } = dumpUiHierarchy(targetDeviceId);
+  const nodes = extractUiNodes(xml);
+  const matches = queryNodes(nodes, selector);
+  const match = matches[index];
+
+  if (!match) {
+    return { deviceId: targetDeviceId, selector, index, found: false };
+  }
+
+  const { x, y, output } = tapUiNode(targetDeviceId, match);
+  return { deviceId: targetDeviceId, selector, index, found: true, x, y, output };
 }
 
 export function typeById(

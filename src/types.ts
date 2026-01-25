@@ -996,6 +996,269 @@ export const WaitForPackageOutputSchema = z.object({
   current: z.string().optional().describe('Last observed package/activity'),
 });
 
+const FlowStepBaseSchema = z.object({
+  id: z.string().optional().describe('Optional step id.'),
+});
+
+const FlowTapStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('tap'),
+  x: z.number().int().min(0),
+  y: z.number().int().min(0),
+});
+
+const FlowTapRelativeStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('tap_relative'),
+  xPercent: z.number().min(0).max(100),
+  yPercent: z.number().min(0).max(100),
+});
+
+const FlowTapCenterStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('tap_center'),
+});
+
+const FlowSwipeStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('swipe'),
+  startX: z.number().int().min(0),
+  startY: z.number().int().min(0),
+  endX: z.number().int().min(0),
+  endY: z.number().int().min(0),
+  durationMs: z.number().int().min(0).optional(),
+});
+
+const FlowSwipeRelativeStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('swipe_relative'),
+  startXPercent: z.number().min(0).max(100),
+  startYPercent: z.number().min(0).max(100),
+  endXPercent: z.number().min(0).max(100),
+  endYPercent: z.number().min(0).max(100),
+  durationMs: z.number().int().min(0).optional(),
+});
+
+const FlowTextStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('text'),
+  text: z.string().min(1),
+});
+
+const FlowKeyeventStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('keyevent'),
+  keyCode: z.union([z.string(), z.number().int()]),
+});
+
+const FlowSleepStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('sleep'),
+  durationMs: z.number().int().min(0),
+});
+
+const FlowTapByTextStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('tap_by_text'),
+  text: z.string().min(1),
+  matchMode: z.enum(['exact', 'contains', 'regex']).optional(),
+  index: z.number().int().min(0).optional(),
+});
+
+const FlowTapByIdStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('tap_by_id'),
+  resourceId: z.string().min(1),
+  index: z.number().int().min(0).optional(),
+});
+
+const FlowTapByDescStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('tap_by_desc'),
+  contentDesc: z.string().min(1),
+  matchMode: z.enum(['exact', 'contains', 'regex']).optional(),
+  index: z.number().int().min(0).optional(),
+});
+
+const FlowTypeByIdStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('type_by_id'),
+  resourceId: z.string().min(1),
+  text: z.string().min(1),
+  matchMode: z.enum(['exact', 'contains', 'regex']).optional(),
+  index: z.number().int().min(0).optional(),
+});
+
+const FlowWaitTextStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('wait_for_text'),
+  text: z.string().min(1),
+  matchMode: z.enum(['exact', 'contains', 'regex']).optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  intervalMs: z.number().int().positive().optional(),
+});
+
+const FlowWaitIdStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('wait_for_id'),
+  resourceId: z.string().min(1),
+  matchMode: z.enum(['exact', 'contains', 'regex']).optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  intervalMs: z.number().int().positive().optional(),
+});
+
+const FlowWaitDescStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('wait_for_desc'),
+  contentDesc: z.string().min(1),
+  matchMode: z.enum(['exact', 'contains', 'regex']).optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  intervalMs: z.number().int().positive().optional(),
+});
+
+const FlowWaitActivityStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('wait_for_activity'),
+  activity: z.string().min(1),
+  matchMode: z.enum(['exact', 'contains', 'regex']).optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  intervalMs: z.number().int().positive().optional(),
+});
+
+const FlowWaitPackageStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('wait_for_package'),
+  packageName: z.string().min(1),
+  timeoutMs: z.number().int().positive().optional(),
+  intervalMs: z.number().int().positive().optional(),
+});
+
+const FlowPressKeySequenceStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('press_key_sequence'),
+  keyCodes: z.array(z.union([z.string(), z.number().int()])).min(1),
+  intervalMs: z.number().int().min(0).optional(),
+});
+
+export const FlowStepSchema = z.discriminatedUnion('type', [
+  FlowTapStepSchema,
+  FlowTapRelativeStepSchema,
+  FlowTapCenterStepSchema,
+  FlowSwipeStepSchema,
+  FlowSwipeRelativeStepSchema,
+  FlowTextStepSchema,
+  FlowKeyeventStepSchema,
+  FlowSleepStepSchema,
+  FlowTapByTextStepSchema,
+  FlowTapByIdStepSchema,
+  FlowTapByDescStepSchema,
+  FlowTypeByIdStepSchema,
+  FlowWaitTextStepSchema,
+  FlowWaitIdStepSchema,
+  FlowWaitDescStepSchema,
+  FlowWaitActivityStepSchema,
+  FlowWaitPackageStepSchema,
+  FlowPressKeySequenceStepSchema,
+]);
+
+export const RunFlowPlanInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  steps: z.array(FlowStepSchema).min(1).describe('Ordered list of steps to execute.'),
+  stopOnFailure: z.boolean().default(true).describe('Stop when a step fails.'),
+});
+
+export const RunFlowPlanOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  steps: z.array(
+    z.object({
+      id: z.string().optional(),
+      type: z.string(),
+      ok: z.boolean(),
+      message: z.string().optional(),
+      elapsedMs: z.number().optional(),
+    })
+  ),
+});
+
+export const UiSelectorSchema = z.object({
+  field: z.enum(['text', 'resourceId', 'contentDesc']).describe('Selector field.'),
+  value: z.string().min(1).describe('Selector value.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
+});
+
+export const QueryUiInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  selector: UiSelectorSchema,
+  maxResults: z.number().int().positive().optional().describe('Max results to return.'),
+});
+
+export const QueryUiOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  selector: UiSelectorSchema,
+  count: z.number().describe('Match count'),
+  nodes: z.array(
+    z.object({
+      text: z.string().optional(),
+      resourceId: z.string().optional(),
+      contentDesc: z.string().optional(),
+      bounds: z
+        .object({
+          x1: z.number(),
+          y1: z.number(),
+          x2: z.number(),
+          y2: z.number(),
+        })
+        .optional(),
+    })
+  ),
+});
+
+export const WaitForNodeCountInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  selector: UiSelectorSchema,
+  count: z.number().int().min(0).describe('Target count.'),
+  comparator: z.enum(['eq', 'gte', 'lte']).default('eq').describe('Comparison operator.'),
+  timeoutMs: z.number().int().positive().optional().describe('Max wait time in ms.'),
+  intervalMs: z.number().int().positive().optional().describe('Polling interval in ms.'),
+});
+
+export const WaitForNodeCountOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  selector: UiSelectorSchema,
+  count: z.number().describe('Target count'),
+  comparator: z.string().describe('Comparator used'),
+  found: z.boolean().describe('Whether condition was met'),
+  elapsedMs: z.number().describe('Elapsed time in ms'),
+  matchCount: z.number().describe('Current match count'),
+});
+
+export const TapBySelectorIndexInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  selector: UiSelectorSchema,
+  index: z.number().int().min(0).default(0).describe('Match index (0-based).'),
+});
+
+export const TapBySelectorIndexOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  selector: UiSelectorSchema,
+  index: z.number().describe('Match index'),
+  found: z.boolean().describe('Whether a match was found'),
+  x: z.number().optional().describe('Tap X coordinate'),
+  y: z.number().optional().describe('Tap Y coordinate'),
+  output: z.string().optional().describe('Raw ADB output'),
+});
+
+export const UiDumpCachedInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  maxChars: z.number().int().positive().optional().describe('Optional maximum number of characters.'),
+});
+
+export const UiDumpCachedOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  xml: z.string().describe('UI hierarchy XML'),
+  length: z.number().describe('Length of XML returned'),
+  truncated: z.boolean().optional().describe('Whether XML was truncated'),
+  filePath: z.string().describe('Remote dump file path'),
+  ageMs: z.number().describe('Age of cached dump in ms'),
+});
+
 export const ReversePortOutputSchema = z.object({
   deviceId: z.string().describe('Target device ID'),
   devicePort: z.number().describe('Device port (tcp)'),
@@ -1784,6 +2047,83 @@ export const WaitForPackageToolSchema = {
   required: ['packageName'] as string[],
 };
 
+export const RunFlowPlanToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    steps: {
+      type: 'array' as const,
+      description: 'Ordered list of steps to execute.',
+    },
+    stopOnFailure: {
+      type: 'boolean' as const,
+      description: 'Stop when a step fails.',
+      default: true,
+    },
+  },
+  required: ['steps'] as string[],
+};
+
+export const QueryUiToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    selector: {
+      type: 'object' as const,
+      description: 'Selector {field,value,matchMode}.',
+    },
+    maxResults: { type: 'number' as const, description: 'Max results to return.' },
+  },
+  required: ['selector'] as string[],
+};
+
+export const WaitForNodeCountToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    selector: { type: 'object' as const, description: 'Selector {field,value,matchMode}.' },
+    count: { type: 'number' as const, description: 'Target count.' },
+    comparator: { type: 'string' as const, description: 'Comparison operator (eq/gte/lte).' },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time in ms.' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval in ms.' },
+  },
+  required: ['selector', 'count'] as string[],
+};
+
+export const TapBySelectorIndexToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    selector: { type: 'object' as const, description: 'Selector {field,value,matchMode}.' },
+    index: { type: 'number' as const, description: 'Match index (0-based).' },
+  },
+  required: ['selector'] as string[],
+};
+
+export const UiDumpCachedToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    maxChars: { type: 'number' as const, description: 'Optional maximum number of characters.' },
+  },
+  required: [] as string[],
+};
+
 export const ReversePortToolSchema = {
   type: 'object' as const,
   properties: {
@@ -2040,6 +2380,18 @@ export type GetScreenHashInput = z.infer<typeof GetScreenHashInputSchema>;
 export type GetScreenHashOutput = z.infer<typeof GetScreenHashOutputSchema>;
 export type WaitForPackageInput = z.infer<typeof WaitForPackageInputSchema>;
 export type WaitForPackageOutput = z.infer<typeof WaitForPackageOutputSchema>;
+export type FlowStep = z.infer<typeof FlowStepSchema>;
+export type RunFlowPlanInput = z.infer<typeof RunFlowPlanInputSchema>;
+export type RunFlowPlanOutput = z.infer<typeof RunFlowPlanOutputSchema>;
+export type UiSelector = z.infer<typeof UiSelectorSchema>;
+export type QueryUiInput = z.infer<typeof QueryUiInputSchema>;
+export type QueryUiOutput = z.infer<typeof QueryUiOutputSchema>;
+export type WaitForNodeCountInput = z.infer<typeof WaitForNodeCountInputSchema>;
+export type WaitForNodeCountOutput = z.infer<typeof WaitForNodeCountOutputSchema>;
+export type TapBySelectorIndexInput = z.infer<typeof TapBySelectorIndexInputSchema>;
+export type TapBySelectorIndexOutput = z.infer<typeof TapBySelectorIndexOutputSchema>;
+export type UiDumpCachedInput = z.infer<typeof UiDumpCachedInputSchema>;
+export type UiDumpCachedOutput = z.infer<typeof UiDumpCachedOutputSchema>;
 export type ReversePortInput = z.infer<typeof ReversePortInputSchema>;
 export type ReversePortOutput = z.infer<typeof ReversePortOutputSchema>;
 export type ForwardPortInput = z.infer<typeof ForwardPortInputSchema>;

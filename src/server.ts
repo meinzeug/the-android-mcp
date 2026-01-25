@@ -113,6 +113,22 @@ import {
   WaitForPackageInputSchema,
   WaitForPackageOutputSchema,
   WaitForPackageToolSchema,
+  RunFlowPlanInputSchema,
+  RunFlowPlanOutputSchema,
+  RunFlowPlanToolSchema,
+  UiSelectorSchema,
+  QueryUiInputSchema,
+  QueryUiOutputSchema,
+  QueryUiToolSchema,
+  WaitForNodeCountInputSchema,
+  WaitForNodeCountOutputSchema,
+  WaitForNodeCountToolSchema,
+  TapBySelectorIndexInputSchema,
+  TapBySelectorIndexOutputSchema,
+  TapBySelectorIndexToolSchema,
+  UiDumpCachedInputSchema,
+  UiDumpCachedOutputSchema,
+  UiDumpCachedToolSchema,
   ReversePortInputSchema,
   ReversePortOutputSchema,
   ReversePortToolSchema,
@@ -166,6 +182,11 @@ import {
   waitForUiStable as adbWaitForUiStable,
   getScreenHash as adbGetScreenHash,
   waitForPackage as adbWaitForPackage,
+  runFlowPlan as adbRunFlowPlan,
+  queryUi as adbQueryUi,
+  waitForNodeCount as adbWaitForNodeCount,
+  tapBySelectorIndex as adbTapBySelectorIndex,
+  getCachedUiDump as adbGetCachedUiDump,
   uninstallApp as adbUninstallApp,
 } from './utils/adb.js';
 import { listPm2Apps, startPm2HotMode, stopPm2App } from './utils/pm2.js';
@@ -179,7 +200,7 @@ class AndroidMcpServer {
     this.server = new Server(
       {
         name: 'the-android-mcp',
-        version: '0.1.13',
+        version: '0.1.14',
       },
       {
         capabilities: {
@@ -368,6 +389,31 @@ class AndroidMcpServer {
           name: 'wait_for_package',
           description: 'Wait for a package to be in the foreground',
           inputSchema: WaitForPackageToolSchema,
+        },
+        {
+          name: 'run_flow_plan',
+          description: 'Execute a multi-step UI flow plan quickly',
+          inputSchema: RunFlowPlanToolSchema,
+        },
+        {
+          name: 'query_ui',
+          description: 'Query UI nodes by selector (text/id/desc)',
+          inputSchema: QueryUiToolSchema,
+        },
+        {
+          name: 'wait_for_node_count',
+          description: 'Wait for a selector to reach a match count',
+          inputSchema: WaitForNodeCountToolSchema,
+        },
+        {
+          name: 'tap_by_selector_index',
+          description: 'Tap a selector match by index',
+          inputSchema: TapBySelectorIndexToolSchema,
+        },
+        {
+          name: 'ui_dump_cached',
+          description: 'Return the last cached UI dump for a device',
+          inputSchema: UiDumpCachedToolSchema,
         },
         {
           name: 'reverse_android_port',
@@ -948,6 +994,71 @@ class AndroidMcpServer {
             };
           }
 
+          case 'run_flow_plan': {
+            const input = RunFlowPlanInputSchema.parse(args);
+            const result = await this.runFlowPlan(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'query_ui': {
+            const input = QueryUiInputSchema.parse(args);
+            const result = await this.queryUi(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'wait_for_node_count': {
+            const input = WaitForNodeCountInputSchema.parse(args);
+            const result = await this.waitForNodeCount(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'tap_by_selector_index': {
+            const input = TapBySelectorIndexInputSchema.parse(args);
+            const result = await this.tapBySelectorIndex(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'ui_dump_cached': {
+            const input = UiDumpCachedInputSchema.parse(args);
+            const result = await this.uiDumpCached(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
           case 'reverse_android_port': {
             const input = ReversePortInputSchema.parse(args);
             const result = await this.reversePort(input);
@@ -1417,6 +1528,55 @@ class AndroidMcpServer {
       intervalMs: input.intervalMs,
     });
     return WaitForPackageOutputSchema.parse(result);
+  }
+
+  private async runFlowPlan(
+    input: z.infer<typeof RunFlowPlanInputSchema>
+  ): Promise<z.infer<typeof RunFlowPlanOutputSchema>> {
+    const result = adbRunFlowPlan(input.steps, input.deviceId, {
+      stopOnFailure: input.stopOnFailure,
+    });
+    return RunFlowPlanOutputSchema.parse(result);
+  }
+
+  private async queryUi(
+    input: z.infer<typeof QueryUiInputSchema>
+  ): Promise<z.infer<typeof QueryUiOutputSchema>> {
+    const selector = UiSelectorSchema.parse(input.selector);
+    const result = adbQueryUi(selector, input.deviceId, { maxResults: input.maxResults });
+    return QueryUiOutputSchema.parse(result);
+  }
+
+  private async waitForNodeCount(
+    input: z.infer<typeof WaitForNodeCountInputSchema>
+  ): Promise<z.infer<typeof WaitForNodeCountOutputSchema>> {
+    const selector = UiSelectorSchema.parse(input.selector);
+    const result = adbWaitForNodeCount(
+      selector,
+      input.count,
+      input.comparator,
+      input.deviceId,
+      {
+        timeoutMs: input.timeoutMs,
+        intervalMs: input.intervalMs,
+      }
+    );
+    return WaitForNodeCountOutputSchema.parse(result);
+  }
+
+  private async tapBySelectorIndex(
+    input: z.infer<typeof TapBySelectorIndexInputSchema>
+  ): Promise<z.infer<typeof TapBySelectorIndexOutputSchema>> {
+    const selector = UiSelectorSchema.parse(input.selector);
+    const result = adbTapBySelectorIndex(selector, input.index ?? 0, input.deviceId);
+    return TapBySelectorIndexOutputSchema.parse(result);
+  }
+
+  private async uiDumpCached(
+    input: z.infer<typeof UiDumpCachedInputSchema>
+  ): Promise<z.infer<typeof UiDumpCachedOutputSchema>> {
+    const result = adbGetCachedUiDump(input.deviceId, { maxChars: input.maxChars });
+    return UiDumpCachedOutputSchema.parse(result);
   }
 
   private async reversePort(
