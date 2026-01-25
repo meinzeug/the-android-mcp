@@ -139,6 +139,121 @@ jest.mock('../../src/types', () => {
       deviceId: z.string().optional(),
       keyCode: z.union([z.string(), z.number()]),
     }),
+    BatchActionsInputSchema: z.object({
+      deviceId: z.string().optional(),
+      actions: z.array(z.any()),
+      timeoutMs: z.number().optional(),
+      captureBefore: z.boolean().optional(),
+      captureAfter: z.boolean().optional(),
+    }),
+    Pm2StartHotModeInputSchema: z.object({
+      projectRoot: z.string().optional(),
+      configPath: z.string().optional(),
+      appName: z.string().optional(),
+    }),
+    Pm2StopInputSchema: z.object({
+      appName: z.string(),
+    }),
+    Pm2ListInputSchema: z.object({}),
+    FastFlowInputSchema: z.object({
+      deviceId: z.string().optional(),
+      actions: z.array(z.any()),
+      timeoutMs: z.number().optional(),
+      captureBefore: z.boolean().optional(),
+      captureAfter: z.boolean().optional(),
+      postActionWaitMs: z.number().optional(),
+      includeUiDump: z.boolean().optional(),
+      uiDumpMaxChars: z.number().optional(),
+    }),
+    TapByTextInputSchema: z.object({
+      deviceId: z.string().optional(),
+      text: z.string(),
+      matchMode: z.string().optional(),
+      index: z.number().optional(),
+    }),
+    TapByIdInputSchema: z.object({
+      deviceId: z.string().optional(),
+      resourceId: z.string(),
+      index: z.number().optional(),
+    }),
+    TapByDescInputSchema: z.object({
+      deviceId: z.string().optional(),
+      contentDesc: z.string(),
+      matchMode: z.string().optional(),
+      index: z.number().optional(),
+    }),
+    WaitForTextInputSchema: z.object({
+      deviceId: z.string().optional(),
+      text: z.string(),
+      matchMode: z.string().optional(),
+      timeoutMs: z.number().optional(),
+      intervalMs: z.number().optional(),
+    }),
+    TypeByIdInputSchema: z.object({
+      deviceId: z.string().optional(),
+      resourceId: z.string(),
+      text: z.string(),
+      matchMode: z.string().optional(),
+      index: z.number().optional(),
+    }),
+    WaitForIdInputSchema: z.object({
+      deviceId: z.string().optional(),
+      resourceId: z.string(),
+      matchMode: z.string().optional(),
+      timeoutMs: z.number().optional(),
+      intervalMs: z.number().optional(),
+    }),
+    WaitForDescInputSchema: z.object({
+      deviceId: z.string().optional(),
+      contentDesc: z.string(),
+      matchMode: z.string().optional(),
+      timeoutMs: z.number().optional(),
+      intervalMs: z.number().optional(),
+    }),
+    WaitForActivityInputSchema: z.object({
+      deviceId: z.string().optional(),
+      activity: z.string(),
+      matchMode: z.string().optional(),
+      timeoutMs: z.number().optional(),
+      intervalMs: z.number().optional(),
+    }),
+    PressKeySequenceInputSchema: z.object({
+      deviceId: z.string().optional(),
+      keyCodes: z.array(z.any()),
+      intervalMs: z.number().optional(),
+      timeoutMs: z.number().optional(),
+    }),
+    TapRelativeInputSchema: z.object({
+      deviceId: z.string().optional(),
+      xPercent: z.number(),
+      yPercent: z.number(),
+    }),
+    SwipeRelativeInputSchema: z.object({
+      deviceId: z.string().optional(),
+      startXPercent: z.number(),
+      startYPercent: z.number(),
+      endXPercent: z.number(),
+      endYPercent: z.number(),
+      durationMs: z.number().optional(),
+    }),
+    TapCenterInputSchema: z.object({
+      deviceId: z.string().optional(),
+    }),
+    WaitForUiStableInputSchema: z.object({
+      deviceId: z.string().optional(),
+      stableIterations: z.number().optional(),
+      intervalMs: z.number().optional(),
+      timeoutMs: z.number().optional(),
+    }),
+    GetScreenHashInputSchema: z.object({
+      deviceId: z.string().optional(),
+    }),
+    WaitForPackageInputSchema: z.object({
+      deviceId: z.string().optional(),
+      packageName: z.string(),
+      timeoutMs: z.number().optional(),
+      intervalMs: z.number().optional(),
+    }),
     ReversePortInputSchema: z.object({
       deviceId: z.string().optional(),
       devicePort: z.number(),
@@ -178,6 +293,8 @@ jest.mock('../../src/types', () => {
       allowTestPackages: z.boolean().optional(),
       allowDowngrade: z.boolean().optional(),
       timeoutMs: z.number().optional(),
+      playProtectAction: z.string().optional(),
+      playProtectMaxWaitMs: z.number().optional(),
     }),
 
     // Tool output schemas
@@ -286,6 +403,154 @@ jest.mock('../../src/types', () => {
       keyCode: z.union([z.string(), z.number()]),
       output: z.string(),
     }),
+    BatchActionsOutputSchema: z.object({
+      deviceId: z.string(),
+      actions: z.array(z.any()),
+      output: z.string(),
+      screenshotBefore: z.any().optional(),
+      screenshotAfter: z.any().optional(),
+    }),
+    Pm2StartHotModeOutputSchema: z.object({
+      configPath: z.string(),
+      appName: z.string().optional(),
+      output: z.string(),
+    }),
+    Pm2StopOutputSchema: z.object({
+      appName: z.string(),
+      output: z.string(),
+    }),
+    Pm2ListOutputSchema: z.object({
+      processes: z.array(z.any()),
+      output: z.string(),
+    }),
+    FastFlowOutputSchema: z.object({
+      deviceId: z.string(),
+      actions: z.array(z.any()),
+      output: z.string(),
+      screenshotBefore: z.any().optional(),
+      screenshotAfter: z.any().optional(),
+      uiDump: z.any().optional(),
+    }),
+    TapByTextOutputSchema: z.object({
+      deviceId: z.string(),
+      text: z.string(),
+      matchMode: z.string(),
+      index: z.number(),
+      found: z.boolean(),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      output: z.string().optional(),
+    }),
+    TapByIdOutputSchema: z.object({
+      deviceId: z.string(),
+      resourceId: z.string(),
+      index: z.number(),
+      found: z.boolean(),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      output: z.string().optional(),
+    }),
+    TapByDescOutputSchema: z.object({
+      deviceId: z.string(),
+      contentDesc: z.string(),
+      matchMode: z.string(),
+      index: z.number(),
+      found: z.boolean(),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      output: z.string().optional(),
+    }),
+    WaitForTextOutputSchema: z.object({
+      deviceId: z.string(),
+      text: z.string(),
+      matchMode: z.string(),
+      found: z.boolean(),
+      elapsedMs: z.number(),
+      matchCount: z.number(),
+    }),
+    TypeByIdOutputSchema: z.object({
+      deviceId: z.string(),
+      resourceId: z.string(),
+      text: z.string(),
+      matchMode: z.string(),
+      index: z.number(),
+      found: z.boolean(),
+      output: z.string().optional(),
+    }),
+    WaitForIdOutputSchema: z.object({
+      deviceId: z.string(),
+      resourceId: z.string(),
+      matchMode: z.string(),
+      found: z.boolean(),
+      elapsedMs: z.number(),
+      matchCount: z.number(),
+    }),
+    WaitForDescOutputSchema: z.object({
+      deviceId: z.string(),
+      contentDesc: z.string(),
+      matchMode: z.string(),
+      found: z.boolean(),
+      elapsedMs: z.number(),
+      matchCount: z.number(),
+    }),
+    WaitForActivityOutputSchema: z.object({
+      deviceId: z.string(),
+      activity: z.string(),
+      matchMode: z.string(),
+      found: z.boolean(),
+      elapsedMs: z.number(),
+      current: z.string().optional(),
+    }),
+    PressKeySequenceOutputSchema: z.object({
+      deviceId: z.string(),
+      keyCodes: z.array(z.any()),
+      output: z.string(),
+    }),
+    TapRelativeOutputSchema: z.object({
+      deviceId: z.string(),
+      xPercent: z.number(),
+      yPercent: z.number(),
+      x: z.number(),
+      y: z.number(),
+      output: z.string(),
+    }),
+    SwipeRelativeOutputSchema: z.object({
+      deviceId: z.string(),
+      startXPercent: z.number(),
+      startYPercent: z.number(),
+      endXPercent: z.number(),
+      endYPercent: z.number(),
+      startX: z.number(),
+      startY: z.number(),
+      endX: z.number(),
+      endY: z.number(),
+      durationMs: z.number().optional(),
+      output: z.string(),
+    }),
+    TapCenterOutputSchema: z.object({
+      deviceId: z.string(),
+      x: z.number(),
+      y: z.number(),
+      output: z.string(),
+    }),
+    WaitForUiStableOutputSchema: z.object({
+      deviceId: z.string(),
+      stable: z.boolean(),
+      elapsedMs: z.number(),
+      hash: z.string().optional(),
+    }),
+    GetScreenHashOutputSchema: z.object({
+      deviceId: z.string(),
+      hash: z.string(),
+      length: z.number(),
+    }),
+    WaitForPackageOutputSchema: z.object({
+      deviceId: z.string(),
+      packageName: z.string(),
+      found: z.boolean(),
+      elapsedMs: z.number(),
+      current: z.string().optional(),
+    }),
     ReversePortOutputSchema: z.object({
       deviceId: z.string(),
       devicePort: z.number(),
@@ -317,6 +582,7 @@ jest.mock('../../src/types', () => {
       install: z.any().optional(),
       stop: z.any().optional(),
       start: z.any().optional(),
+      playProtect: z.any().optional(),
     }),
 
     // MCP Tool schemas
@@ -460,6 +726,201 @@ jest.mock('../../src/types', () => {
       },
       required: ['keyCode'],
     },
+    BatchActionsToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        actions: { type: 'array' },
+        timeoutMs: { type: 'number' },
+        captureBefore: { type: 'boolean' },
+        captureAfter: { type: 'boolean' },
+      },
+      required: ['actions'],
+    },
+    Pm2StartHotModeToolSchema: {
+      type: 'object',
+      properties: {
+        projectRoot: { type: 'string' },
+        configPath: { type: 'string' },
+        appName: { type: 'string' },
+      },
+      required: [],
+    },
+    Pm2StopToolSchema: {
+      type: 'object',
+      properties: {
+        appName: { type: 'string' },
+      },
+      required: ['appName'],
+    },
+    Pm2ListToolSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+    FastFlowToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        actions: { type: 'array' },
+        timeoutMs: { type: 'number' },
+        captureBefore: { type: 'boolean' },
+        captureAfter: { type: 'boolean' },
+        postActionWaitMs: { type: 'number' },
+        includeUiDump: { type: 'boolean' },
+        uiDumpMaxChars: { type: 'number' },
+      },
+      required: ['actions'],
+    },
+    TapByTextToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        text: { type: 'string' },
+        matchMode: { type: 'string' },
+        index: { type: 'number' },
+      },
+      required: ['text'],
+    },
+    TapByIdToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        resourceId: { type: 'string' },
+        index: { type: 'number' },
+      },
+      required: ['resourceId'],
+    },
+    TapByDescToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        contentDesc: { type: 'string' },
+        matchMode: { type: 'string' },
+        index: { type: 'number' },
+      },
+      required: ['contentDesc'],
+    },
+    WaitForTextToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        text: { type: 'string' },
+        matchMode: { type: 'string' },
+        timeoutMs: { type: 'number' },
+        intervalMs: { type: 'number' },
+      },
+      required: ['text'],
+    },
+    TypeByIdToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        resourceId: { type: 'string' },
+        text: { type: 'string' },
+        matchMode: { type: 'string' },
+        index: { type: 'number' },
+      },
+      required: ['resourceId', 'text'],
+    },
+    WaitForIdToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        resourceId: { type: 'string' },
+        matchMode: { type: 'string' },
+        timeoutMs: { type: 'number' },
+        intervalMs: { type: 'number' },
+      },
+      required: ['resourceId'],
+    },
+    WaitForDescToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        contentDesc: { type: 'string' },
+        matchMode: { type: 'string' },
+        timeoutMs: { type: 'number' },
+        intervalMs: { type: 'number' },
+      },
+      required: ['contentDesc'],
+    },
+    WaitForActivityToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        activity: { type: 'string' },
+        matchMode: { type: 'string' },
+        timeoutMs: { type: 'number' },
+        intervalMs: { type: 'number' },
+      },
+      required: ['activity'],
+    },
+    PressKeySequenceToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        keyCodes: { type: 'array' },
+        intervalMs: { type: 'number' },
+        timeoutMs: { type: 'number' },
+      },
+      required: ['keyCodes'],
+    },
+    TapRelativeToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        xPercent: { type: 'number' },
+        yPercent: { type: 'number' },
+      },
+      required: ['xPercent', 'yPercent'],
+    },
+    SwipeRelativeToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        startXPercent: { type: 'number' },
+        startYPercent: { type: 'number' },
+        endXPercent: { type: 'number' },
+        endYPercent: { type: 'number' },
+        durationMs: { type: 'number' },
+      },
+      required: ['startXPercent', 'startYPercent', 'endXPercent', 'endYPercent'],
+    },
+    TapCenterToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+      },
+      required: [],
+    },
+    WaitForUiStableToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        stableIterations: { type: 'number' },
+        intervalMs: { type: 'number' },
+        timeoutMs: { type: 'number' },
+      },
+      required: [],
+    },
+    GetScreenHashToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+      },
+      required: [],
+    },
+    WaitForPackageToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        packageName: { type: 'string' },
+        timeoutMs: { type: 'number' },
+        intervalMs: { type: 'number' },
+      },
+      required: ['packageName'],
+    },
     ReversePortToolSchema: {
       type: 'object',
       properties: {
@@ -517,6 +978,8 @@ jest.mock('../../src/types', () => {
         allowTestPackages: { type: 'boolean' },
         allowDowngrade: { type: 'boolean' },
         timeoutMs: { type: 'number' },
+        playProtectAction: { type: 'string' },
+        playProtectMaxWaitMs: { type: 'number' },
       },
       required: ['packageName'],
     },
@@ -552,6 +1015,46 @@ jest.mock('../../src/types', () => {
     InputTextOutput: {},
     KeyeventInput: {},
     KeyeventOutput: {},
+    BatchActionsInput: {},
+    BatchActionsOutput: {},
+    Pm2StartHotModeInput: {},
+    Pm2StartHotModeOutput: {},
+    Pm2StopInput: {},
+    Pm2StopOutput: {},
+    Pm2ListInput: {},
+    Pm2ListOutput: {},
+    FastFlowInput: {},
+    FastFlowOutput: {},
+    TapByTextInput: {},
+    TapByTextOutput: {},
+    TapByIdInput: {},
+    TapByIdOutput: {},
+    TapByDescInput: {},
+    TapByDescOutput: {},
+    WaitForTextInput: {},
+    WaitForTextOutput: {},
+    TypeByIdInput: {},
+    TypeByIdOutput: {},
+    WaitForIdInput: {},
+    WaitForIdOutput: {},
+    WaitForDescInput: {},
+    WaitForDescOutput: {},
+    WaitForActivityInput: {},
+    WaitForActivityOutput: {},
+    PressKeySequenceInput: {},
+    PressKeySequenceOutput: {},
+    TapRelativeInput: {},
+    TapRelativeOutput: {},
+    SwipeRelativeInput: {},
+    SwipeRelativeOutput: {},
+    TapCenterInput: {},
+    TapCenterOutput: {},
+    WaitForUiStableInput: {},
+    WaitForUiStableOutput: {},
+    GetScreenHashInput: {},
+    GetScreenHashOutput: {},
+    WaitForPackageInput: {},
+    WaitForPackageOutput: {},
     ReversePortInput: {},
     ReversePortOutput: {},
     ForwardPortInput: {},
@@ -605,6 +1108,26 @@ describe('MCP Server Integration Tests', () => {
         expect(toolNames).toContain('list_android_devices');
         expect(toolNames).toContain('install_android_apk');
         expect(toolNames).toContain('tap_android_screen');
+        expect(toolNames).toContain('batch_android_actions');
+        expect(toolNames).toContain('pm2_start_hot_mode');
+        expect(toolNames).toContain('pm2_stop_app');
+        expect(toolNames).toContain('pm2_list');
+        expect(toolNames).toContain('fast_flow');
+        expect(toolNames).toContain('tap_by_text');
+        expect(toolNames).toContain('tap_by_id');
+        expect(toolNames).toContain('tap_by_desc');
+        expect(toolNames).toContain('wait_for_text');
+        expect(toolNames).toContain('type_by_id');
+        expect(toolNames).toContain('wait_for_id');
+        expect(toolNames).toContain('wait_for_desc');
+        expect(toolNames).toContain('wait_for_activity');
+        expect(toolNames).toContain('press_key_sequence');
+        expect(toolNames).toContain('tap_relative');
+        expect(toolNames).toContain('swipe_relative');
+        expect(toolNames).toContain('tap_center');
+        expect(toolNames).toContain('wait_for_ui_stable');
+        expect(toolNames).toContain('get_screen_hash');
+        expect(toolNames).toContain('wait_for_package');
         expect(toolNames).toContain('get_android_current_activity');
         expect(toolNames).toContain('get_android_window_size');
         expect(toolNames).toContain('dump_android_ui_hierarchy');

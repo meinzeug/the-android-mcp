@@ -53,6 +53,13 @@ Based on the original project: [infiniV/Android-Ui-MCP](https://github.com/infin
 
 This MCP server works with AI agents that support the Model Context Protocol. Configure your preferred agent to enable real-time Android UI analysis:
 
+Have fun exploring this tool!
+
+We’re actively developing in the background right now — as you’re reading this.
+A lot of work is happening at this very moment, and even more powerful tools are already in development.
+
+This project is evolving fast, and there’s much more to come. 🚧
+
 ### Claude Code
 ```bash
 # CLI Installation
@@ -329,11 +336,31 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `swipe_android_screen`    | Sends a swipe gesture                     | `startX`, `startY`, `endX`, `endY`, `durationMs` (optional), `deviceId`    |
 | `input_android_text`      | Types text into focused input             | `text`, `deviceId` (optional)                                              |
 | `send_android_keyevent`   | Sends an Android keyevent                 | `keyCode`, `deviceId` (optional)                                           |
+| `batch_android_actions`   | Runs multiple input actions in one call   | `actions`, `deviceId` (optional), `captureBefore`/`captureAfter` (optional), `timeoutMs` |
+| `pm2_start_hot_mode`      | Start hot mode build via PM2              | `projectRoot`/`configPath` (optional), `appName` (optional)                |
+| `pm2_stop_app`            | Stop a PM2 app by name                     | `appName`                                                                  |
+| `pm2_list`                | List PM2 apps                              | None                                                                       |
+| `fast_flow`               | Run fast UI flow (batch + optional dumps)  | `actions`, `captureBefore`/`captureAfter`, `includeUiDump` (optional)      |
+| `tap_by_text`             | Tap UI node by visible text               | `text`, `matchMode` (optional), `index` (optional), `deviceId` (optional)  |
+| `tap_by_id`               | Tap UI node by resource-id                | `resourceId`, `index` (optional), `deviceId` (optional)                    |
+| `tap_by_desc`             | Tap UI node by content-desc               | `contentDesc`, `matchMode` (optional), `index` (optional), `deviceId` (optional) |
+| `wait_for_text`           | Wait for text via UI dump polling         | `text`, `matchMode` (optional), `timeoutMs`/`intervalMs` (optional)        |
+| `type_by_id`              | Tap a field by id and type text           | `resourceId`, `text`, `matchMode`/`index` (optional), `deviceId` (optional)|
+| `wait_for_id`             | Wait for resource-id via UI dump polling  | `resourceId`, `matchMode` (optional), `timeoutMs`/`intervalMs` (optional)  |
+| `wait_for_desc`           | Wait for content-desc via UI dump polling | `contentDesc`, `matchMode` (optional), `timeoutMs`/`intervalMs` (optional) |
+| `wait_for_activity`       | Wait for current activity/component       | `activity`, `matchMode` (optional), `timeoutMs`/`intervalMs` (optional)    |
+| `press_key_sequence`      | Press multiple keyevents in sequence      | `keyCodes`, `intervalMs` (optional), `deviceId` (optional)                 |
+| `tap_relative`            | Tap using percentage coordinates          | `xPercent`, `yPercent`, `deviceId` (optional)                              |
+| `swipe_relative`          | Swipe using percentage coordinates        | `startXPercent`, `startYPercent`, `endXPercent`, `endYPercent`, `durationMs`|
+| `tap_center`              | Tap the center of the screen              | `deviceId` (optional)                                                      |
+| `wait_for_ui_stable`      | Wait for UI dump to stabilize             | `stableIterations`, `intervalMs`, `timeoutMs` (optional)                   |
+| `get_screen_hash`         | Get UI hash from current dump             | `deviceId` (optional)                                                      |
+| `wait_for_package`        | Wait for package in foreground            | `packageName`, `timeoutMs`/`intervalMs` (optional)                         |
 | `reverse_android_port`    | Reverse TCP port (device → host)          | `devicePort`, `hostPort` (optional), `deviceId` (optional)                 |
 | `forward_android_port`    | Forward TCP port (host → device)          | `devicePort`, `hostPort`, `deviceId` (optional)                            |
 | `get_android_logcat`      | Fetch recent logcat output                | `lines` (optional), filters, `deviceId` (optional)                         |
 | `list_android_activities` | List activities for a package             | `packageName`, `deviceId` (optional)                                       |
-| `hot_reload_android_app`  | Reverse ports + install/start for hot dev | `packageName`, `reversePorts`, install/start options, `deviceId` (optional)|
+| `hot_reload_android_app`  | Reverse ports + install/start for hot dev | `packageName`, `reversePorts`, install/start options, Play Protect handling, `deviceId` (optional)|
 
 ### Tool Schemas (selected)
 
@@ -436,6 +463,14 @@ Full schemas are exported via the MCP server and live in `src/types.ts`.
       "timeoutMs": {
         "type": "number",
         "description": "Optional timeout in milliseconds for install"
+      },
+      "playProtectAction": {
+        "type": "string",
+        "description": "How to handle Google Play Protect prompts (send_once, always, never)"
+      },
+      "playProtectMaxWaitMs": {
+        "type": "number",
+        "description": "Max time to wait for Play Protect prompt handling (milliseconds)"
       }
     }
   }
@@ -894,6 +929,74 @@ Full schemas are exported via the MCP server and live in `src/types.ts`.
 }
 ```
 
+**pm2_start_hot_mode**
+
+```json
+{
+  "name": "pm2_start_hot_mode",
+  "description": "Start the Android hot mode build in the background via PM2",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "projectRoot": {
+        "type": "string",
+        "description": "Optional project root to resolve config paths"
+      },
+      "configPath": {
+        "type": "string",
+        "description": "Optional PM2 config path (defaults to android_hot_mode.config.json)"
+      },
+      "appName": {
+        "type": "string",
+        "description": "Optional PM2 app name to start (filters config)"
+      }
+    }
+  }
+}
+```
+
+**fast_flow**
+
+```json
+{
+  "name": "fast_flow",
+  "description": "Run a fast UI flow with optional screenshots and UI dump",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "deviceId": {
+        "type": "string",
+        "description": "Optional device ID"
+      },
+      "actions": {
+        "type": "array",
+        "description": "Ordered list of actions to run"
+      },
+      "captureBefore": {
+        "type": "boolean",
+        "description": "Capture a screenshot before running the actions"
+      },
+      "captureAfter": {
+        "type": "boolean",
+        "description": "Capture a screenshot after running the actions"
+      },
+      "postActionWaitMs": {
+        "type": "number",
+        "description": "Optional wait after actions before capture/dump (milliseconds)"
+      },
+      "includeUiDump": {
+        "type": "boolean",
+        "description": "Include a UI hierarchy dump after the actions"
+      },
+      "uiDumpMaxChars": {
+        "type": "number",
+        "description": "Optional maximum number of characters to return from the UI dump"
+      }
+    }
+  }
+}
+```
+
 ## Usage Examples
 
 _Example: AI agent listing devices, capturing screenshots, and providing detailed UI analysis in real-time_
@@ -930,6 +1033,7 @@ With your development environment running (Expo, React Native, Flutter, etc.), i
 - "Find the latest APK in this repo and install it"
 - "Start com.example.app and open the main activity"
 - "Tap the login button at (540, 1620) and type my test credentials"
+- "Run a batch: tap email, type, tap password, type, tap login (one call)"
 - "Reverse port 8081 for hot reload, then relaunch the app"
 - "Get the last 200 logcat lines for com.example.app"
 

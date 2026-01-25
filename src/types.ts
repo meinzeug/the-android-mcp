@@ -278,6 +278,73 @@ export const KeyeventInputSchema = z.object({
     .describe('Android keycode (e.g., 3 for HOME, 4 for BACK, KEYCODE_ENTER).'),
 });
 
+const BatchActionTapSchema = z.object({
+  type: z.literal('tap'),
+  x: z.number().int().min(0).describe('Tap X coordinate in pixels.'),
+  y: z.number().int().min(0).describe('Tap Y coordinate in pixels.'),
+});
+
+const BatchActionSwipeSchema = z.object({
+  type: z.literal('swipe'),
+  startX: z.number().int().min(0).describe('Start X coordinate in pixels.'),
+  startY: z.number().int().min(0).describe('Start Y coordinate in pixels.'),
+  endX: z.number().int().min(0).describe('End X coordinate in pixels.'),
+  endY: z.number().int().min(0).describe('End Y coordinate in pixels.'),
+  durationMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Optional swipe duration in milliseconds.'),
+});
+
+const BatchActionTextSchema = z.object({
+  type: z.literal('text'),
+  text: z.string().min(1).describe('Text to input into the focused field.'),
+});
+
+const BatchActionKeyeventSchema = z.object({
+  type: z.literal('keyevent'),
+  keyCode: z
+    .union([z.string(), z.number().int()])
+    .describe('Android keycode (e.g., 3 for HOME, 4 for BACK, KEYCODE_ENTER).'),
+});
+
+const BatchActionSleepSchema = z.object({
+  type: z.literal('sleep'),
+  durationMs: z.number().int().min(0).describe('Sleep duration in milliseconds.'),
+});
+
+export const BatchActionSchema = z.discriminatedUnion('type', [
+  BatchActionTapSchema,
+  BatchActionSwipeSchema,
+  BatchActionTextSchema,
+  BatchActionKeyeventSchema,
+  BatchActionSleepSchema,
+]);
+
+export const BatchActionsInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  actions: z.array(BatchActionSchema).min(1).describe('Ordered list of actions to run.'),
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Optional timeout in milliseconds for the batch command.'),
+  captureBefore: z
+    .boolean()
+    .default(false)
+    .describe('Capture a screenshot before running the batch actions.'),
+  captureAfter: z
+    .boolean()
+    .default(false)
+    .describe('Capture a screenshot after running the batch actions.'),
+});
+
 export const ReversePortInputSchema = z.object({
   deviceId: z
     .string()
@@ -387,6 +454,18 @@ export const HotReloadSetupInputSchema = z.object({
     .positive()
     .optional()
     .describe('Optional timeout in milliseconds for install.'),
+  playProtectAction: z
+    .enum(['send_once', 'always', 'never'])
+    .default('send_once')
+    .describe(
+      'How to handle Google Play Protect prompts after install/start (send_once, always, never).'
+    ),
+  playProtectMaxWaitMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Max time to wait for Play Protect prompt handling (milliseconds).'),
 });
 
 // Tool output schemas
@@ -539,6 +618,384 @@ export const KeyeventOutputSchema = z.object({
   output: z.string().describe('Raw ADB output'),
 });
 
+export const BatchActionsOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  actions: z.array(BatchActionSchema).describe('Actions that were executed'),
+  output: z.string().describe('Raw ADB output'),
+  screenshotBefore: TakeScreenshotOutputSchema.optional().describe('Screenshot before actions'),
+  screenshotAfter: TakeScreenshotOutputSchema.optional().describe('Screenshot after actions'),
+});
+
+export const Pm2StartHotModeInputSchema = z.object({
+  projectRoot: z
+    .string()
+    .optional()
+    .describe('Optional project root to resolve config paths.'),
+  configPath: z
+    .string()
+    .optional()
+    .describe('Optional PM2 config path (defaults to android_hot_mode.config.json).'),
+  appName: z.string().optional().describe('Optional PM2 app name to start (filters config).'),
+});
+
+export const Pm2StartHotModeOutputSchema = z.object({
+  configPath: z.string().describe('Resolved config path used for PM2 start'),
+  appName: z.string().optional().describe('App name if filtered'),
+  output: z.string().describe('Raw PM2 output'),
+});
+
+export const Pm2StopInputSchema = z.object({
+  appName: z.string().min(1).describe('PM2 app name to stop.'),
+});
+
+export const Pm2StopOutputSchema = z.object({
+  appName: z.string().describe('PM2 app name'),
+  output: z.string().describe('Raw PM2 output'),
+});
+
+export const Pm2ListInputSchema = z.object({});
+
+export const Pm2ListOutputSchema = z.object({
+  processes: z.array(z.any()).describe('PM2 process list'),
+  output: z.string().describe('Raw PM2 output'),
+});
+
+export const FastFlowInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  actions: z.array(BatchActionSchema).min(1).describe('Ordered list of actions to run.'),
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Optional timeout in milliseconds for the batch command.'),
+  captureBefore: z
+    .boolean()
+    .default(false)
+    .describe('Capture a screenshot before running the actions.'),
+  captureAfter: z
+    .boolean()
+    .default(false)
+    .describe('Capture a screenshot after running the actions.'),
+  postActionWaitMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Optional wait after actions before capture/dump (milliseconds).'),
+  includeUiDump: z
+    .boolean()
+    .default(false)
+    .describe('Include a UI hierarchy dump after the actions.'),
+  uiDumpMaxChars: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Optional maximum number of characters to return from the UI dump.'),
+});
+
+export const FastFlowOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  actions: z.array(BatchActionSchema).describe('Actions that were executed'),
+  output: z.string().describe('Raw ADB output'),
+  screenshotBefore: TakeScreenshotOutputSchema.optional().describe('Screenshot before actions'),
+  screenshotAfter: TakeScreenshotOutputSchema.optional().describe('Screenshot after actions'),
+  uiDump: DumpUiOutputSchema.optional().describe('UI hierarchy dump after actions'),
+});
+
+export const TapByTextInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  text: z.string().min(1).describe('Text to match.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
+  index: z.number().int().min(0).default(0).describe('Match index (0-based).'),
+});
+
+export const TapByTextOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  text: z.string().describe('Matched text'),
+  matchMode: z.string().describe('Match mode used'),
+  index: z.number().describe('Match index used'),
+  found: z.boolean().describe('Whether a match was found'),
+  x: z.number().optional().describe('Tap X coordinate'),
+  y: z.number().optional().describe('Tap Y coordinate'),
+  output: z.string().optional().describe('Raw ADB output'),
+});
+
+export const TapByIdInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  resourceId: z.string().min(1).describe('Resource-id to match.'),
+  index: z.number().int().min(0).default(0).describe('Match index (0-based).'),
+});
+
+export const TapByIdOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  resourceId: z.string().describe('Matched resource-id'),
+  index: z.number().describe('Match index used'),
+  found: z.boolean().describe('Whether a match was found'),
+  x: z.number().optional().describe('Tap X coordinate'),
+  y: z.number().optional().describe('Tap Y coordinate'),
+  output: z.string().optional().describe('Raw ADB output'),
+});
+
+export const TapByDescInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  contentDesc: z.string().min(1).describe('Content-desc to match.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
+  index: z.number().int().min(0).default(0).describe('Match index (0-based).'),
+});
+
+export const TapByDescOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  contentDesc: z.string().describe('Matched content-desc'),
+  matchMode: z.string().describe('Match mode used'),
+  index: z.number().describe('Match index used'),
+  found: z.boolean().describe('Whether a match was found'),
+  x: z.number().optional().describe('Tap X coordinate'),
+  y: z.number().optional().describe('Tap Y coordinate'),
+  output: z.string().optional().describe('Raw ADB output'),
+});
+
+export const WaitForTextInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  text: z.string().min(1).describe('Text to wait for.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
+  timeoutMs: z.number().int().positive().optional().describe('Max wait time in milliseconds.'),
+  intervalMs: z.number().int().positive().optional().describe('Polling interval in milliseconds.'),
+});
+
+export const WaitForTextOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  text: z.string().describe('Target text'),
+  matchMode: z.string().describe('Match mode used'),
+  found: z.boolean().describe('Whether the text was found'),
+  elapsedMs: z.number().describe('Elapsed time in milliseconds'),
+  matchCount: z.number().describe('Number of matches found'),
+});
+
+export const TypeByIdInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  resourceId: z.string().min(1).describe('Resource-id to match.'),
+  text: z.string().min(1).describe('Text to input into the matched field.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
+  index: z.number().int().min(0).default(0).describe('Match index (0-based).'),
+});
+
+export const TypeByIdOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  resourceId: z.string().describe('Matched resource-id'),
+  text: z.string().describe('Text input'),
+  matchMode: z.string().describe('Match mode used'),
+  index: z.number().describe('Match index used'),
+  found: z.boolean().describe('Whether a match was found'),
+  output: z.string().optional().describe('Raw ADB output'),
+});
+
+export const WaitForIdInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  resourceId: z.string().min(1).describe('Resource-id to wait for.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
+  timeoutMs: z.number().int().positive().optional().describe('Max wait time in milliseconds.'),
+  intervalMs: z.number().int().positive().optional().describe('Polling interval in milliseconds.'),
+});
+
+export const WaitForIdOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  resourceId: z.string().describe('Target resource-id'),
+  matchMode: z.string().describe('Match mode used'),
+  found: z.boolean().describe('Whether the id was found'),
+  elapsedMs: z.number().describe('Elapsed time in milliseconds'),
+  matchCount: z.number().describe('Number of matches found'),
+});
+
+export const WaitForDescInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  contentDesc: z.string().min(1).describe('Content-desc to wait for.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
+  timeoutMs: z.number().int().positive().optional().describe('Max wait time in milliseconds.'),
+  intervalMs: z.number().int().positive().optional().describe('Polling interval in milliseconds.'),
+});
+
+export const WaitForDescOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  contentDesc: z.string().describe('Target content-desc'),
+  matchMode: z.string().describe('Match mode used'),
+  found: z.boolean().describe('Whether the desc was found'),
+  elapsedMs: z.number().describe('Elapsed time in milliseconds'),
+  matchCount: z.number().describe('Number of matches found'),
+});
+
+export const WaitForActivityInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  activity: z.string().min(1).describe('Activity/component to wait for.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('contains').describe('Match mode.'),
+  timeoutMs: z.number().int().positive().optional().describe('Max wait time in milliseconds.'),
+  intervalMs: z.number().int().positive().optional().describe('Polling interval in milliseconds.'),
+});
+
+export const WaitForActivityOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  activity: z.string().describe('Target activity/component'),
+  matchMode: z.string().describe('Match mode used'),
+  found: z.boolean().describe('Whether the activity was found'),
+  elapsedMs: z.number().describe('Elapsed time in milliseconds'),
+  current: z.string().optional().describe('Last observed activity/component'),
+});
+
+export const PressKeySequenceInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  keyCodes: z.array(z.union([z.string(), z.number()])).min(1).describe('Keycodes to press.'),
+  intervalMs: z.number().int().min(0).optional().describe('Delay between key presses.'),
+  timeoutMs: z.number().int().positive().optional().describe('Optional timeout in milliseconds.'),
+});
+
+export const PressKeySequenceOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  keyCodes: z.array(z.union([z.string(), z.number()])).describe('Keycodes pressed'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const TapRelativeInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  xPercent: z.number().min(0).max(100).describe('X coordinate percentage (0-100).'),
+  yPercent: z.number().min(0).max(100).describe('Y coordinate percentage (0-100).'),
+});
+
+export const TapRelativeOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  xPercent: z.number().describe('X percentage'),
+  yPercent: z.number().describe('Y percentage'),
+  x: z.number().describe('Resolved X coordinate'),
+  y: z.number().describe('Resolved Y coordinate'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const SwipeRelativeInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  startXPercent: z.number().min(0).max(100).describe('Start X percentage (0-100).'),
+  startYPercent: z.number().min(0).max(100).describe('Start Y percentage (0-100).'),
+  endXPercent: z.number().min(0).max(100).describe('End X percentage (0-100).'),
+  endYPercent: z.number().min(0).max(100).describe('End Y percentage (0-100).'),
+  durationMs: z.number().int().min(0).optional().describe('Optional swipe duration in ms.'),
+});
+
+export const SwipeRelativeOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  startXPercent: z.number().describe('Start X percentage'),
+  startYPercent: z.number().describe('Start Y percentage'),
+  endXPercent: z.number().describe('End X percentage'),
+  endYPercent: z.number().describe('End Y percentage'),
+  startX: z.number().describe('Resolved start X coordinate'),
+  startY: z.number().describe('Resolved start Y coordinate'),
+  endX: z.number().describe('Resolved end X coordinate'),
+  endY: z.number().describe('Resolved end Y coordinate'),
+  durationMs: z.number().optional().describe('Swipe duration in ms'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const TapCenterInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+});
+
+export const TapCenterOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  x: z.number().describe('Resolved X coordinate'),
+  y: z.number().describe('Resolved Y coordinate'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const WaitForUiStableInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  stableIterations: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe('Number of consecutive stable dumps required.'),
+  intervalMs: z.number().int().min(0).optional().describe('Polling interval in ms.'),
+  timeoutMs: z.number().int().positive().optional().describe('Max wait time in ms.'),
+});
+
+export const WaitForUiStableOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  stable: z.boolean().describe('Whether UI became stable'),
+  elapsedMs: z.number().describe('Elapsed time in ms'),
+  hash: z.string().optional().describe('Last observed UI hash'),
+});
+
+export const GetScreenHashInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+});
+
+export const GetScreenHashOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  hash: z.string().describe('UI hash'),
+  length: z.number().describe('UI dump length'),
+});
+
+export const WaitForPackageInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z.string().min(1).describe('Package name to wait for.'),
+  timeoutMs: z.number().int().positive().optional().describe('Max wait time in ms.'),
+  intervalMs: z.number().int().positive().optional().describe('Polling interval in ms.'),
+});
+
+export const WaitForPackageOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  packageName: z.string().describe('Package name'),
+  found: z.boolean().describe('Whether package is in foreground'),
+  elapsedMs: z.number().describe('Elapsed time in ms'),
+  current: z.string().optional().describe('Last observed package/activity'),
+});
+
 export const ReversePortOutputSchema = z.object({
   deviceId: z.string().describe('Target device ID'),
   devicePort: z.number().describe('Device port (tcp)'),
@@ -582,6 +1039,13 @@ export const HotReloadSetupOutputSchema = z.object({
   install: InstallApkOutputSchema.optional().describe('APK install result (if performed)'),
   stop: StopAppOutputSchema.optional().describe('Stop result (if performed)'),
   start: StartAppOutputSchema.optional().describe('Start result (if performed)'),
+  playProtect: z
+    .object({
+      handled: z.boolean().describe('Whether a Play Protect prompt was handled'),
+      action: z.string().optional().describe('Action that was taken (if handled)'),
+    })
+    .optional()
+    .describe('Play Protect prompt handling result (if attempted)'),
 });
 
 // MCP Tool schemas
@@ -855,6 +1319,471 @@ export const KeyeventToolSchema = {
   required: ['keyCode'] as string[],
 };
 
+export const BatchActionsToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    actions: {
+      type: 'array' as const,
+      description: 'Ordered list of actions to run.',
+      items: {
+        oneOf: [
+          {
+            type: 'object' as const,
+            properties: {
+              type: { type: 'string' as const, enum: ['tap'] },
+              x: { type: 'number' as const },
+              y: { type: 'number' as const },
+            },
+            required: ['type', 'x', 'y'] as string[],
+          },
+          {
+            type: 'object' as const,
+            properties: {
+              type: { type: 'string' as const, enum: ['swipe'] },
+              startX: { type: 'number' as const },
+              startY: { type: 'number' as const },
+              endX: { type: 'number' as const },
+              endY: { type: 'number' as const },
+              durationMs: { type: 'number' as const },
+            },
+            required: ['type', 'startX', 'startY', 'endX', 'endY'] as string[],
+          },
+          {
+            type: 'object' as const,
+            properties: {
+              type: { type: 'string' as const, enum: ['text'] },
+              text: { type: 'string' as const },
+            },
+            required: ['type', 'text'] as string[],
+          },
+          {
+            type: 'object' as const,
+            properties: {
+              type: { type: 'string' as const, enum: ['keyevent'] },
+              keyCode: { type: 'string' as const },
+            },
+            required: ['type', 'keyCode'] as string[],
+          },
+          {
+            type: 'object' as const,
+            properties: {
+              type: { type: 'string' as const, enum: ['sleep'] },
+              durationMs: { type: 'number' as const },
+            },
+            required: ['type', 'durationMs'] as string[],
+          },
+        ],
+      },
+    },
+    timeoutMs: {
+      type: 'number' as const,
+      description: 'Optional timeout in milliseconds for the batch command.',
+    },
+    captureBefore: {
+      type: 'boolean' as const,
+      description: 'Capture a screenshot before running the batch actions.',
+      default: false,
+    },
+    captureAfter: {
+      type: 'boolean' as const,
+      description: 'Capture a screenshot after running the batch actions.',
+      default: false,
+    },
+  },
+  required: ['actions'] as string[],
+};
+
+export const Pm2StartHotModeToolSchema = {
+  type: 'object' as const,
+  properties: {
+    projectRoot: {
+      type: 'string' as const,
+      description: 'Optional project root to resolve config paths.',
+    },
+    configPath: {
+      type: 'string' as const,
+      description: 'Optional PM2 config path (defaults to android_hot_mode.config.json).',
+    },
+    appName: {
+      type: 'string' as const,
+      description: 'Optional PM2 app name to start (filters config).',
+    },
+  },
+  required: [] as string[],
+};
+
+export const Pm2StopToolSchema = {
+  type: 'object' as const,
+  properties: {
+    appName: {
+      type: 'string' as const,
+      description: 'PM2 app name to stop.',
+    },
+  },
+  required: ['appName'] as string[],
+};
+
+export const Pm2ListToolSchema = {
+  type: 'object' as const,
+  properties: {},
+  required: [] as string[],
+};
+
+export const FastFlowToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    actions: {
+      type: 'array' as const,
+      description: 'Ordered list of actions to run.',
+      items: {
+        oneOf: [
+          {
+            type: 'object' as const,
+            properties: {
+              type: { type: 'string' as const, enum: ['tap'] },
+              x: { type: 'number' as const },
+              y: { type: 'number' as const },
+            },
+            required: ['type', 'x', 'y'] as string[],
+          },
+          {
+            type: 'object' as const,
+            properties: {
+              type: { type: 'string' as const, enum: ['swipe'] },
+              startX: { type: 'number' as const },
+              startY: { type: 'number' as const },
+              endX: { type: 'number' as const },
+              endY: { type: 'number' as const },
+              durationMs: { type: 'number' as const },
+            },
+            required: ['type', 'startX', 'startY', 'endX', 'endY'] as string[],
+          },
+          {
+            type: 'object' as const,
+            properties: {
+              type: { type: 'string' as const, enum: ['text'] },
+              text: { type: 'string' as const },
+            },
+            required: ['type', 'text'] as string[],
+          },
+          {
+            type: 'object' as const,
+            properties: {
+              type: { type: 'string' as const, enum: ['keyevent'] },
+              keyCode: { type: 'string' as const },
+            },
+            required: ['type', 'keyCode'] as string[],
+          },
+          {
+            type: 'object' as const,
+            properties: {
+              type: { type: 'string' as const, enum: ['sleep'] },
+              durationMs: { type: 'number' as const },
+            },
+            required: ['type', 'durationMs'] as string[],
+          },
+        ],
+      },
+    },
+    timeoutMs: {
+      type: 'number' as const,
+      description: 'Optional timeout in milliseconds for the batch command.',
+    },
+    captureBefore: {
+      type: 'boolean' as const,
+      description: 'Capture a screenshot before running the actions.',
+      default: false,
+    },
+    captureAfter: {
+      type: 'boolean' as const,
+      description: 'Capture a screenshot after running the actions.',
+      default: false,
+    },
+    postActionWaitMs: {
+      type: 'number' as const,
+      description: 'Optional wait after actions before capture/dump (milliseconds).',
+    },
+    includeUiDump: {
+      type: 'boolean' as const,
+      description: 'Include a UI hierarchy dump after the actions.',
+      default: false,
+    },
+    uiDumpMaxChars: {
+      type: 'number' as const,
+      description: 'Optional maximum number of characters to return from the UI dump.',
+    },
+  },
+  required: ['actions'] as string[],
+};
+
+export const TapByTextToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    text: { type: 'string' as const, description: 'Text to match.' },
+    matchMode: {
+      type: 'string' as const,
+      enum: ['exact', 'contains', 'regex'],
+      default: 'exact',
+      description: 'Match mode.',
+    },
+    index: {
+      type: 'number' as const,
+      description: 'Match index (0-based).',
+      default: 0,
+    },
+  },
+  required: ['text'] as string[],
+};
+
+export const TapByIdToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    resourceId: { type: 'string' as const, description: 'Resource-id to match.' },
+    index: {
+      type: 'number' as const,
+      description: 'Match index (0-based).',
+      default: 0,
+    },
+  },
+  required: ['resourceId'] as string[],
+};
+
+export const TapByDescToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    contentDesc: { type: 'string' as const, description: 'Content-desc to match.' },
+    matchMode: {
+      type: 'string' as const,
+      enum: ['exact', 'contains', 'regex'],
+      default: 'exact',
+      description: 'Match mode.',
+    },
+    index: {
+      type: 'number' as const,
+      description: 'Match index (0-based).',
+      default: 0,
+    },
+  },
+  required: ['contentDesc'] as string[],
+};
+
+export const WaitForTextToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    text: { type: 'string' as const, description: 'Text to wait for.' },
+    matchMode: {
+      type: 'string' as const,
+      enum: ['exact', 'contains', 'regex'],
+      default: 'exact',
+      description: 'Match mode.',
+    },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time in milliseconds.' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval in milliseconds.' },
+  },
+  required: ['text'] as string[],
+};
+
+export const TypeByIdToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    resourceId: { type: 'string' as const, description: 'Resource-id to match.' },
+    text: { type: 'string' as const, description: 'Text to input.' },
+    matchMode: {
+      type: 'string' as const,
+      enum: ['exact', 'contains', 'regex'],
+      default: 'exact',
+      description: 'Match mode.',
+    },
+    index: {
+      type: 'number' as const,
+      description: 'Match index (0-based).',
+      default: 0,
+    },
+  },
+  required: ['resourceId', 'text'] as string[],
+};
+
+export const WaitForIdToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    resourceId: { type: 'string' as const, description: 'Resource-id to wait for.' },
+    matchMode: {
+      type: 'string' as const,
+      enum: ['exact', 'contains', 'regex'],
+      default: 'exact',
+      description: 'Match mode.',
+    },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time in milliseconds.' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval in milliseconds.' },
+  },
+  required: ['resourceId'] as string[],
+};
+
+export const WaitForDescToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    contentDesc: { type: 'string' as const, description: 'Content-desc to wait for.' },
+    matchMode: {
+      type: 'string' as const,
+      enum: ['exact', 'contains', 'regex'],
+      default: 'exact',
+      description: 'Match mode.',
+    },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time in milliseconds.' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval in milliseconds.' },
+  },
+  required: ['contentDesc'] as string[],
+};
+
+export const WaitForActivityToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    activity: { type: 'string' as const, description: 'Activity/component to wait for.' },
+    matchMode: {
+      type: 'string' as const,
+      enum: ['exact', 'contains', 'regex'],
+      default: 'contains',
+      description: 'Match mode.',
+    },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time in milliseconds.' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval in milliseconds.' },
+  },
+  required: ['activity'] as string[],
+};
+
+export const PressKeySequenceToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    keyCodes: { type: 'array' as const, description: 'Keycodes to press.' },
+    intervalMs: { type: 'number' as const, description: 'Delay between key presses.' },
+    timeoutMs: { type: 'number' as const, description: 'Optional timeout in milliseconds.' },
+  },
+  required: ['keyCodes'] as string[],
+};
+
+export const TapRelativeToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    xPercent: { type: 'number' as const, description: 'X percentage (0-100).' },
+    yPercent: { type: 'number' as const, description: 'Y percentage (0-100).' },
+  },
+  required: ['xPercent', 'yPercent'] as string[],
+};
+
+export const SwipeRelativeToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    startXPercent: { type: 'number' as const, description: 'Start X percentage (0-100).' },
+    startYPercent: { type: 'number' as const, description: 'Start Y percentage (0-100).' },
+    endXPercent: { type: 'number' as const, description: 'End X percentage (0-100).' },
+    endYPercent: { type: 'number' as const, description: 'End Y percentage (0-100).' },
+    durationMs: { type: 'number' as const, description: 'Optional swipe duration in ms.' },
+  },
+  required: ['startXPercent', 'startYPercent', 'endXPercent', 'endYPercent'] as string[],
+};
+
+export const TapCenterToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+  },
+  required: [] as string[],
+};
+
+export const WaitForUiStableToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    stableIterations: { type: 'number' as const, description: 'Stable dump count.' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval in ms.' },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time in ms.' },
+  },
+  required: [] as string[],
+};
+
+export const GetScreenHashToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+  },
+  required: [] as string[],
+};
+
+export const WaitForPackageToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: { type: 'string' as const, description: 'Package name to wait for.' },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time in ms.' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval in ms.' },
+  },
+  required: ['packageName'] as string[],
+};
+
 export const ReversePortToolSchema = {
   type: 'object' as const,
   properties: {
@@ -1024,6 +1953,17 @@ export const HotReloadSetupToolSchema = {
       type: 'number' as const,
       description: 'Optional timeout in milliseconds for install.',
     },
+    playProtectAction: {
+      type: 'string' as const,
+      description:
+        'How to handle Google Play Protect prompts after install/start (send_once, always, never).',
+      enum: ['send_once', 'always', 'never'],
+      default: 'send_once',
+    },
+    playProtectMaxWaitMs: {
+      type: 'number' as const,
+      description: 'Max time to wait for Play Protect prompt handling (milliseconds).',
+    },
   },
   required: ['packageName'] as string[],
 };
@@ -1059,6 +1999,47 @@ export type InputTextInput = z.infer<typeof InputTextInputSchema>;
 export type InputTextOutput = z.infer<typeof InputTextOutputSchema>;
 export type KeyeventInput = z.infer<typeof KeyeventInputSchema>;
 export type KeyeventOutput = z.infer<typeof KeyeventOutputSchema>;
+export type BatchAction = z.infer<typeof BatchActionSchema>;
+export type BatchActionsInput = z.infer<typeof BatchActionsInputSchema>;
+export type BatchActionsOutput = z.infer<typeof BatchActionsOutputSchema>;
+export type Pm2StartHotModeInput = z.infer<typeof Pm2StartHotModeInputSchema>;
+export type Pm2StartHotModeOutput = z.infer<typeof Pm2StartHotModeOutputSchema>;
+export type Pm2StopInput = z.infer<typeof Pm2StopInputSchema>;
+export type Pm2StopOutput = z.infer<typeof Pm2StopOutputSchema>;
+export type Pm2ListInput = z.infer<typeof Pm2ListInputSchema>;
+export type Pm2ListOutput = z.infer<typeof Pm2ListOutputSchema>;
+export type FastFlowInput = z.infer<typeof FastFlowInputSchema>;
+export type FastFlowOutput = z.infer<typeof FastFlowOutputSchema>;
+export type TapByTextInput = z.infer<typeof TapByTextInputSchema>;
+export type TapByTextOutput = z.infer<typeof TapByTextOutputSchema>;
+export type TapByIdInput = z.infer<typeof TapByIdInputSchema>;
+export type TapByIdOutput = z.infer<typeof TapByIdOutputSchema>;
+export type TapByDescInput = z.infer<typeof TapByDescInputSchema>;
+export type TapByDescOutput = z.infer<typeof TapByDescOutputSchema>;
+export type WaitForTextInput = z.infer<typeof WaitForTextInputSchema>;
+export type WaitForTextOutput = z.infer<typeof WaitForTextOutputSchema>;
+export type TypeByIdInput = z.infer<typeof TypeByIdInputSchema>;
+export type TypeByIdOutput = z.infer<typeof TypeByIdOutputSchema>;
+export type WaitForIdInput = z.infer<typeof WaitForIdInputSchema>;
+export type WaitForIdOutput = z.infer<typeof WaitForIdOutputSchema>;
+export type WaitForDescInput = z.infer<typeof WaitForDescInputSchema>;
+export type WaitForDescOutput = z.infer<typeof WaitForDescOutputSchema>;
+export type WaitForActivityInput = z.infer<typeof WaitForActivityInputSchema>;
+export type WaitForActivityOutput = z.infer<typeof WaitForActivityOutputSchema>;
+export type PressKeySequenceInput = z.infer<typeof PressKeySequenceInputSchema>;
+export type PressKeySequenceOutput = z.infer<typeof PressKeySequenceOutputSchema>;
+export type TapRelativeInput = z.infer<typeof TapRelativeInputSchema>;
+export type TapRelativeOutput = z.infer<typeof TapRelativeOutputSchema>;
+export type SwipeRelativeInput = z.infer<typeof SwipeRelativeInputSchema>;
+export type SwipeRelativeOutput = z.infer<typeof SwipeRelativeOutputSchema>;
+export type TapCenterInput = z.infer<typeof TapCenterInputSchema>;
+export type TapCenterOutput = z.infer<typeof TapCenterOutputSchema>;
+export type WaitForUiStableInput = z.infer<typeof WaitForUiStableInputSchema>;
+export type WaitForUiStableOutput = z.infer<typeof WaitForUiStableOutputSchema>;
+export type GetScreenHashInput = z.infer<typeof GetScreenHashInputSchema>;
+export type GetScreenHashOutput = z.infer<typeof GetScreenHashOutputSchema>;
+export type WaitForPackageInput = z.infer<typeof WaitForPackageInputSchema>;
+export type WaitForPackageOutput = z.infer<typeof WaitForPackageOutputSchema>;
 export type ReversePortInput = z.infer<typeof ReversePortInputSchema>;
 export type ReversePortOutput = z.infer<typeof ReversePortOutputSchema>;
 export type ForwardPortInput = z.infer<typeof ForwardPortInputSchema>;

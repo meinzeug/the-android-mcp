@@ -6,6 +6,7 @@ import {
   ADBCommandError,
   ADBNotFoundError,
   APKNotFoundError,
+  BatchAction,
   DeviceNotFoundError,
   NoDevicesFoundError,
   PackageNotRunningError,
@@ -36,6 +37,16 @@ function escapeShellArg(value: string): string {
 
 function encodeAdbInputText(value: string): string {
   return value.replace(/\s/g, '%s');
+}
+
+function formatSleepSeconds(durationMs: number): string {
+  if (durationMs <= 0) {
+    return '0';
+  }
+
+  const seconds = durationMs / 1000;
+  const rounded = Math.round(seconds * 1000) / 1000;
+  return rounded.toString().replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
 }
 
 function collectApkFiles(
@@ -698,6 +709,54 @@ export function inputText(
   return { deviceId: targetDeviceId, text, output: output.trim() };
 }
 
+export function batchInputActions(
+  actions: BatchAction[],
+  deviceId?: string,
+  options: { timeoutMs?: number; resolvedDeviceId?: string } = {}
+): { deviceId: string; actions: BatchAction[]; output: string } {
+  const targetDeviceId = options.resolvedDeviceId ?? resolveDeviceId(deviceId);
+  const commands = actions
+    .map(action => {
+      switch (action.type) {
+        case 'tap':
+          return `input tap ${action.x} ${action.y}`;
+        case 'swipe': {
+          const durationArg =
+            typeof action.durationMs === 'number' ? ` ${action.durationMs}` : '';
+          return `input swipe ${action.startX} ${action.startY} ${action.endX} ${action.endY}${durationArg}`;
+        }
+        case 'text': {
+          const encoded = encodeAdbInputText(action.text);
+          return `input text ${escapeShellArg(encoded)}`;
+        }
+        case 'keyevent':
+          return `input keyevent ${escapeShellArg(String(action.keyCode))}`;
+        case 'sleep': {
+          const seconds = formatSleepSeconds(action.durationMs);
+          return seconds === '0' ? '' : `sleep ${seconds}`;
+        }
+        default:
+          return '';
+      }
+    })
+    .filter(Boolean);
+
+  if (commands.length === 0) {
+    commands.push(':');
+  }
+
+  const script = commands.join('; ');
+  const output = executeADBCommand(`-s ${targetDeviceId} shell ${escapeShellArg(script)}`, {
+    timeout: options.timeoutMs ?? DEFAULT_TIMEOUT,
+  });
+
+  return {
+    deviceId: targetDeviceId,
+    actions,
+    output: output.trim(),
+  };
+}
+
 export function sendKeyevent(
   keyCode: string | number,
   deviceId?: string
@@ -892,12 +951,15 @@ export function hotReloadSetup(options: {
   allowTestPackages?: boolean;
   allowDowngrade?: boolean;
   timeoutMs?: number;
+  playProtectAction?: 'send_once' | 'always' | 'never';
+  playProtectMaxWaitMs?: number;
 }): {
   deviceId: string;
   reversedPorts: Array<{ devicePort: number; hostPort: number; output: string }>;
   install?: { deviceId: string; apkPath: string; output: string; success: boolean };
   stop?: { deviceId: string; packageName: string; output: string };
   start?: { deviceId: string; packageName: string; activity?: string; output: string };
+  playProtect?: { handled: boolean; action?: string };
 } {
   const targetDeviceId = resolveDeviceId(options.deviceId);
   const reversePorts = options.reversePorts ?? [{ devicePort: 8081 }];
@@ -934,11 +996,599 @@ export function hotReloadSetup(options: {
     startResult = startApp(options.packageName, options.activity, targetDeviceId);
   }
 
+  const playProtectAction = options.playProtectAction ?? 'send_once';
+  let playProtectResult: { handled: boolean; action?: string } | undefined;
+
+  if (playProtectAction !== 'never') {
+    playProtectResult = handlePlayProtectPrompt(targetDeviceId, playProtectAction, {
+      maxWaitMs: options.playProtectMaxWaitMs,
+    });
+  }
+
   return {
     deviceId: targetDeviceId,
     reversedPorts,
     install: installResult,
     stop: stopResult,
     start: startResult,
+    playProtect: playProtectResult,
   };
+}
+
+function handlePlayProtectPrompt(
+  deviceId: string,
+  action: 'send_once' | 'always' | 'never',
+  options: { maxWaitMs?: number } = {}
+): { handled: boolean; action?: string } {
+  const maxWaitMs = options.maxWaitMs ?? 2500;
+  const deadline = Date.now() + maxWaitMs;
+  const targets = getPlayProtectTargets(action);
+
+  while (Date.now() <= deadline) {
+    const { xml } = dumpUiHierarchy(deviceId, { maxChars: 500000 });
+    if (xml.includes('Google Play Protect')) {
+      const tapResult = tapPlayProtectButton(xml, deviceId, targets);
+      if (tapResult) {
+        return { handled: true, action };
+      }
+    }
+
+    executeADBCommand(`-s ${deviceId} shell sleep 0.5`);
+  }
+
+  return { handled: false };
+}
+
+function getPlayProtectTargets(action: 'send_once' | 'always' | 'never'): string[] {
+  switch (action) {
+    case 'always':
+      return [
+        'Unbekannte Apps immer zum Sicherheitsscan senden',
+        'Always send',
+        'Always send apps to Google',
+      ];
+    case 'never':
+      return ['Nicht senden', "Don't send", 'Do not send'];
+    case 'send_once':
+    default:
+      return ['Dieses Mal senden', 'Send this time', 'Send once'];
+  }
+}
+
+function tapPlayProtectButton(xml: string, deviceId: string, targets: string[]): boolean {
+  const nodes = extractUiNodes(xml);
+
+  for (const target of targets) {
+    const node = nodes.find(candidate => candidate.text.includes(target));
+    if (node && node.bounds) {
+      const { x, y } = centerOfBounds(node.bounds);
+      executeADBCommand(`-s ${deviceId} shell input tap ${x} ${y}`);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+type UiNode = {
+  text: string;
+  resourceId: string;
+  contentDesc: string;
+  bounds?: { x1: number; y1: number; x2: number; y2: number };
+};
+
+function extractUiNodes(xml: string): UiNode[] {
+  const nodes: UiNode[] = [];
+  const nodeRegex = /<node\b[^>]*>/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = nodeRegex.exec(xml))) {
+    const node = match[0];
+    const textMatch = node.match(/text="([^"]*)"/);
+    const idMatch = node.match(/resource-id="([^"]*)"/);
+    const descMatch = node.match(/content-desc="([^"]*)"/);
+    const boundsMatch = node.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
+    const text = textMatch ? textMatch[1] : '';
+    const resourceId = idMatch ? idMatch[1] : '';
+    const contentDesc = descMatch ? descMatch[1] : '';
+    let bounds;
+
+    if (boundsMatch) {
+      bounds = {
+        x1: parseInt(boundsMatch[1], 10),
+        y1: parseInt(boundsMatch[2], 10),
+        x2: parseInt(boundsMatch[3], 10),
+        y2: parseInt(boundsMatch[4], 10),
+      };
+    }
+
+    nodes.push({ text, resourceId, contentDesc, bounds });
+  }
+
+  return nodes;
+}
+
+function centerOfBounds(bounds: { x1: number; y1: number; x2: number; y2: number }): {
+  x: number;
+  y: number;
+} {
+  return {
+    x: Math.round((bounds.x1 + bounds.x2) / 2),
+    y: Math.round((bounds.y1 + bounds.y2) / 2),
+  };
+}
+
+type MatchMode = 'exact' | 'contains' | 'regex';
+
+function matchesValue(value: string, target: string, mode: MatchMode): boolean {
+  switch (mode) {
+    case 'contains':
+      return value.includes(target);
+    case 'regex':
+      try {
+        return new RegExp(target).test(value);
+      } catch {
+        return false;
+      }
+    case 'exact':
+    default:
+      return value === target;
+  }
+}
+
+function findNodesBy(
+  nodes: UiNode[],
+  field: 'text' | 'resourceId' | 'contentDesc',
+  target: string,
+  mode: MatchMode
+): UiNode[] {
+  return nodes.filter(node => matchesValue(node[field], target, mode));
+}
+
+function tapUiNode(deviceId: string, node: UiNode): { x: number; y: number; output: string } {
+  if (!node.bounds) {
+    throw new ADBCommandError('UI_NODE_NO_BOUNDS', 'UI node has no bounds', { node });
+  }
+  const { x, y } = centerOfBounds(node.bounds);
+  const output = executeADBCommand(`-s ${deviceId} shell input tap ${x} ${y}`);
+  return { x, y, output: output.trim() };
+}
+
+export function tapByText(
+  text: string,
+  deviceId?: string,
+  options: { matchMode?: MatchMode; index?: number } = {}
+): { deviceId: string; text: string; matchMode: MatchMode; index: number; found: boolean; x?: number; y?: number; output?: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { xml } = dumpUiHierarchy(targetDeviceId);
+  const nodes = extractUiNodes(xml);
+  const matchMode = options.matchMode ?? 'exact';
+  const index = options.index ?? 0;
+  const matches = findNodesBy(nodes, 'text', text, matchMode);
+
+  if (!matches[index]) {
+    return { deviceId: targetDeviceId, text, matchMode, index, found: false };
+  }
+
+  const { x, y, output } = tapUiNode(targetDeviceId, matches[index]);
+  return { deviceId: targetDeviceId, text, matchMode, index, found: true, x, y, output };
+}
+
+export function tapById(
+  resourceId: string,
+  deviceId?: string,
+  options: { index?: number } = {}
+): { deviceId: string; resourceId: string; index: number; found: boolean; x?: number; y?: number; output?: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { xml } = dumpUiHierarchy(targetDeviceId);
+  const nodes = extractUiNodes(xml);
+  const index = options.index ?? 0;
+  const matches = findNodesBy(nodes, 'resourceId', resourceId, 'exact');
+
+  if (!matches[index]) {
+    return { deviceId: targetDeviceId, resourceId, index, found: false };
+  }
+
+  const { x, y, output } = tapUiNode(targetDeviceId, matches[index]);
+  return { deviceId: targetDeviceId, resourceId, index, found: true, x, y, output };
+}
+
+export function tapByDesc(
+  contentDesc: string,
+  deviceId?: string,
+  options: { matchMode?: MatchMode; index?: number } = {}
+): {
+  deviceId: string;
+  contentDesc: string;
+  matchMode: MatchMode;
+  index: number;
+  found: boolean;
+  x?: number;
+  y?: number;
+  output?: string;
+} {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { xml } = dumpUiHierarchy(targetDeviceId);
+  const nodes = extractUiNodes(xml);
+  const matchMode = options.matchMode ?? 'exact';
+  const index = options.index ?? 0;
+  const matches = findNodesBy(nodes, 'contentDesc', contentDesc, matchMode);
+
+  if (!matches[index]) {
+    return { deviceId: targetDeviceId, contentDesc, matchMode, index, found: false };
+  }
+
+  const { x, y, output } = tapUiNode(targetDeviceId, matches[index]);
+  return { deviceId: targetDeviceId, contentDesc, matchMode, index, found: true, x, y, output };
+}
+
+export function waitForText(
+  text: string,
+  deviceId?: string,
+  options: { matchMode?: MatchMode; timeoutMs?: number; intervalMs?: number } = {}
+): { deviceId: string; text: string; matchMode: MatchMode; found: boolean; elapsedMs: number; matchCount: number } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const matchMode = options.matchMode ?? 'exact';
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const intervalMs = options.intervalMs ?? 300;
+  const start = Date.now();
+
+  while (Date.now() - start <= timeoutMs) {
+    const { xml } = dumpUiHierarchy(targetDeviceId);
+    const nodes = extractUiNodes(xml);
+    const matches = findNodesBy(nodes, 'text', text, matchMode);
+    if (matches.length > 0) {
+      return {
+        deviceId: targetDeviceId,
+        text,
+        matchMode,
+        found: true,
+        elapsedMs: Date.now() - start,
+        matchCount: matches.length,
+      };
+    }
+    executeADBCommand(`-s ${targetDeviceId} shell sleep ${intervalMs / 1000}`);
+  }
+
+  return {
+    deviceId: targetDeviceId,
+    text,
+    matchMode,
+    found: false,
+    elapsedMs: Date.now() - start,
+    matchCount: 0,
+  };
+}
+
+export function waitForId(
+  resourceId: string,
+  deviceId?: string,
+  options: { matchMode?: MatchMode; timeoutMs?: number; intervalMs?: number } = {}
+): {
+  deviceId: string;
+  resourceId: string;
+  matchMode: MatchMode;
+  found: boolean;
+  elapsedMs: number;
+  matchCount: number;
+} {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const matchMode = options.matchMode ?? 'exact';
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const intervalMs = options.intervalMs ?? 300;
+  const start = Date.now();
+
+  while (Date.now() - start <= timeoutMs) {
+    const { xml } = dumpUiHierarchy(targetDeviceId);
+    const nodes = extractUiNodes(xml);
+    const matches = findNodesBy(nodes, 'resourceId', resourceId, matchMode);
+    if (matches.length > 0) {
+      return {
+        deviceId: targetDeviceId,
+        resourceId,
+        matchMode,
+        found: true,
+        elapsedMs: Date.now() - start,
+        matchCount: matches.length,
+      };
+    }
+    executeADBCommand(`-s ${targetDeviceId} shell sleep ${intervalMs / 1000}`);
+  }
+
+  return {
+    deviceId: targetDeviceId,
+    resourceId,
+    matchMode,
+    found: false,
+    elapsedMs: Date.now() - start,
+    matchCount: 0,
+  };
+}
+
+export function waitForDesc(
+  contentDesc: string,
+  deviceId?: string,
+  options: { matchMode?: MatchMode; timeoutMs?: number; intervalMs?: number } = {}
+): {
+  deviceId: string;
+  contentDesc: string;
+  matchMode: MatchMode;
+  found: boolean;
+  elapsedMs: number;
+  matchCount: number;
+} {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const matchMode = options.matchMode ?? 'exact';
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const intervalMs = options.intervalMs ?? 300;
+  const start = Date.now();
+
+  while (Date.now() - start <= timeoutMs) {
+    const { xml } = dumpUiHierarchy(targetDeviceId);
+    const nodes = extractUiNodes(xml);
+    const matches = findNodesBy(nodes, 'contentDesc', contentDesc, matchMode);
+    if (matches.length > 0) {
+      return {
+        deviceId: targetDeviceId,
+        contentDesc,
+        matchMode,
+        found: true,
+        elapsedMs: Date.now() - start,
+        matchCount: matches.length,
+      };
+    }
+    executeADBCommand(`-s ${targetDeviceId} shell sleep ${intervalMs / 1000}`);
+  }
+
+  return {
+    deviceId: targetDeviceId,
+    contentDesc,
+    matchMode,
+    found: false,
+    elapsedMs: Date.now() - start,
+    matchCount: 0,
+  };
+}
+
+export function waitForActivity(
+  activity: string,
+  deviceId?: string,
+  options: { matchMode?: MatchMode; timeoutMs?: number; intervalMs?: number } = {}
+): {
+  deviceId: string;
+  activity: string;
+  matchMode: MatchMode;
+  found: boolean;
+  elapsedMs: number;
+  current?: string;
+} {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const matchMode = options.matchMode ?? 'exact';
+  const timeoutMs = options.timeoutMs ?? 8000;
+  const intervalMs = options.intervalMs ?? 300;
+  const start = Date.now();
+
+  while (Date.now() - start <= timeoutMs) {
+    const current = getCurrentActivity(targetDeviceId);
+    const candidate =
+      current.component ?? current.activity ?? current.packageName ?? current.raw ?? '';
+    if (matchesValue(candidate, activity, matchMode)) {
+      return {
+        deviceId: targetDeviceId,
+        activity,
+        matchMode,
+        found: true,
+        elapsedMs: Date.now() - start,
+        current: candidate,
+      };
+    }
+    executeADBCommand(`-s ${targetDeviceId} shell sleep ${intervalMs / 1000}`);
+  }
+
+  const fallback = getCurrentActivity(targetDeviceId);
+  return {
+    deviceId: targetDeviceId,
+    activity,
+    matchMode,
+    found: false,
+    elapsedMs: Date.now() - start,
+    current: fallback.component ?? fallback.activity ?? fallback.packageName ?? fallback.raw ?? '',
+  };
+}
+
+export function pressKeySequence(
+  keyCodes: Array<string | number>,
+  deviceId?: string,
+  options: { intervalMs?: number; timeoutMs?: number } = {}
+): { deviceId: string; keyCodes: Array<string | number>; output: string } {
+  const actions: BatchAction[] = [];
+  const intervalMs = options.intervalMs ?? 0;
+
+  keyCodes.forEach((keyCode, index) => {
+    actions.push({ type: 'keyevent', keyCode });
+    if (intervalMs > 0 && index < keyCodes.length - 1) {
+      actions.push({ type: 'sleep', durationMs: intervalMs });
+    }
+  });
+
+  const result = batchInputActions(actions, deviceId, { timeoutMs: options.timeoutMs });
+  return { deviceId: result.deviceId, keyCodes, output: result.output };
+}
+
+export function tapRelative(
+  xPercent: number,
+  yPercent: number,
+  deviceId?: string
+): { deviceId: string; xPercent: number; yPercent: number; x: number; y: number; output: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { width, height } = getWindowSize(targetDeviceId);
+  const x = Math.round((xPercent / 100) * width);
+  const y = Math.round((yPercent / 100) * height);
+  const output = executeADBCommand(`-s ${targetDeviceId} shell input tap ${x} ${y}`);
+
+  return { deviceId: targetDeviceId, xPercent, yPercent, x, y, output: output.trim() };
+}
+
+export function swipeRelative(
+  startXPercent: number,
+  startYPercent: number,
+  endXPercent: number,
+  endYPercent: number,
+  deviceId?: string,
+  durationMs?: number
+): {
+  deviceId: string;
+  startXPercent: number;
+  startYPercent: number;
+  endXPercent: number;
+  endYPercent: number;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  durationMs?: number;
+  output: string;
+} {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { width, height } = getWindowSize(targetDeviceId);
+  const startX = Math.round((startXPercent / 100) * width);
+  const startY = Math.round((startYPercent / 100) * height);
+  const endX = Math.round((endXPercent / 100) * width);
+  const endY = Math.round((endYPercent / 100) * height);
+  const durationArg = typeof durationMs === 'number' ? ` ${durationMs}` : '';
+  const output = executeADBCommand(
+    `-s ${targetDeviceId} shell input swipe ${startX} ${startY} ${endX} ${endY}${durationArg}`
+  );
+
+  return {
+    deviceId: targetDeviceId,
+    startXPercent,
+    startYPercent,
+    endXPercent,
+    endYPercent,
+    startX,
+    startY,
+    endX,
+    endY,
+    durationMs,
+    output: output.trim(),
+  };
+}
+
+export function tapCenter(
+  deviceId?: string
+): { deviceId: string; x: number; y: number; output: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { width, height } = getWindowSize(targetDeviceId);
+  const x = Math.round(width / 2);
+  const y = Math.round(height / 2);
+  const output = executeADBCommand(`-s ${targetDeviceId} shell input tap ${x} ${y}`);
+
+  return { deviceId: targetDeviceId, x, y, output: output.trim() };
+}
+
+export function waitForUiStable(
+  deviceId?: string,
+  options: { stableIterations?: number; intervalMs?: number; timeoutMs?: number } = {}
+): { deviceId: string; stable: boolean; elapsedMs: number; hash?: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const stableIterations = options.stableIterations ?? 3;
+  const intervalMs = options.intervalMs ?? 300;
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const start = Date.now();
+  let lastHash = '';
+  let stableCount = 0;
+
+  while (Date.now() - start <= timeoutMs) {
+    const { xml } = dumpUiHierarchy(targetDeviceId);
+    const hash = hashString(xml);
+    if (hash === lastHash) {
+      stableCount += 1;
+      if (stableCount >= stableIterations) {
+        return { deviceId: targetDeviceId, stable: true, elapsedMs: Date.now() - start, hash };
+      }
+    } else {
+      stableCount = 0;
+      lastHash = hash;
+    }
+
+    executeADBCommand(`-s ${targetDeviceId} shell sleep ${intervalMs / 1000}`);
+  }
+
+  return { deviceId: targetDeviceId, stable: false, elapsedMs: Date.now() - start, hash: lastHash };
+}
+
+export function getScreenHash(
+  deviceId?: string
+): { deviceId: string; hash: string; length: number } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { xml } = dumpUiHierarchy(targetDeviceId);
+  const hash = hashString(xml);
+  return { deviceId: targetDeviceId, hash, length: xml.length };
+}
+
+export function waitForPackage(
+  packageName: string,
+  deviceId?: string,
+  options: { timeoutMs?: number; intervalMs?: number } = {}
+): { deviceId: string; packageName: string; found: boolean; elapsedMs: number; current?: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const timeoutMs = options.timeoutMs ?? 8000;
+  const intervalMs = options.intervalMs ?? 300;
+  const start = Date.now();
+
+  while (Date.now() - start <= timeoutMs) {
+    const current = getCurrentActivity(targetDeviceId);
+    const currentPackage = current.packageName ?? '';
+    if (currentPackage === packageName) {
+      return {
+        deviceId: targetDeviceId,
+        packageName,
+        found: true,
+        elapsedMs: Date.now() - start,
+        current: currentPackage,
+      };
+    }
+    executeADBCommand(`-s ${targetDeviceId} shell sleep ${intervalMs / 1000}`);
+  }
+
+  const fallback = getCurrentActivity(targetDeviceId);
+  return {
+    deviceId: targetDeviceId,
+    packageName,
+    found: false,
+    elapsedMs: Date.now() - start,
+    current: fallback.packageName ?? fallback.raw,
+  };
+}
+
+function hashString(value: string): string {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash << 5) - hash + value.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(16);
+}
+
+export function typeById(
+  resourceId: string,
+  text: string,
+  deviceId?: string,
+  options: { index?: number; matchMode?: MatchMode } = {}
+): { deviceId: string; resourceId: string; text: string; index: number; found: boolean; output?: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { xml } = dumpUiHierarchy(targetDeviceId);
+  const nodes = extractUiNodes(xml);
+  const index = options.index ?? 0;
+  const matchMode = options.matchMode ?? 'exact';
+  const matches = findNodesBy(nodes, 'resourceId', resourceId, matchMode);
+
+  if (!matches[index]) {
+    return { deviceId: targetDeviceId, resourceId, text, index, found: false };
+  }
+
+  tapUiNode(targetDeviceId, matches[index]);
+  const input = inputText(text, targetDeviceId);
+  return { deviceId: targetDeviceId, resourceId, text, index, found: true, output: input.output };
 }

@@ -53,6 +53,66 @@ import {
   KeyeventInputSchema,
   KeyeventOutputSchema,
   KeyeventToolSchema,
+  BatchActionsInputSchema,
+  BatchActionsOutputSchema,
+  BatchActionsToolSchema,
+  Pm2StartHotModeInputSchema,
+  Pm2StartHotModeOutputSchema,
+  Pm2StartHotModeToolSchema,
+  Pm2StopInputSchema,
+  Pm2StopOutputSchema,
+  Pm2StopToolSchema,
+  Pm2ListInputSchema,
+  Pm2ListOutputSchema,
+  Pm2ListToolSchema,
+  FastFlowInputSchema,
+  FastFlowOutputSchema,
+  FastFlowToolSchema,
+  TapByTextInputSchema,
+  TapByTextOutputSchema,
+  TapByTextToolSchema,
+  TapByIdInputSchema,
+  TapByIdOutputSchema,
+  TapByIdToolSchema,
+  TapByDescInputSchema,
+  TapByDescOutputSchema,
+  TapByDescToolSchema,
+  WaitForTextInputSchema,
+  WaitForTextOutputSchema,
+  WaitForTextToolSchema,
+  TypeByIdInputSchema,
+  TypeByIdOutputSchema,
+  TypeByIdToolSchema,
+  WaitForIdInputSchema,
+  WaitForIdOutputSchema,
+  WaitForIdToolSchema,
+  WaitForDescInputSchema,
+  WaitForDescOutputSchema,
+  WaitForDescToolSchema,
+  WaitForActivityInputSchema,
+  WaitForActivityOutputSchema,
+  WaitForActivityToolSchema,
+  PressKeySequenceInputSchema,
+  PressKeySequenceOutputSchema,
+  PressKeySequenceToolSchema,
+  TapRelativeInputSchema,
+  TapRelativeOutputSchema,
+  TapRelativeToolSchema,
+  SwipeRelativeInputSchema,
+  SwipeRelativeOutputSchema,
+  SwipeRelativeToolSchema,
+  TapCenterInputSchema,
+  TapCenterOutputSchema,
+  TapCenterToolSchema,
+  WaitForUiStableInputSchema,
+  WaitForUiStableOutputSchema,
+  WaitForUiStableToolSchema,
+  GetScreenHashInputSchema,
+  GetScreenHashOutputSchema,
+  GetScreenHashToolSchema,
+  WaitForPackageInputSchema,
+  WaitForPackageOutputSchema,
+  WaitForPackageToolSchema,
   ReversePortInputSchema,
   ReversePortOutputSchema,
   ReversePortToolSchema,
@@ -83,14 +143,32 @@ import {
   installApk as adbInstallApk,
   inputText as adbInputText,
   listPackageActivities as adbListPackageActivities,
+  batchInputActions as adbBatchInputActions,
   reversePort as adbReversePort,
+  resolveDeviceId,
   sendKeyevent as adbSendKeyevent,
   startApp as adbStartApp,
   stopApp as adbStopApp,
   swipeScreen as adbSwipeScreen,
   tapScreen as adbTapScreen,
+  tapByText as adbTapByText,
+  tapById as adbTapById,
+  tapByDesc as adbTapByDesc,
+  waitForText as adbWaitForText,
+  typeById as adbTypeById,
+  waitForId as adbWaitForId,
+  waitForDesc as adbWaitForDesc,
+  waitForActivity as adbWaitForActivity,
+  pressKeySequence as adbPressKeySequence,
+  tapRelative as adbTapRelative,
+  swipeRelative as adbSwipeRelative,
+  tapCenter as adbTapCenter,
+  waitForUiStable as adbWaitForUiStable,
+  getScreenHash as adbGetScreenHash,
+  waitForPackage as adbWaitForPackage,
   uninstallApp as adbUninstallApp,
 } from './utils/adb.js';
+import { listPm2Apps, startPm2HotMode, stopPm2App } from './utils/pm2.js';
 import { downloadApkFromUrl } from './utils/download.js';
 import { formatErrorForResponse } from './utils/error.js';
 
@@ -101,7 +179,7 @@ class AndroidMcpServer {
     this.server = new Server(
       {
         name: 'the-android-mcp',
-        version: '0.1.5',
+        version: '0.1.13',
       },
       {
         capabilities: {
@@ -190,6 +268,106 @@ class AndroidMcpServer {
           name: 'send_android_keyevent',
           description: 'Send an Android keyevent',
           inputSchema: KeyeventToolSchema,
+        },
+        {
+          name: 'batch_android_actions',
+          description: 'Run multiple input actions in a single ADB shell call',
+          inputSchema: BatchActionsToolSchema,
+        },
+        {
+          name: 'pm2_start_hot_mode',
+          description: 'Start the Android hot mode build in the background via PM2',
+          inputSchema: Pm2StartHotModeToolSchema,
+        },
+        {
+          name: 'pm2_stop_app',
+          description: 'Stop a PM2 app by name',
+          inputSchema: Pm2StopToolSchema,
+        },
+        {
+          name: 'pm2_list',
+          description: 'List PM2 apps',
+          inputSchema: Pm2ListToolSchema,
+        },
+        {
+          name: 'fast_flow',
+          description: 'Run a fast UI flow with optional screenshots and UI dump',
+          inputSchema: FastFlowToolSchema,
+        },
+        {
+          name: 'tap_by_text',
+          description: 'Tap the first UI node matching text',
+          inputSchema: TapByTextToolSchema,
+        },
+        {
+          name: 'tap_by_id',
+          description: 'Tap the first UI node matching resource-id',
+          inputSchema: TapByIdToolSchema,
+        },
+        {
+          name: 'tap_by_desc',
+          description: 'Tap the first UI node matching content-desc',
+          inputSchema: TapByDescToolSchema,
+        },
+        {
+          name: 'wait_for_text',
+          description: 'Wait for UI text to appear via UI dump polling',
+          inputSchema: WaitForTextToolSchema,
+        },
+        {
+          name: 'type_by_id',
+          description: 'Tap a field by resource-id and type text',
+          inputSchema: TypeByIdToolSchema,
+        },
+        {
+          name: 'wait_for_id',
+          description: 'Wait for UI resource-id to appear via UI dump polling',
+          inputSchema: WaitForIdToolSchema,
+        },
+        {
+          name: 'wait_for_desc',
+          description: 'Wait for UI content-desc to appear via UI dump polling',
+          inputSchema: WaitForDescToolSchema,
+        },
+        {
+          name: 'wait_for_activity',
+          description: 'Wait for current activity/component',
+          inputSchema: WaitForActivityToolSchema,
+        },
+        {
+          name: 'press_key_sequence',
+          description: 'Press multiple Android keyevents in sequence',
+          inputSchema: PressKeySequenceToolSchema,
+        },
+        {
+          name: 'tap_relative',
+          description: 'Tap using percentage coordinates',
+          inputSchema: TapRelativeToolSchema,
+        },
+        {
+          name: 'swipe_relative',
+          description: 'Swipe using percentage coordinates',
+          inputSchema: SwipeRelativeToolSchema,
+        },
+        {
+          name: 'tap_center',
+          description: 'Tap the center of the screen',
+          inputSchema: TapCenterToolSchema,
+        },
+        {
+          name: 'wait_for_ui_stable',
+          description: 'Wait until the UI dump is stable',
+          inputSchema: WaitForUiStableToolSchema,
+        },
+        {
+          name: 'get_screen_hash',
+          description: 'Get a UI hash from the current UI dump',
+          inputSchema: GetScreenHashToolSchema,
+        },
+        {
+          name: 'wait_for_package',
+          description: 'Wait for a package to be in the foreground',
+          inputSchema: WaitForPackageToolSchema,
         },
         {
           name: 'reverse_android_port',
@@ -416,6 +594,350 @@ class AndroidMcpServer {
           case 'send_android_keyevent': {
             const input = KeyeventInputSchema.parse(args);
             const result = await this.sendKeyevent(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'batch_android_actions': {
+            const input = BatchActionsInputSchema.parse(args);
+            const result = await this.batchActions(input);
+            const content: Array<{ type: 'image' | 'text'; data?: string; mimeType?: string; text?: string }> = [];
+
+            if (result.screenshotBefore) {
+              content.push({
+                type: 'image',
+                data: result.screenshotBefore.data,
+                mimeType: 'image/png',
+              });
+            }
+
+            if (result.screenshotAfter) {
+              content.push({
+                type: 'image',
+                data: result.screenshotAfter.data,
+                mimeType: 'image/png',
+              });
+            }
+
+            const summary = {
+              deviceId: result.deviceId,
+              actions: result.actions,
+              output: result.output,
+              screenshotBefore: result.screenshotBefore
+                ? {
+                    deviceId: result.screenshotBefore.deviceId,
+                    width: result.screenshotBefore.width,
+                    height: result.screenshotBefore.height,
+                    timestamp: result.screenshotBefore.timestamp,
+                  }
+                : undefined,
+              screenshotAfter: result.screenshotAfter
+                ? {
+                    deviceId: result.screenshotAfter.deviceId,
+                    width: result.screenshotAfter.width,
+                    height: result.screenshotAfter.height,
+                    timestamp: result.screenshotAfter.timestamp,
+                  }
+                : undefined,
+            };
+
+            content.push({
+              type: 'text',
+              text: JSON.stringify(summary),
+            });
+
+            return { content };
+          }
+
+          case 'pm2_start_hot_mode': {
+            const input = Pm2StartHotModeInputSchema.parse(args);
+            const result = await this.pm2StartHotMode(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'pm2_stop_app': {
+            const input = Pm2StopInputSchema.parse(args);
+            const result = await this.pm2StopApp(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'pm2_list': {
+            const input = Pm2ListInputSchema.parse(args);
+            const result = await this.pm2List(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'fast_flow': {
+            const input = FastFlowInputSchema.parse(args);
+            const result = await this.fastFlow(input);
+            const content: Array<{ type: 'image' | 'text'; data?: string; mimeType?: string; text?: string }> = [];
+
+            if (result.screenshotBefore) {
+              content.push({
+                type: 'image',
+                data: result.screenshotBefore.data,
+                mimeType: 'image/png',
+              });
+            }
+
+            if (result.screenshotAfter) {
+              content.push({
+                type: 'image',
+                data: result.screenshotAfter.data,
+                mimeType: 'image/png',
+              });
+            }
+
+            const summary = {
+              deviceId: result.deviceId,
+              actions: result.actions,
+              output: result.output,
+              screenshotBefore: result.screenshotBefore
+                ? {
+                    deviceId: result.screenshotBefore.deviceId,
+                    width: result.screenshotBefore.width,
+                    height: result.screenshotBefore.height,
+                    timestamp: result.screenshotBefore.timestamp,
+                  }
+                : undefined,
+              screenshotAfter: result.screenshotAfter
+                ? {
+                    deviceId: result.screenshotAfter.deviceId,
+                    width: result.screenshotAfter.width,
+                    height: result.screenshotAfter.height,
+                    timestamp: result.screenshotAfter.timestamp,
+                  }
+                : undefined,
+              uiDump: result.uiDump
+                ? {
+                    deviceId: result.uiDump.deviceId,
+                    length: result.uiDump.length,
+                    truncated: result.uiDump.truncated,
+                    filePath: result.uiDump.filePath,
+                  }
+                : undefined,
+            };
+
+            content.push({
+              type: 'text',
+              text: JSON.stringify(summary),
+            });
+
+            return { content };
+          }
+
+          case 'tap_by_text': {
+            const input = TapByTextInputSchema.parse(args);
+            const result = await this.tapByText(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'tap_by_id': {
+            const input = TapByIdInputSchema.parse(args);
+            const result = await this.tapById(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'tap_by_desc': {
+            const input = TapByDescInputSchema.parse(args);
+            const result = await this.tapByDesc(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'wait_for_text': {
+            const input = WaitForTextInputSchema.parse(args);
+            const result = await this.waitForText(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'type_by_id': {
+            const input = TypeByIdInputSchema.parse(args);
+            const result = await this.typeById(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'wait_for_id': {
+            const input = WaitForIdInputSchema.parse(args);
+            const result = await this.waitForId(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'wait_for_desc': {
+            const input = WaitForDescInputSchema.parse(args);
+            const result = await this.waitForDesc(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'wait_for_activity': {
+            const input = WaitForActivityInputSchema.parse(args);
+            const result = await this.waitForActivity(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'press_key_sequence': {
+            const input = PressKeySequenceInputSchema.parse(args);
+            const result = await this.pressKeySequence(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'tap_relative': {
+            const input = TapRelativeInputSchema.parse(args);
+            const result = await this.tapRelative(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'swipe_relative': {
+            const input = SwipeRelativeInputSchema.parse(args);
+            const result = await this.swipeRelative(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'tap_center': {
+            const input = TapCenterInputSchema.parse(args);
+            const result = await this.tapCenter(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'wait_for_ui_stable': {
+            const input = WaitForUiStableInputSchema.parse(args);
+            const result = await this.waitForUiStable(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'get_screen_hash': {
+            const input = GetScreenHashInputSchema.parse(args);
+            const result = await this.getScreenHash(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'wait_for_package': {
+            const input = WaitForPackageInputSchema.parse(args);
+            const result = await this.waitForPackage(input);
             return {
               content: [
                 {
@@ -658,6 +1180,245 @@ class AndroidMcpServer {
     return KeyeventOutputSchema.parse(result);
   }
 
+  private async batchActions(
+    input: z.infer<typeof BatchActionsInputSchema>
+  ): Promise<z.infer<typeof BatchActionsOutputSchema>> {
+    const targetDeviceId = resolveDeviceId(input.deviceId);
+    let screenshotBefore;
+    let screenshotAfter;
+
+    if (input.captureBefore) {
+      screenshotBefore = await captureScreenshotResponse(targetDeviceId);
+    }
+
+    const result = adbBatchInputActions(input.actions, targetDeviceId, {
+      timeoutMs: input.timeoutMs,
+      resolvedDeviceId: targetDeviceId,
+    });
+
+    if (input.captureAfter) {
+      screenshotAfter = await captureScreenshotResponse(targetDeviceId);
+    }
+
+    return BatchActionsOutputSchema.parse({
+      ...result,
+      screenshotBefore,
+      screenshotAfter,
+    });
+  }
+
+  private async pm2StartHotMode(
+    input: z.infer<typeof Pm2StartHotModeInputSchema>
+  ): Promise<z.infer<typeof Pm2StartHotModeOutputSchema>> {
+    const result = startPm2HotMode({
+      configPath: input.configPath,
+      projectRoot: input.projectRoot,
+      appName: input.appName,
+    });
+    return Pm2StartHotModeOutputSchema.parse(result);
+  }
+
+  private async pm2StopApp(
+    input: z.infer<typeof Pm2StopInputSchema>
+  ): Promise<z.infer<typeof Pm2StopOutputSchema>> {
+    const result = stopPm2App(input.appName);
+    return Pm2StopOutputSchema.parse(result);
+  }
+
+  private async pm2List(
+    _input: z.infer<typeof Pm2ListInputSchema>
+  ): Promise<z.infer<typeof Pm2ListOutputSchema>> {
+    const result = listPm2Apps();
+    return Pm2ListOutputSchema.parse(result);
+  }
+
+  private async fastFlow(
+    input: z.infer<typeof FastFlowInputSchema>
+  ): Promise<z.infer<typeof FastFlowOutputSchema>> {
+    const targetDeviceId = resolveDeviceId(input.deviceId);
+    const actions = [...input.actions];
+    let screenshotBefore;
+    let screenshotAfter;
+    let uiDump;
+
+    if (input.captureBefore) {
+      screenshotBefore = await captureScreenshotResponse(targetDeviceId);
+    }
+
+    if (input.postActionWaitMs && input.postActionWaitMs > 0) {
+      actions.push({ type: 'sleep', durationMs: input.postActionWaitMs });
+    }
+
+    const result = adbBatchInputActions(actions, targetDeviceId, {
+      timeoutMs: input.timeoutMs,
+      resolvedDeviceId: targetDeviceId,
+    });
+
+    if (input.captureAfter) {
+      screenshotAfter = await captureScreenshotResponse(targetDeviceId);
+    }
+
+    if (input.includeUiDump) {
+      uiDump = adbDumpUiHierarchy(targetDeviceId, { maxChars: input.uiDumpMaxChars });
+    }
+
+    return FastFlowOutputSchema.parse({
+      ...result,
+      screenshotBefore,
+      screenshotAfter,
+      uiDump,
+    });
+  }
+
+  private async tapByText(
+    input: z.infer<typeof TapByTextInputSchema>
+  ): Promise<z.infer<typeof TapByTextOutputSchema>> {
+    const result = adbTapByText(input.text, input.deviceId, {
+      matchMode: input.matchMode,
+      index: input.index,
+    });
+    return TapByTextOutputSchema.parse(result);
+  }
+
+  private async tapById(
+    input: z.infer<typeof TapByIdInputSchema>
+  ): Promise<z.infer<typeof TapByIdOutputSchema>> {
+    const result = adbTapById(input.resourceId, input.deviceId, {
+      index: input.index,
+    });
+    return TapByIdOutputSchema.parse(result);
+  }
+
+  private async tapByDesc(
+    input: z.infer<typeof TapByDescInputSchema>
+  ): Promise<z.infer<typeof TapByDescOutputSchema>> {
+    const result = adbTapByDesc(input.contentDesc, input.deviceId, {
+      matchMode: input.matchMode,
+      index: input.index,
+    });
+    return TapByDescOutputSchema.parse(result);
+  }
+
+  private async waitForText(
+    input: z.infer<typeof WaitForTextInputSchema>
+  ): Promise<z.infer<typeof WaitForTextOutputSchema>> {
+    const result = adbWaitForText(input.text, input.deviceId, {
+      matchMode: input.matchMode,
+      timeoutMs: input.timeoutMs,
+      intervalMs: input.intervalMs,
+    });
+    return WaitForTextOutputSchema.parse(result);
+  }
+
+  private async typeById(
+    input: z.infer<typeof TypeByIdInputSchema>
+  ): Promise<z.infer<typeof TypeByIdOutputSchema>> {
+    const result = adbTypeById(input.resourceId, input.text, input.deviceId, {
+      matchMode: input.matchMode,
+      index: input.index,
+    });
+    return TypeByIdOutputSchema.parse(result);
+  }
+
+  private async waitForId(
+    input: z.infer<typeof WaitForIdInputSchema>
+  ): Promise<z.infer<typeof WaitForIdOutputSchema>> {
+    const result = adbWaitForId(input.resourceId, input.deviceId, {
+      matchMode: input.matchMode,
+      timeoutMs: input.timeoutMs,
+      intervalMs: input.intervalMs,
+    });
+    return WaitForIdOutputSchema.parse(result);
+  }
+
+  private async waitForDesc(
+    input: z.infer<typeof WaitForDescInputSchema>
+  ): Promise<z.infer<typeof WaitForDescOutputSchema>> {
+    const result = adbWaitForDesc(input.contentDesc, input.deviceId, {
+      matchMode: input.matchMode,
+      timeoutMs: input.timeoutMs,
+      intervalMs: input.intervalMs,
+    });
+    return WaitForDescOutputSchema.parse(result);
+  }
+
+  private async waitForActivity(
+    input: z.infer<typeof WaitForActivityInputSchema>
+  ): Promise<z.infer<typeof WaitForActivityOutputSchema>> {
+    const result = adbWaitForActivity(input.activity, input.deviceId, {
+      matchMode: input.matchMode,
+      timeoutMs: input.timeoutMs,
+      intervalMs: input.intervalMs,
+    });
+    return WaitForActivityOutputSchema.parse(result);
+  }
+
+  private async pressKeySequence(
+    input: z.infer<typeof PressKeySequenceInputSchema>
+  ): Promise<z.infer<typeof PressKeySequenceOutputSchema>> {
+    const result = adbPressKeySequence(input.keyCodes, input.deviceId, {
+      intervalMs: input.intervalMs,
+      timeoutMs: input.timeoutMs,
+    });
+    return PressKeySequenceOutputSchema.parse(result);
+  }
+
+  private async tapRelative(
+    input: z.infer<typeof TapRelativeInputSchema>
+  ): Promise<z.infer<typeof TapRelativeOutputSchema>> {
+    const result = adbTapRelative(input.xPercent, input.yPercent, input.deviceId);
+    return TapRelativeOutputSchema.parse(result);
+  }
+
+  private async swipeRelative(
+    input: z.infer<typeof SwipeRelativeInputSchema>
+  ): Promise<z.infer<typeof SwipeRelativeOutputSchema>> {
+    const result = adbSwipeRelative(
+      input.startXPercent,
+      input.startYPercent,
+      input.endXPercent,
+      input.endYPercent,
+      input.deviceId,
+      input.durationMs
+    );
+    return SwipeRelativeOutputSchema.parse(result);
+  }
+
+  private async tapCenter(
+    input: z.infer<typeof TapCenterInputSchema>
+  ): Promise<z.infer<typeof TapCenterOutputSchema>> {
+    const result = adbTapCenter(input.deviceId);
+    return TapCenterOutputSchema.parse(result);
+  }
+
+  private async waitForUiStable(
+    input: z.infer<typeof WaitForUiStableInputSchema>
+  ): Promise<z.infer<typeof WaitForUiStableOutputSchema>> {
+    const result = adbWaitForUiStable(input.deviceId, {
+      stableIterations: input.stableIterations,
+      intervalMs: input.intervalMs,
+      timeoutMs: input.timeoutMs,
+    });
+    return WaitForUiStableOutputSchema.parse(result);
+  }
+
+  private async getScreenHash(
+    input: z.infer<typeof GetScreenHashInputSchema>
+  ): Promise<z.infer<typeof GetScreenHashOutputSchema>> {
+    const result = adbGetScreenHash(input.deviceId);
+    return GetScreenHashOutputSchema.parse(result);
+  }
+
+  private async waitForPackage(
+    input: z.infer<typeof WaitForPackageInputSchema>
+  ): Promise<z.infer<typeof WaitForPackageOutputSchema>> {
+    const result = adbWaitForPackage(input.packageName, input.deviceId, {
+      timeoutMs: input.timeoutMs,
+      intervalMs: input.intervalMs,
+    });
+    return WaitForPackageOutputSchema.parse(result);
+  }
+
   private async reversePort(
     input: z.infer<typeof ReversePortInputSchema>
   ): Promise<z.infer<typeof ReversePortOutputSchema>> {
@@ -713,6 +1474,8 @@ class AndroidMcpServer {
       allowTestPackages: input.allowTestPackages,
       allowDowngrade: input.allowDowngrade,
       timeoutMs: input.timeoutMs,
+      playProtectAction: input.playProtectAction,
+      playProtectMaxWaitMs: input.playProtectMaxWaitMs,
     });
     return HotReloadSetupOutputSchema.parse(result);
   }
