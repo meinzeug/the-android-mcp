@@ -86,6 +86,7 @@ Use this when you want **maximum speed** and **minimum ADB round‑trips**.
 ### 2) Reduce screenshots to only what you need
 - Use `take_android_screenshot` with `throttleMs` to reuse the last capture.
 - Prefer **UI dumps** (`dump_android_ui_hierarchy`) for logic, and screenshots only for visual confirmation.
+- For repeated UI queries, use `query_ui` with `useCache`/`maxAgeMs`.
 
 ### 3) Use ADB keyboard for fast input
 - `smart_login_fast` with `useAdbKeyboard=true` is the fastest login path.
@@ -104,6 +105,24 @@ Use this when you want **maximum speed** and **minimum ADB round‑trips**.
 
 ### 7) Capture bug reports immediately
 - When a flow fails, use `create_github_issue` with repro steps + logs/screenshots.
+
+## Flow Orchestrator v1 (run_flow_plan)
+
+`run_flow_plan` now supports **asserts**, **retries**, and **on‑fail hooks** to keep UI flows resilient.
+
+```json
+{
+  "steps": [
+    { "type": "tap_by_text", "text": "Login" },
+    { "type": "assert_text", "text": "Welcome", "timeoutMs": 6000 }
+  ],
+  "stepRetries": 1,
+  "retryDelayMs": 400,
+  "onFailSteps": [
+    { "type": "press_key_sequence", "keyCodes": ["4", "4"] }
+  ]
+}
+```
 
 ## Issue Reporting (GitHub)
 
@@ -462,9 +481,9 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `adb_keyboard_editor_action` | Send editor action via ADB Keyboard IME | `code`, `imeId` (optional), `setIme` (optional), `deviceId` (optional)     |
 | `adb_keyboard_input_chars`| Send unicode codepoints via ADB Keyboard  | `text`, `imeId` (optional), `setIme` (optional), `deviceId` (optional)     |
 | `set_adb_keyboard_mode`   | Enable/disable ADB keyboard mode          | `enable` (optional), `imeId` (optional)                                    |
-| `smart_login`             | Auto-fill login screen quickly            | `email`, `password`, `submitLabels` (optional)                             |
+| `smart_login`             | Auto-fill login screen quickly            | `email`, `password`, `submitLabels`, `submitFallback` (optional)           |
 | `detect_login_fields`     | Detect login fields and submit button     | `submitLabels` (optional), `deviceId` (optional)                           |
-| `smart_login_fast`        | Fast login (single dump + batch actions)  | `email`, `password`, `useAdbKeyboard` (optional)                           |
+| `smart_login_fast`        | Fast login (single dump + batch actions)  | `email`, `password`, `useAdbKeyboard`, `submitFallback` (optional)         |
 | `find_android_apk`        | Finds the most recent APK in a project    | `projectRoot` (optional)                                                   |
 | `install_android_apk`     | Installs an APK on a device               | `apkPath`/`apkUrl` (optional), `deviceId` (optional), install flags, `timeoutMs` |
 | `uninstall_android_app`   | Uninstalls an app by package name         | `packageName`, `deviceId` (optional), `keepData` (optional)                |
@@ -478,7 +497,7 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `get_android_properties`  | Read system properties by prefix          | `prefix` (optional), `deviceId` (optional)                                 |
 | `open_url`                | Open URL via Android intent               | `url`, `deviceId` (optional)                                               |
 | `paste_clipboard`         | Paste clipboard content                   | `deviceId` (optional)                                                      |
-| `dump_android_ui_hierarchy` | Dumps UI hierarchy XML                  | `deviceId` (optional), `maxChars` (optional)                               |
+| `dump_android_ui_hierarchy` | Dumps UI hierarchy XML                  | `deviceId` (optional), `maxChars`, `useCache`, `maxAgeMs` (optional)       |
 | `stop_android_app`        | Force-stops an app                        | `packageName`, `deviceId` (optional)                                       |
 | `clear_android_app_data`  | Clears app data                           | `packageName`, `deviceId` (optional)                                       |
 | `tap_android_screen`      | Sends a tap event                         | `x`, `y`, `deviceId` (optional)                                            |
@@ -519,11 +538,11 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `scroll_until_id`         | Scroll until resource-id appears          | `resourceId`, `matchMode` (optional), `maxScrolls` (optional)              |
 | `scroll_until_desc`       | Scroll until content-desc appears         | `contentDesc`, `matchMode` (optional), `maxScrolls` (optional)             |
 | `wait_for_package`        | Wait for package in foreground            | `packageName`, `timeoutMs`/`intervalMs` (optional)                         |
-| `run_flow_plan`           | Execute a multi-step UI plan quickly      | `steps`, `stopOnFailure` (optional), `deviceId`/`deviceAlias` (optional)   |
-| `query_ui`                | Query UI nodes by selector                | `selector`, `maxResults` (optional), `deviceId` (optional)                 |
+| `run_flow_plan`           | Execute a multi-step UI plan quickly      | `steps`, `stopOnFailure`, `stepRetries`, `retryDelayMs`, `onFailSteps`      |
+| `query_ui`                | Query UI nodes by selector                | `selector`, `maxResults`, `useCache`, `maxAgeMs`, `deviceId` (optional)     |
 | `wait_for_node_count`     | Wait for selector match count             | `selector`, `count`, `comparator` (optional)                               |
 | `tap_by_selector_index`   | Tap selector match by index               | `selector`, `index` (optional), `deviceId` (optional)                      |
-| `ui_dump_cached`          | Return last cached UI dump                | `deviceId` (optional), `maxChars` (optional)                               |
+| `ui_dump_cached`          | Return last cached UI dump                | `deviceId`, `maxChars`, `maxAgeMs`, `invalidateOnActivityChange`, `refresh` |
 | `reverse_android_port`    | Reverse TCP port (device → host)          | `devicePort`, `hostPort` (optional), `deviceId` (optional)                 |
 | `forward_android_port`    | Forward TCP port (host → device)          | `devicePort`, `hostPort`, `deviceId` (optional)                            |
 | `get_android_logcat`      | Fetch recent logcat output                | `lines` (optional), filters, `deviceId` (optional)                         |

@@ -2181,6 +2181,7 @@ class AndroidMcpServer {
       submitLabels: input.submitLabels,
       imeId: input.imeId,
       hideKeyboard: input.hideKeyboard,
+      submitFallback: input.submitFallback,
     });
     return SmartLoginOutputSchema.parse(result);
   }
@@ -2205,6 +2206,7 @@ class AndroidMcpServer {
       submitLabels: input.submitLabels,
       hideKeyboard: input.hideKeyboard,
       useAdbKeyboard: input.useAdbKeyboard,
+      submitFallback: input.submitFallback,
     });
     return SmartLoginFastOutputSchema.parse(result);
   }
@@ -2342,7 +2344,12 @@ class AndroidMcpServer {
   private async dumpUiHierarchy(
     input: z.infer<typeof DumpUiInputSchema>
   ): Promise<z.infer<typeof DumpUiOutputSchema>> {
-    const result = adbDumpUiHierarchy(input.deviceId, { maxChars: input.maxChars });
+    const result = adbDumpUiHierarchy(input.deviceId, {
+      maxChars: input.maxChars,
+      cache: input.useCache,
+      maxAgeMs: input.maxAgeMs,
+      invalidateOnActivityChange: input.invalidateOnActivityChange,
+    });
     return DumpUiOutputSchema.parse(result);
   }
 
@@ -2477,7 +2484,10 @@ class AndroidMcpServer {
       : undefined;
 
     const screenshot = input.captureScreenshot
-      ? await this.getScreenshotWithThrottle(swipe.deviceId, input.screenshotThrottleMs)
+      ? await this.getScreenshotWithThrottle(
+          swipe.deviceId,
+          input.screenshotThrottleMs ?? 600
+        )
       : undefined;
 
     return SmartSwipeOutputSchema.parse({
@@ -2588,39 +2598,12 @@ class AndroidMcpServer {
     }
 
     if (input.steps && input.steps.length > 0) {
-      stepResults = [];
-      const retries = input.stepRetries ?? 0;
-      for (const step of input.steps) {
-        let lastResult: z.infer<typeof RunFlowPlanOutputSchema> | undefined;
-        let attempt = 0;
-        while (attempt <= retries) {
-          lastResult = adbRunFlowPlan([step], targetDeviceId, { stopOnFailure: true });
-          const stepResult = lastResult.steps[0];
-          if (stepResult?.ok) {
-            stepResults.push(stepResult);
-            break;
-          }
-          attempt += 1;
-          if (attempt > retries) {
-            if (stepResult) {
-              stepResults.push(stepResult);
-            }
-            break;
-          }
-          if (input.retryDelayMs && input.retryDelayMs > 0) {
-            adbBatchInputActions(
-              [{ type: 'sleep', durationMs: input.retryDelayMs }],
-              targetDeviceId,
-              { timeoutMs: input.timeoutMs, resolvedDeviceId: targetDeviceId }
-            );
-          }
-        }
-
-        const lastStep = stepResults[stepResults.length - 1];
-        if (input.stepRetries !== undefined && input.stepRetries >= 0 && lastStep && !lastStep.ok) {
-          break;
-        }
-      }
+      const flow = adbRunFlowPlan(input.steps, targetDeviceId, {
+        stopOnFailure: true,
+        stepRetries: input.stepRetries,
+        retryDelayMs: input.retryDelayMs,
+      });
+      stepResults = flow.steps;
     }
 
     const result =
@@ -2881,7 +2864,10 @@ class AndroidMcpServer {
       : undefined;
 
     const screenshot = input.captureScreenshot
-      ? await this.getScreenshotWithThrottle(scroll.deviceId, input.screenshotThrottleMs)
+      ? await this.getScreenshotWithThrottle(
+          scroll.deviceId,
+          input.screenshotThrottleMs ?? 600
+        )
       : undefined;
 
     return SmartScrollOutputSchema.parse({
@@ -3002,6 +2988,9 @@ class AndroidMcpServer {
     const targetDeviceId = this.resolveDeviceIdInput(input.deviceId, input.deviceAlias);
     const result = adbRunFlowPlan(input.steps, targetDeviceId, {
       stopOnFailure: input.stopOnFailure,
+      stepRetries: input.stepRetries,
+      retryDelayMs: input.retryDelayMs,
+      onFailSteps: input.onFailSteps,
     });
     return RunFlowPlanOutputSchema.parse(result);
   }
@@ -3010,7 +2999,12 @@ class AndroidMcpServer {
     input: z.infer<typeof QueryUiInputSchema>
   ): Promise<z.infer<typeof QueryUiOutputSchema>> {
     const selector = UiSelectorSchema.parse(input.selector);
-    const result = adbQueryUi(selector, input.deviceId, { maxResults: input.maxResults });
+    const result = adbQueryUi(selector, input.deviceId, {
+      maxResults: input.maxResults,
+      useCache: input.useCache,
+      maxAgeMs: input.maxAgeMs,
+      invalidateOnActivityChange: input.invalidateOnActivityChange,
+    });
     return QueryUiOutputSchema.parse(result);
   }
 
@@ -3042,7 +3036,12 @@ class AndroidMcpServer {
   private async uiDumpCached(
     input: z.infer<typeof UiDumpCachedInputSchema>
   ): Promise<z.infer<typeof UiDumpCachedOutputSchema>> {
-    const result = adbGetCachedUiDump(input.deviceId, { maxChars: input.maxChars });
+    const result = adbGetCachedUiDump(input.deviceId, {
+      maxChars: input.maxChars,
+      maxAgeMs: input.maxAgeMs,
+      invalidateOnActivityChange: input.invalidateOnActivityChange,
+      refresh: input.refresh,
+    });
     return UiDumpCachedOutputSchema.parse(result);
   }
 

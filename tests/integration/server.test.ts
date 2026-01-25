@@ -143,6 +143,9 @@ jest.mock('../../src/types', () => {
     DumpUiInputSchema: z.object({
       deviceId: z.string().optional(),
       maxChars: z.number().optional(),
+      useCache: z.boolean().optional(),
+      maxAgeMs: z.number().optional(),
+      invalidateOnActivityChange: z.boolean().optional(),
     }),
     StopAppInputSchema: z.object({
       deviceId: z.string().optional(),
@@ -422,11 +425,17 @@ jest.mock('../../src/types', () => {
       deviceAlias: z.string().optional(),
       steps: z.array(z.any()),
       stopOnFailure: z.boolean().optional(),
+      stepRetries: z.number().optional(),
+      retryDelayMs: z.number().optional(),
+      onFailSteps: z.array(z.any()).optional(),
     }),
     QueryUiInputSchema: z.object({
       deviceId: z.string().optional(),
       selector: z.any(),
       maxResults: z.number().optional(),
+      useCache: z.boolean().optional(),
+      maxAgeMs: z.number().optional(),
+      invalidateOnActivityChange: z.boolean().optional(),
     }),
     WaitForNodeCountInputSchema: z.object({
       deviceId: z.string().optional(),
@@ -444,6 +453,9 @@ jest.mock('../../src/types', () => {
     UiDumpCachedInputSchema: z.object({
       deviceId: z.string().optional(),
       maxChars: z.number().optional(),
+      maxAgeMs: z.number().optional(),
+      invalidateOnActivityChange: z.boolean().optional(),
+      refresh: z.boolean().optional(),
     }),
     SetDeviceAliasInputSchema: z.object({
       alias: z.string(),
@@ -509,6 +521,7 @@ jest.mock('../../src/types', () => {
       submitLabels: z.array(z.string()).optional(),
       imeId: z.string().optional(),
       hideKeyboard: z.boolean().optional(),
+      submitFallback: z.boolean().optional(),
     }),
     DetectLoginFieldsInputSchema: z.object({
       deviceId: z.string().optional(),
@@ -521,6 +534,7 @@ jest.mock('../../src/types', () => {
       submitLabels: z.array(z.string()).optional(),
       hideKeyboard: z.boolean().optional(),
       useAdbKeyboard: z.boolean().optional(),
+      submitFallback: z.boolean().optional(),
     }),
     ReversePortInputSchema: z.object({
       deviceId: z.string().optional(),
@@ -993,6 +1007,7 @@ jest.mock('../../src/types', () => {
       truncated: z.boolean().optional(),
       filePath: z.string(),
       ageMs: z.number(),
+      hash: z.string().optional(),
     }),
     SetDeviceAliasOutputSchema: z.object({
       alias: z.string(),
@@ -1270,6 +1285,9 @@ jest.mock('../../src/types', () => {
       properties: {
         deviceId: { type: 'string' },
         maxChars: { type: 'number' },
+        useCache: { type: 'boolean' },
+        maxAgeMs: { type: 'number' },
+        invalidateOnActivityChange: { type: 'boolean' },
       },
       required: [],
     },
@@ -1713,6 +1731,9 @@ jest.mock('../../src/types', () => {
         deviceAlias: { type: 'string' },
         steps: { type: 'array' },
         stopOnFailure: { type: 'boolean' },
+        stepRetries: { type: 'number' },
+        retryDelayMs: { type: 'number' },
+        onFailSteps: { type: 'array' },
       },
       required: ['steps'],
     },
@@ -1722,6 +1743,9 @@ jest.mock('../../src/types', () => {
         deviceId: { type: 'string' },
         selector: { type: 'object' },
         maxResults: { type: 'number' },
+        useCache: { type: 'boolean' },
+        maxAgeMs: { type: 'number' },
+        invalidateOnActivityChange: { type: 'boolean' },
       },
       required: ['selector'],
     },
@@ -1751,6 +1775,9 @@ jest.mock('../../src/types', () => {
       properties: {
         deviceId: { type: 'string' },
         maxChars: { type: 'number' },
+        maxAgeMs: { type: 'number' },
+        invalidateOnActivityChange: { type: 'boolean' },
+        refresh: { type: 'boolean' },
       },
       required: [],
     },
@@ -1872,6 +1899,7 @@ jest.mock('../../src/types', () => {
         submitLabels: { type: 'array' },
         imeId: { type: 'string' },
         hideKeyboard: { type: 'boolean' },
+        submitFallback: { type: 'boolean' },
       },
       required: ['email', 'password'],
     },
@@ -1892,6 +1920,7 @@ jest.mock('../../src/types', () => {
         submitLabels: { type: 'array' },
         hideKeyboard: { type: 'boolean' },
         useAdbKeyboard: { type: 'boolean' },
+        submitFallback: { type: 'boolean' },
       },
       required: ['email', 'password'],
     },

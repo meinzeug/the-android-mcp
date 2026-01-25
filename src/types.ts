@@ -683,6 +683,12 @@ export const DumpUiInputSchema = z.object({
     .positive()
     .optional()
     .describe('Optional maximum number of characters to return from the UI dump.'),
+  useCache: z.boolean().optional().describe('Use cached UI dump when available.'),
+  maxAgeMs: z.number().int().positive().optional().describe('Max age for cached UI dump in ms.'),
+  invalidateOnActivityChange: z
+    .boolean()
+    .optional()
+    .describe('Invalidate cache when activity changes.'),
 });
 
 export const DumpUiOutputSchema = z.object({
@@ -1456,6 +1462,7 @@ export const WaitForPackageOutputSchema = z.object({
 
 const FlowStepBaseSchema = z.object({
   id: z.string().optional().describe('Optional step id.'),
+  retries: z.number().int().min(0).optional().describe('Optional retries for this step.'),
 });
 
 const FlowTapStepSchema = FlowStepBaseSchema.extend({
@@ -1580,6 +1587,45 @@ const FlowPressKeySequenceStepSchema = FlowStepBaseSchema.extend({
   intervalMs: z.number().int().min(0).optional(),
 });
 
+const FlowAssertTextStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('assert_text'),
+  text: z.string().min(1),
+  matchMode: z.enum(['exact', 'contains', 'regex']).optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  intervalMs: z.number().int().positive().optional(),
+});
+
+const FlowAssertIdStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('assert_id'),
+  resourceId: z.string().min(1),
+  matchMode: z.enum(['exact', 'contains', 'regex']).optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  intervalMs: z.number().int().positive().optional(),
+});
+
+const FlowAssertDescStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('assert_desc'),
+  contentDesc: z.string().min(1),
+  matchMode: z.enum(['exact', 'contains', 'regex']).optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  intervalMs: z.number().int().positive().optional(),
+});
+
+const FlowAssertActivityStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('assert_activity'),
+  activity: z.string().min(1),
+  matchMode: z.enum(['exact', 'contains', 'regex']).optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  intervalMs: z.number().int().positive().optional(),
+});
+
+const FlowAssertPackageStepSchema = FlowStepBaseSchema.extend({
+  type: z.literal('assert_package'),
+  packageName: z.string().min(1),
+  timeoutMs: z.number().int().positive().optional(),
+  intervalMs: z.number().int().positive().optional(),
+});
+
 export const FlowStepSchema = z.discriminatedUnion('type', [
   FlowTapStepSchema,
   FlowTapRelativeStepSchema,
@@ -1599,6 +1645,11 @@ export const FlowStepSchema = z.discriminatedUnion('type', [
   FlowWaitActivityStepSchema,
   FlowWaitPackageStepSchema,
   FlowPressKeySequenceStepSchema,
+  FlowAssertTextStepSchema,
+  FlowAssertIdStepSchema,
+  FlowAssertDescStepSchema,
+  FlowAssertActivityStepSchema,
+  FlowAssertPackageStepSchema,
 ]);
 
 export const RunFlowPlanInputSchema = z.object({
@@ -1609,6 +1660,17 @@ export const RunFlowPlanInputSchema = z.object({
   deviceAlias: z.string().optional().describe('Optional device alias to resolve.'),
   steps: z.array(FlowStepSchema).min(1).describe('Ordered list of steps to execute.'),
   stopOnFailure: z.boolean().default(true).describe('Stop when a step fails.'),
+  stepRetries: z.number().int().min(0).default(0).describe('Retries per step.'),
+  retryDelayMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Delay between step retries (milliseconds).'),
+  onFailSteps: z
+    .array(FlowStepSchema)
+    .optional()
+    .describe('Optional steps to execute when a step fails.'),
 });
 
 export const RunFlowPlanOutputSchema = z.object({
@@ -1720,6 +1782,12 @@ export const QueryUiInputSchema = z.object({
     .describe('Optional device ID. If not provided, uses the first available device.'),
   selector: UiSelectorSchema,
   maxResults: z.number().int().positive().optional().describe('Max results to return.'),
+  useCache: z.boolean().optional().describe('Use cached UI dump when available.'),
+  maxAgeMs: z.number().int().positive().optional().describe('Max age for cached UI dump in ms.'),
+  invalidateOnActivityChange: z
+    .boolean()
+    .optional()
+    .describe('Invalidate cache when activity changes.'),
 });
 
 export const QueryUiOutputSchema = z.object({
@@ -1790,6 +1858,12 @@ export const UiDumpCachedInputSchema = z.object({
     .optional()
     .describe('Optional device ID. If not provided, uses the first available device.'),
   maxChars: z.number().int().positive().optional().describe('Optional maximum number of characters.'),
+  maxAgeMs: z.number().int().positive().optional().describe('Max age for cached UI dump in ms.'),
+  invalidateOnActivityChange: z
+    .boolean()
+    .optional()
+    .describe('Invalidate cache when activity changes.'),
+  refresh: z.boolean().optional().describe('Refresh cache when missing/stale.'),
 });
 
 export const UiDumpCachedOutputSchema = z.object({
@@ -1799,6 +1873,7 @@ export const UiDumpCachedOutputSchema = z.object({
   truncated: z.boolean().optional().describe('Whether XML was truncated'),
   filePath: z.string().describe('Remote dump file path'),
   ageMs: z.number().describe('Age of cached dump in ms'),
+  hash: z.string().optional().describe('Hash of cached dump'),
 });
 
 export const SetDeviceAliasInputSchema = z.object({
@@ -2011,6 +2086,10 @@ export const SmartLoginInputSchema = z.object({
     .optional()
     .describe('Optional IME ID for ADB keyboard (default: com.android.adbkeyboard/.AdbIME).'),
   hideKeyboard: z.boolean().default(true).describe('Hide keyboard before submit.'),
+  submitFallback: z
+    .boolean()
+    .default(true)
+    .describe('Attempt editor action/enter if no submit button is found.'),
 });
 
 export const SmartLoginOutputSchema = z.object({
@@ -2047,6 +2126,10 @@ export const SmartLoginFastInputSchema = z.object({
   submitLabels: z.array(z.string()).optional().describe('Custom submit labels.'),
   hideKeyboard: z.boolean().default(true).describe('Hide keyboard before submit.'),
   useAdbKeyboard: z.boolean().default(false).describe('Use ADB Keyboard instead of batch input.'),
+  submitFallback: z
+    .boolean()
+    .default(true)
+    .describe('Attempt editor action/enter if no submit button is found.'),
 });
 
 export const SmartLoginFastOutputSchema = SmartLoginOutputSchema;
@@ -2383,6 +2466,12 @@ export const DumpUiToolSchema = {
     maxChars: {
       type: 'number' as const,
       description: 'Optional maximum number of characters to return from the UI dump.',
+    },
+    useCache: { type: 'boolean' as const, description: 'Use cached UI dump when available.' },
+    maxAgeMs: { type: 'number' as const, description: 'Max age for cached UI dump in ms.' },
+    invalidateOnActivityChange: {
+      type: 'boolean' as const,
+      description: 'Invalidate cache when activity changes.',
     },
   },
   required: [] as string[],
@@ -3308,6 +3397,18 @@ export const RunFlowPlanToolSchema = {
       description: 'Stop when a step fails.',
       default: true,
     },
+    stepRetries: {
+      type: 'number' as const,
+      description: 'Retries per step.',
+    },
+    retryDelayMs: {
+      type: 'number' as const,
+      description: 'Delay between step retries (milliseconds).',
+    },
+    onFailSteps: {
+      type: 'array' as const,
+      description: 'Optional steps to execute when a step fails.',
+    },
   },
   required: ['steps'] as string[],
 };
@@ -3324,6 +3425,12 @@ export const QueryUiToolSchema = {
       description: 'Selector {field,value,matchMode}.',
     },
     maxResults: { type: 'number' as const, description: 'Max results to return.' },
+    useCache: { type: 'boolean' as const, description: 'Use cached UI dump when available.' },
+    maxAgeMs: { type: 'number' as const, description: 'Max age for cached UI dump in ms.' },
+    invalidateOnActivityChange: {
+      type: 'boolean' as const,
+      description: 'Invalidate cache when activity changes.',
+    },
   },
   required: ['selector'] as string[],
 };
@@ -3365,6 +3472,12 @@ export const UiDumpCachedToolSchema = {
       description: 'Optional device ID. If not provided, uses the first available device.',
     },
     maxChars: { type: 'number' as const, description: 'Optional maximum number of characters.' },
+    maxAgeMs: { type: 'number' as const, description: 'Max age for cached UI dump in ms.' },
+    invalidateOnActivityChange: {
+      type: 'boolean' as const,
+      description: 'Invalidate cache when activity changes.',
+    },
+    refresh: { type: 'boolean' as const, description: 'Refresh cache when missing/stale.' },
   },
   required: [] as string[],
 };
@@ -3500,6 +3613,7 @@ export const SmartLoginToolSchema = {
     submitLabels: { type: 'array' as const, description: 'Custom submit labels.' },
     imeId: { type: 'string' as const, description: 'Optional IME ID.' },
     hideKeyboard: { type: 'boolean' as const, description: 'Hide keyboard before submit.' },
+    submitFallback: { type: 'boolean' as const, description: 'Attempt editor action/enter if no submit button is found.' },
   },
   required: ['email', 'password'] as string[],
 };
@@ -3522,6 +3636,7 @@ export const SmartLoginFastToolSchema = {
     submitLabels: { type: 'array' as const, description: 'Custom submit labels.' },
     hideKeyboard: { type: 'boolean' as const, description: 'Hide keyboard before submit.' },
     useAdbKeyboard: { type: 'boolean' as const, description: 'Use ADB Keyboard instead of batch input.' },
+    submitFallback: { type: 'boolean' as const, description: 'Attempt editor action/enter if no submit button is found.' },
   },
   required: ['email', 'password'] as string[],
 };

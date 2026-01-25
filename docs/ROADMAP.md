@@ -29,6 +29,9 @@ This is the concrete plan to reach **v3.0**. Items are grouped by impact and can
 - [x] **Gesture profiles** with profile‑driven defaults (`fast`, `normal`, `safe`).
 - [x] **Swipe+Screenshot** single‑call helper.
 - [x] **Issue tool** scaffolded with `gh issue create` support.
+- [x] **Flow Orchestrator v1**: asserts, retries, on‑fail hooks in `run_flow_plan`.
+- [x] **UI‑dump cache** with age + activity invalidation + hash metadata.
+- [x] **Batch‑first flow execution** for input-heavy steps.
 
 ## Nice‑to‑have
 - [ ] **Multi‑device test matrix** (parallel runs).

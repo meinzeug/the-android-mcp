@@ -26,7 +26,10 @@ const APK_SEARCH_DIRS = [
   'build/outputs/flutter-apk',
 ];
 
-const UI_DUMP_CACHE: Record<string, { xml: string; timestamp: number; filePath: string }> = {};
+const UI_DUMP_CACHE: Record<
+  string,
+  { xml: string; timestamp: number; filePath: string; activity?: string; hash?: string }
+> = {};
 
 function escapeShellArg(value: string): string {
   if (process.platform === 'win32') {
@@ -486,6 +489,11 @@ function pickLargest(nodes: UiNode[], predicate: (node: UiNode) => boolean): UiN
   })[0];
 }
 
+function boundsArea(bounds?: { x1: number; y1: number; x2: number; y2: number }): number {
+  if (!bounds) return 0;
+  return Math.abs(bounds.x2 - bounds.x1) * Math.abs(bounds.y2 - bounds.y1);
+}
+
 function containsBounds(
   outer?: { x1: number; y1: number; x2: number; y2: number },
   inner?: { x1: number; y1: number; x2: number; y2: number }
@@ -639,6 +647,29 @@ export function detectLoginFields(options: {
       isSubmitCandidate(node, submitLabels)
     );
 
+  if (!submitButton && passwordBounds) {
+    const fallbackCandidates = nodes.filter(
+      node =>
+        node.bounds &&
+        node.clickable &&
+        node.bounds.y1 >= submitMinY &&
+        !isTextInput(node)
+    );
+    if (fallbackCandidates.length === 1) {
+      return { deviceId: targetDeviceId, emailField, passwordField, submitButton: fallbackCandidates[0] };
+    }
+    if (fallbackCandidates.length > 1) {
+      const sorted = [...fallbackCandidates].sort(
+        (a, b) => boundsArea(b.bounds) - boundsArea(a.bounds)
+      );
+      const top = sorted[0];
+      const second = sorted[1];
+      if (top && (!second || boundsArea(top.bounds) >= boundsArea(second.bounds) * 1.4)) {
+        return { deviceId: targetDeviceId, emailField, passwordField, submitButton: top };
+      }
+    }
+  }
+
   return { deviceId: targetDeviceId, emailField, passwordField, submitButton };
 }
 
@@ -649,6 +680,7 @@ export function smartLogin(options: {
   submitLabels?: string[];
   imeId?: string;
   hideKeyboard?: boolean;
+  submitFallback?: boolean;
 }): SmartLoginResult {
   const targetDeviceId = resolveDeviceId(options.deviceId);
   const output: string[] = [];
@@ -697,6 +729,16 @@ export function smartLogin(options: {
 
   if (submitButton) {
     tapUiNode(targetDeviceId, submitButton);
+  } else if (options.submitFallback !== false) {
+    if (usedIme) {
+      const actionResult = adbKeyboardEditorAction(6, targetDeviceId, {
+        imeId: options.imeId,
+        setIme: true,
+      });
+      output.push(actionResult.output);
+    }
+    const enter = sendKeyevent('66', targetDeviceId);
+    output.push(enter.output);
   }
 
   return {
@@ -716,6 +758,7 @@ export function smartLoginFast(options: {
   submitLabels?: string[];
   hideKeyboard?: boolean;
   useAdbKeyboard?: boolean;
+  submitFallback?: boolean;
 }): SmartLoginResult {
   const targetDeviceId = resolveDeviceId(options.deviceId);
   const { emailField, passwordField, submitButton } = detectLoginFields({
@@ -779,6 +822,13 @@ export function smartLoginFast(options: {
 
   if (submitButton && options.useAdbKeyboard) {
     tapUiNode(targetDeviceId, submitButton);
+  } else if (!submitButton && options.submitFallback !== false) {
+    if (options.useAdbKeyboard) {
+      const actionResult = adbKeyboardEditorAction(6, targetDeviceId, { setIme: true });
+      output.push(actionResult.output);
+    }
+    const enter = sendKeyevent('66', targetDeviceId);
+    output.push(enter.output);
   }
 
   return {
@@ -818,19 +868,73 @@ export function captureScreenshot(deviceId?: string): Buffer {
 
 export function dumpUiHierarchy(
   deviceId?: string,
-  options: { maxChars?: number } = {}
+  options: {
+    maxChars?: number;
+    cache?: boolean;
+    maxAgeMs?: number;
+    invalidateOnActivityChange?: boolean;
+  } = {}
 ): { deviceId: string; xml: string; length: number; truncated?: boolean; filePath: string } {
-  const filePath = '/sdcard/mcp_ui.xml';
-  const { deviceId: targetDeviceId } = executeADBCommandOnDevice(
-    `shell uiautomator dump ${escapeShellArg(filePath)}`,
-    deviceId,
-    { timeout: 10000 }
-  );
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const maxAgeMs = options.maxAgeMs ?? 750;
+  const invalidateOnActivityChange = options.invalidateOnActivityChange !== false;
+  const cached = options.cache ? UI_DUMP_CACHE[targetDeviceId] : undefined;
 
-  const output = executeADBCommand(
-    `-s ${targetDeviceId} exec-out cat ${escapeShellArg(filePath)}`,
-    { timeout: 10000 }
-  );
+  if (cached) {
+    const ageMs = Date.now() - cached.timestamp;
+    if (ageMs <= maxAgeMs) {
+      if (invalidateOnActivityChange && cached.activity) {
+        const current = getCurrentActivity(targetDeviceId);
+        const currentActivity = current.component ?? current.activity ?? '';
+        if (currentActivity && currentActivity !== cached.activity) {
+          // ignore cache; activity changed
+        } else {
+          const xml = cached.xml;
+          if (options.maxChars && xml.length > options.maxChars) {
+            return {
+              deviceId: targetDeviceId,
+              xml: xml.slice(0, options.maxChars),
+              length: options.maxChars,
+              truncated: true,
+              filePath: cached.filePath,
+            };
+          }
+          return {
+            deviceId: targetDeviceId,
+            xml,
+            length: xml.length,
+            filePath: cached.filePath,
+          };
+        }
+      } else {
+        const xml = cached.xml;
+        if (options.maxChars && xml.length > options.maxChars) {
+          return {
+            deviceId: targetDeviceId,
+            xml: xml.slice(0, options.maxChars),
+            length: options.maxChars,
+            truncated: true,
+            filePath: cached.filePath,
+          };
+        }
+        return {
+          deviceId: targetDeviceId,
+          xml,
+          length: xml.length,
+          filePath: cached.filePath,
+        };
+      }
+    }
+  }
+
+  const filePath = '/sdcard/mcp_ui.xml';
+  executeADBCommand(`-s ${targetDeviceId} shell uiautomator dump ${escapeShellArg(filePath)}`, {
+    timeout: 10000,
+  });
+
+  const output = executeADBCommand(`-s ${targetDeviceId} exec-out cat ${escapeShellArg(filePath)}`, {
+    timeout: 10000,
+  });
 
   executeADBCommand(`-s ${targetDeviceId} shell rm ${escapeShellArg(filePath)}`);
 
@@ -843,17 +947,24 @@ export function dumpUiHierarchy(
     );
   }
 
-  const fullRecord = {
-    deviceId: targetDeviceId,
-    xml,
-    length: xml.length,
-    filePath,
-  };
+  const recordActivity = options.cache === true || options.invalidateOnActivityChange === true;
+  const currentActivity = recordActivity
+    ? (() => {
+        try {
+          const current = getCurrentActivity(targetDeviceId);
+          return current.component ?? current.activity ?? '';
+        } catch {
+          return '';
+        }
+      })()
+    : '';
 
   UI_DUMP_CACHE[targetDeviceId] = {
     xml,
     timestamp: Date.now(),
     filePath,
+    activity: currentActivity || undefined,
+    hash: hashString(xml),
   };
 
   if (options.maxChars && xml.length > options.maxChars) {
@@ -866,7 +977,12 @@ export function dumpUiHierarchy(
     };
   }
 
-  return fullRecord;
+  return {
+    deviceId: targetDeviceId,
+    xml,
+    length: xml.length,
+    filePath,
+  };
 }
 
 // Get device information
@@ -2303,15 +2419,24 @@ export function pressKeySequence(
   return { deviceId: result.deviceId, keyCodes, output: result.output };
 }
 
+function resolveRelativePoint(
+  deviceId: string,
+  xPercent: number,
+  yPercent: number
+): { x: number; y: number } {
+  const { width, height } = getWindowSize(deviceId);
+  const x = Math.round((xPercent / 100) * width);
+  const y = Math.round((yPercent / 100) * height);
+  return { x, y };
+}
+
 export function tapRelative(
   xPercent: number,
   yPercent: number,
   deviceId?: string
 ): { deviceId: string; xPercent: number; yPercent: number; x: number; y: number; output: string } {
   const targetDeviceId = resolveDeviceId(deviceId);
-  const { width, height } = getWindowSize(targetDeviceId);
-  const x = Math.round((xPercent / 100) * width);
-  const y = Math.round((yPercent / 100) * height);
+  const { x, y } = resolveRelativePoint(targetDeviceId, xPercent, yPercent);
   const output = executeADBCommand(`-s ${targetDeviceId} shell input tap ${x} ${y}`);
 
   return { deviceId: targetDeviceId, xPercent, yPercent, x, y, output: output.trim() };
@@ -2338,11 +2463,16 @@ export function swipeRelative(
   output: string;
 } {
   const targetDeviceId = resolveDeviceId(deviceId);
-  const { width, height } = getWindowSize(targetDeviceId);
-  const startX = Math.round((startXPercent / 100) * width);
-  const startY = Math.round((startYPercent / 100) * height);
-  const endX = Math.round((endXPercent / 100) * width);
-  const endY = Math.round((endYPercent / 100) * height);
+  const { x: startX, y: startY } = resolveRelativePoint(
+    targetDeviceId,
+    startXPercent,
+    startYPercent
+  );
+  const { x: endX, y: endY } = resolveRelativePoint(
+    targetDeviceId,
+    endXPercent,
+    endYPercent
+  );
   const durationArg = typeof durationMs === 'number' ? ` ${durationMs}` : '';
   const output = executeADBCommand(
     `-s ${targetDeviceId} shell input swipe ${startX} ${startY} ${endX} ${endY}${durationArg}`
@@ -2636,249 +2766,457 @@ function hashString(value: string): string {
 export function runFlowPlan(
   steps: Array<{ type: string; [key: string]: any }>,
   deviceId?: string,
-  options: { stopOnFailure?: boolean } = {}
+  options: {
+    stopOnFailure?: boolean;
+    stepRetries?: number;
+    retryDelayMs?: number;
+    onFailSteps?: Array<{ type: string; [key: string]: any }>;
+  } = {}
 ): { deviceId: string; steps: Array<{ id?: string; type: string; ok: boolean; message?: string; elapsedMs?: number }> } {
   const targetDeviceId = resolveDeviceId(deviceId);
   const stopOnFailure = options.stopOnFailure !== false;
+  const defaultRetries = options.stepRetries ?? 0;
+  const retryDelayMs = options.retryDelayMs ?? 0;
   const results: Array<{ id?: string; type: string; ok: boolean; message?: string; elapsedMs?: number }> = [];
+  const batchActions: BatchAction[] = [];
+  const batchMeta: Array<{ id?: string; type: string }> = [];
 
-  for (const step of steps) {
+  const flushBatch = () => {
+    if (batchActions.length === 0) return;
+    batchInputActions(batchActions, targetDeviceId);
+    for (const meta of batchMeta) {
+      results.push({ id: meta.id, type: meta.type, ok: true });
+    }
+    batchActions.length = 0;
+    batchMeta.length = 0;
+  };
+
+  const pushBatchable = (step: any) => {
+    switch (step.type) {
+      case 'tap':
+        batchActions.push({ type: 'tap', x: step.x, y: step.y });
+        batchMeta.push({ id: step.id, type: step.type });
+        return true;
+      case 'swipe':
+        batchActions.push({
+          type: 'swipe',
+          startX: step.startX,
+          startY: step.startY,
+          endX: step.endX,
+          endY: step.endY,
+          durationMs: step.durationMs,
+        });
+        batchMeta.push({ id: step.id, type: step.type });
+        return true;
+      case 'swipe_relative': {
+        const { x: startX, y: startY } = resolveRelativePoint(
+          targetDeviceId,
+          step.startXPercent,
+          step.startYPercent
+        );
+        const { x: endX, y: endY } = resolveRelativePoint(
+          targetDeviceId,
+          step.endXPercent,
+          step.endYPercent
+        );
+        batchActions.push({
+          type: 'swipe',
+          startX,
+          startY,
+          endX,
+          endY,
+          durationMs: step.durationMs,
+        });
+        batchMeta.push({ id: step.id, type: step.type });
+        return true;
+      }
+      case 'text':
+        batchActions.push({ type: 'text', text: step.text });
+        batchMeta.push({ id: step.id, type: step.type });
+        return true;
+      case 'keyevent':
+        batchActions.push({ type: 'keyevent', keyCode: step.keyCode });
+        batchMeta.push({ id: step.id, type: step.type });
+        return true;
+      case 'sleep':
+        batchActions.push({ type: 'sleep', durationMs: step.durationMs });
+        batchMeta.push({ id: step.id, type: step.type });
+        return true;
+      default:
+        return false;
+    }
+  };
+
+  const executeStepOnce = (step: any): { ok: boolean; message?: string; elapsedMs?: number } => {
     const start = Date.now();
-    try {
-      switch (step.type) {
-        case 'tap':
-          tapScreen(step.x, step.y, targetDeviceId);
-          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
-          break;
-        case 'tap_relative':
-          tapRelative(step.xPercent, step.yPercent, targetDeviceId);
-          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
-          break;
-        case 'tap_center':
-          tapCenter(targetDeviceId);
-          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
-          break;
-        case 'swipe':
-          swipeScreen(step.startX, step.startY, step.endX, step.endY, step.durationMs, targetDeviceId);
-          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
-          break;
-        case 'swipe_relative':
-          swipeRelative(
-            step.startXPercent,
-            step.startYPercent,
-            step.endXPercent,
-            step.endYPercent,
-            targetDeviceId,
-            step.durationMs
-          );
-          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
-          break;
-        case 'text':
-          inputText(step.text, targetDeviceId);
-          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
-          break;
-        case 'keyevent':
-          sendKeyevent(step.keyCode, targetDeviceId);
-          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
-          break;
-        case 'sleep':
-          executeADBCommand(`-s ${targetDeviceId} shell sleep ${step.durationMs / 1000}`);
-          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
-          break;
-        case 'tap_by_text': {
-          const res = tapByText(step.text, targetDeviceId, {
-            matchMode: step.matchMode,
-            index: step.index,
-          });
-          results.push({
-            id: step.id,
-            type: step.type,
-            ok: res.found,
-            message: res.found ? undefined : 'No matching text',
-            elapsedMs: Date.now() - start,
-          });
-          break;
-        }
-        case 'tap_by_id': {
-          const res = tapById(step.resourceId, targetDeviceId, { index: step.index });
-          results.push({
-            id: step.id,
-            type: step.type,
-            ok: res.found,
-            message: res.found ? undefined : 'No matching resource-id',
-            elapsedMs: Date.now() - start,
-          });
-          break;
-        }
-        case 'tap_by_desc': {
-          const res = tapByDesc(step.contentDesc, targetDeviceId, {
-            matchMode: step.matchMode,
-            index: step.index,
-          });
-          results.push({
-            id: step.id,
-            type: step.type,
-            ok: res.found,
-            message: res.found ? undefined : 'No matching content-desc',
-            elapsedMs: Date.now() - start,
-          });
-          break;
-        }
-        case 'type_by_id': {
-          const res = typeById(step.resourceId, step.text, targetDeviceId, {
-            matchMode: step.matchMode,
-            index: step.index,
-          });
-          results.push({
-            id: step.id,
-            type: step.type,
-            ok: res.found,
-            message: res.found ? undefined : 'No matching resource-id',
-            elapsedMs: Date.now() - start,
-          });
-          break;
-        }
-        case 'wait_for_text': {
+    switch (step.type) {
+      case 'tap_relative':
+        tapRelative(step.xPercent, step.yPercent, targetDeviceId);
+        return { ok: true, elapsedMs: Date.now() - start };
+      case 'tap_center':
+        tapCenter(targetDeviceId);
+        return { ok: true, elapsedMs: Date.now() - start };
+      case 'tap_by_text': {
+        const res = tapByText(step.text, targetDeviceId, {
+          matchMode: step.matchMode,
+          index: step.index,
+        });
+        return {
+          ok: res.found,
+          message: res.found ? undefined : 'No matching text',
+          elapsedMs: Date.now() - start,
+        };
+      }
+      case 'tap_by_id': {
+        const res = tapById(step.resourceId, targetDeviceId, { index: step.index });
+        return {
+          ok: res.found,
+          message: res.found ? undefined : 'No matching resource-id',
+          elapsedMs: Date.now() - start,
+        };
+      }
+      case 'tap_by_desc': {
+        const res = tapByDesc(step.contentDesc, targetDeviceId, {
+          matchMode: step.matchMode,
+          index: step.index,
+        });
+        return {
+          ok: res.found,
+          message: res.found ? undefined : 'No matching content-desc',
+          elapsedMs: Date.now() - start,
+        };
+      }
+      case 'type_by_id': {
+        const res = typeById(step.resourceId, step.text, targetDeviceId, {
+          matchMode: step.matchMode,
+          index: step.index,
+        });
+        return {
+          ok: res.found,
+          message: res.found ? undefined : 'No matching resource-id',
+          elapsedMs: Date.now() - start,
+        };
+      }
+      case 'wait_for_text': {
+        const res = waitForText(step.text, targetDeviceId, {
+          matchMode: step.matchMode,
+          timeoutMs: step.timeoutMs,
+          intervalMs: step.intervalMs,
+        });
+        return {
+          ok: res.found,
+          message: res.found ? undefined : 'Text not found',
+          elapsedMs: Date.now() - start,
+        };
+      }
+      case 'wait_for_id': {
+        const res = waitForId(step.resourceId, targetDeviceId, {
+          matchMode: step.matchMode,
+          timeoutMs: step.timeoutMs,
+          intervalMs: step.intervalMs,
+        });
+        return {
+          ok: res.found,
+          message: res.found ? undefined : 'Resource-id not found',
+          elapsedMs: Date.now() - start,
+        };
+      }
+      case 'wait_for_desc': {
+        const res = waitForDesc(step.contentDesc, targetDeviceId, {
+          matchMode: step.matchMode,
+          timeoutMs: step.timeoutMs,
+          intervalMs: step.intervalMs,
+        });
+        return {
+          ok: res.found,
+          message: res.found ? undefined : 'Content-desc not found',
+          elapsedMs: Date.now() - start,
+        };
+      }
+      case 'wait_for_activity': {
+        const res = waitForActivity(step.activity, targetDeviceId, {
+          matchMode: step.matchMode,
+          timeoutMs: step.timeoutMs,
+          intervalMs: step.intervalMs,
+        });
+        return {
+          ok: res.found,
+          message: res.found ? undefined : 'Activity not reached',
+          elapsedMs: Date.now() - start,
+        };
+      }
+      case 'wait_for_package': {
+        const res = waitForPackage(step.packageName, targetDeviceId, {
+          timeoutMs: step.timeoutMs,
+          intervalMs: step.intervalMs,
+        });
+        return {
+          ok: res.found,
+          message: res.found ? undefined : 'Package not in foreground',
+          elapsedMs: Date.now() - start,
+        };
+      }
+      case 'press_key_sequence':
+        pressKeySequence(step.keyCodes, targetDeviceId, { intervalMs: step.intervalMs });
+        return { ok: true, elapsedMs: Date.now() - start };
+      case 'assert_text': {
+        if (step.timeoutMs || step.intervalMs) {
           const res = waitForText(step.text, targetDeviceId, {
             matchMode: step.matchMode,
             timeoutMs: step.timeoutMs,
             intervalMs: step.intervalMs,
           });
-          results.push({
-            id: step.id,
-            type: step.type,
+          return {
             ok: res.found,
             message: res.found ? undefined : 'Text not found',
             elapsedMs: Date.now() - start,
-          });
-          break;
+          };
         }
-        case 'wait_for_id': {
+        const { xml } = dumpUiHierarchy(targetDeviceId);
+        const nodes = extractUiNodes(xml);
+        const matches = findNodesBy(nodes, 'text', step.text, step.matchMode ?? 'exact');
+        return {
+          ok: matches.length > 0,
+          message: matches.length > 0 ? undefined : 'Text not found',
+          elapsedMs: Date.now() - start,
+        };
+      }
+      case 'assert_id': {
+        if (step.timeoutMs || step.intervalMs) {
           const res = waitForId(step.resourceId, targetDeviceId, {
             matchMode: step.matchMode,
             timeoutMs: step.timeoutMs,
             intervalMs: step.intervalMs,
           });
-          results.push({
-            id: step.id,
-            type: step.type,
+          return {
             ok: res.found,
             message: res.found ? undefined : 'Resource-id not found',
             elapsedMs: Date.now() - start,
-          });
-          break;
+          };
         }
-        case 'wait_for_desc': {
+        const { xml } = dumpUiHierarchy(targetDeviceId);
+        const nodes = extractUiNodes(xml);
+        const matches = findNodesBy(nodes, 'resourceId', step.resourceId, step.matchMode ?? 'exact');
+        return {
+          ok: matches.length > 0,
+          message: matches.length > 0 ? undefined : 'Resource-id not found',
+          elapsedMs: Date.now() - start,
+        };
+      }
+      case 'assert_desc': {
+        if (step.timeoutMs || step.intervalMs) {
           const res = waitForDesc(step.contentDesc, targetDeviceId, {
             matchMode: step.matchMode,
             timeoutMs: step.timeoutMs,
             intervalMs: step.intervalMs,
           });
-          results.push({
-            id: step.id,
-            type: step.type,
+          return {
             ok: res.found,
             message: res.found ? undefined : 'Content-desc not found',
             elapsedMs: Date.now() - start,
-          });
-          break;
+          };
         }
-        case 'wait_for_activity': {
+        const { xml } = dumpUiHierarchy(targetDeviceId);
+        const nodes = extractUiNodes(xml);
+        const matches = findNodesBy(nodes, 'contentDesc', step.contentDesc, step.matchMode ?? 'exact');
+        return {
+          ok: matches.length > 0,
+          message: matches.length > 0 ? undefined : 'Content-desc not found',
+          elapsedMs: Date.now() - start,
+        };
+      }
+      case 'assert_activity': {
+        if (step.timeoutMs || step.intervalMs) {
           const res = waitForActivity(step.activity, targetDeviceId, {
             matchMode: step.matchMode,
             timeoutMs: step.timeoutMs,
             intervalMs: step.intervalMs,
           });
-          results.push({
-            id: step.id,
-            type: step.type,
+          return {
             ok: res.found,
             message: res.found ? undefined : 'Activity not reached',
             elapsedMs: Date.now() - start,
-          });
-          break;
+          };
         }
-        case 'wait_for_package': {
+        const current = getCurrentActivity(targetDeviceId);
+        const value = current.component ?? current.activity ?? '';
+        const ok = matchesValue(value, step.activity, step.matchMode ?? 'exact');
+        return { ok, message: ok ? undefined : 'Activity not reached', elapsedMs: Date.now() - start };
+      }
+      case 'assert_package': {
+        if (step.timeoutMs || step.intervalMs) {
           const res = waitForPackage(step.packageName, targetDeviceId, {
             timeoutMs: step.timeoutMs,
             intervalMs: step.intervalMs,
           });
-          results.push({
-            id: step.id,
-            type: step.type,
+          return {
             ok: res.found,
             message: res.found ? undefined : 'Package not in foreground',
             elapsedMs: Date.now() - start,
-          });
-          break;
+          };
         }
-        case 'press_key_sequence': {
-          pressKeySequence(step.keyCodes, targetDeviceId, { intervalMs: step.intervalMs });
-          results.push({ id: step.id, type: step.type, ok: true, elapsedMs: Date.now() - start });
-          break;
-        }
-        default:
-          results.push({ id: step.id, type: step.type, ok: false, message: 'Unknown step type' });
+        const current = getCurrentActivity(targetDeviceId);
+        const ok = current.packageName === step.packageName;
+        return {
+          ok,
+          message: ok ? undefined : 'Package not in foreground',
+          elapsedMs: Date.now() - start,
+        };
       }
-    } catch (error: any) {
-      results.push({
-        id: step.id,
-        type: step.type,
-        ok: false,
-        message: error?.message ?? String(error),
-        elapsedMs: Date.now() - start,
-      });
+      default:
+        return { ok: false, message: 'Unknown step type' };
+    }
+  };
+
+  const runOnFailSteps = () => {
+    if (!options.onFailSteps || options.onFailSteps.length === 0) return;
+    const fallback = runFlowPlan(options.onFailSteps, targetDeviceId, { stopOnFailure: false });
+    results.push(...fallback.steps);
+  };
+
+  for (const step of steps) {
+    if (pushBatchable(step)) {
+      continue;
     }
 
-    if (stopOnFailure && results[results.length - 1] && !results[results.length - 1].ok) {
-      break;
+    flushBatch();
+
+    const retries = typeof step.retries === 'number' ? step.retries : defaultRetries;
+    let attempt = 0;
+    let lastResult: { ok: boolean; message?: string; elapsedMs?: number } = { ok: false };
+
+    while (attempt <= retries) {
+      try {
+        lastResult = executeStepOnce(step);
+      } catch (error: any) {
+        lastResult = { ok: false, message: error?.message ?? String(error) };
+      }
+
+      if (lastResult.ok) break;
+
+      attempt += 1;
+      if (attempt <= retries && retryDelayMs > 0) {
+        executeADBCommand(`-s ${targetDeviceId} shell sleep ${retryDelayMs / 1000}`);
+      }
+    }
+
+    results.push({
+      id: step.id,
+      type: step.type,
+      ok: lastResult.ok,
+      message: lastResult.message,
+      elapsedMs: lastResult.elapsedMs,
+    });
+
+    if (!lastResult.ok) {
+      runOnFailSteps();
+      if (stopOnFailure) {
+        break;
+      }
     }
   }
+
+  flushBatch();
 
   return { deviceId: targetDeviceId, steps: results };
 }
 
 export function getCachedUiDump(
   deviceId?: string,
-  options: { maxChars?: number } = {}
-): { deviceId: string; xml: string; length: number; truncated?: boolean; filePath: string; ageMs: number } {
+  options: {
+    maxChars?: number;
+    maxAgeMs?: number;
+    invalidateOnActivityChange?: boolean;
+    refresh?: boolean;
+  } = {}
+): {
+  deviceId: string;
+  xml: string;
+  length: number;
+  truncated?: boolean;
+  filePath: string;
+  ageMs: number;
+  hash?: string;
+} {
   const targetDeviceId = resolveDeviceId(deviceId);
   const cached = UI_DUMP_CACHE[targetDeviceId];
-  if (!cached) {
+  const maxAgeMs = options.maxAgeMs ?? 0;
+  const invalidateOnActivityChange = options.invalidateOnActivityChange !== false;
+
+  if (cached) {
+    const ageMs = Date.now() - cached.timestamp;
+    const isFresh = maxAgeMs <= 0 ? true : ageMs <= maxAgeMs;
+    let activityMatches = true;
+
+    if (invalidateOnActivityChange && cached.activity) {
+      const current = getCurrentActivity(targetDeviceId);
+      const currentActivity = current.component ?? current.activity ?? '';
+      activityMatches = !currentActivity || currentActivity === cached.activity;
+    }
+
+    if (isFresh && activityMatches) {
+      const xml = cached.xml;
+      if (options.maxChars && xml.length > options.maxChars) {
+        return {
+          deviceId: targetDeviceId,
+          xml: xml.slice(0, options.maxChars),
+          length: options.maxChars,
+          truncated: true,
+          filePath: cached.filePath,
+          ageMs,
+          hash: cached.hash,
+        };
+      }
+
+      return {
+        deviceId: targetDeviceId,
+        xml,
+        length: xml.length,
+        filePath: cached.filePath,
+        ageMs,
+        hash: cached.hash,
+      };
+    }
+  }
+
+  if (!options.refresh) {
     throw new ADBCommandError('UI_DUMP_CACHE_MISS', 'No cached UI dump for device', {
       deviceId: targetDeviceId,
     });
   }
 
-  const ageMs = Date.now() - cached.timestamp;
-  const xml = cached.xml;
-  if (options.maxChars && xml.length > options.maxChars) {
-    return {
-      deviceId: targetDeviceId,
-      xml: xml.slice(0, options.maxChars),
-      length: options.maxChars,
-      truncated: true,
-      filePath: cached.filePath,
-      ageMs,
-    };
-  }
+  const fresh = dumpUiHierarchy(targetDeviceId, {
+    maxChars: options.maxChars,
+    cache: false,
+  });
 
   return {
     deviceId: targetDeviceId,
-    xml,
-    length: xml.length,
-    filePath: cached.filePath,
-    ageMs,
+    xml: fresh.xml,
+    length: fresh.length,
+    truncated: fresh.truncated,
+    filePath: fresh.filePath,
+    ageMs: 0,
+    hash: UI_DUMP_CACHE[targetDeviceId]?.hash,
   };
 }
 
 export function queryUi(
   selector: UiSelector,
   deviceId?: string,
-  options: { maxResults?: number } = {}
+  options: {
+    maxResults?: number;
+    useCache?: boolean;
+    maxAgeMs?: number;
+    invalidateOnActivityChange?: boolean;
+  } = {}
 ): { deviceId: string; selector: UiSelector; count: number; nodes: UiNode[] } {
   const targetDeviceId = resolveDeviceId(deviceId);
-  const { xml } = dumpUiHierarchy(targetDeviceId);
+  const { xml } = dumpUiHierarchy(targetDeviceId, {
+    cache: options.useCache,
+    maxAgeMs: options.maxAgeMs,
+    invalidateOnActivityChange: options.invalidateOnActivityChange,
+  });
   const nodes = extractUiNodes(xml);
   const matches = queryNodes(nodes, selector);
   const maxResults = options.maxResults ?? matches.length;
