@@ -261,6 +261,179 @@ export function executeADBCommandOnDevice(
   return { deviceId: targetDeviceId, output };
 }
 
+export function listImes(deviceId?: string): { deviceId: string; imes: string[]; current?: string; output: string } {
+  const { deviceId: targetDeviceId, output } = executeADBCommandOnDevice('shell ime list -s', deviceId);
+  const imes = output
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+  const current = getCurrentIme(targetDeviceId);
+  return { deviceId: targetDeviceId, imes, current, output: output.trim() };
+}
+
+export function getCurrentIme(deviceId?: string): string | undefined {
+  try {
+    const { output } = executeADBCommandOnDevice(
+      'shell settings get secure default_input_method',
+      deviceId
+    );
+    const trimmed = output.trim();
+    return trimmed || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function enableIme(imeId: string, deviceId?: string): { deviceId: string; imeId: string; output: string } {
+  const { deviceId: targetDeviceId, output } = executeADBCommandOnDevice(
+    `shell ime enable ${escapeShellArg(imeId)}`,
+    deviceId
+  );
+  return { deviceId: targetDeviceId, imeId, output: output.trim() };
+}
+
+export function setIme(imeId: string, deviceId?: string): { deviceId: string; imeId: string; output: string } {
+  const { deviceId: targetDeviceId, output } = executeADBCommandOnDevice(
+    `shell ime set ${escapeShellArg(imeId)}`,
+    deviceId
+  );
+  return { deviceId: targetDeviceId, imeId, output: output.trim() };
+}
+
+export function adbKeyboardInput(
+  text: string,
+  deviceId?: string,
+  options: { imeId?: string; setIme?: boolean; useBase64?: boolean } = {}
+): { deviceId: string; imeId: string; textLength: number; output: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const imeId = options.imeId ?? 'com.android.adbkeyboard/.AdbIME';
+  if (options.setIme !== false) {
+    try {
+      enableIme(imeId, targetDeviceId);
+    } catch {
+      // ignore enable failures; setIme may still work if already enabled
+    }
+    setIme(imeId, targetDeviceId);
+  }
+
+  const useBase64 = options.useBase64 !== false;
+  const payload = useBase64 ? Buffer.from(text, 'utf8').toString('base64') : text;
+  const action = useBase64 ? 'ADB_INPUT_B64' : 'ADB_INPUT_TEXT';
+  const messageKey = useBase64 ? 'msg' : 'msg';
+  const cmd = `shell am broadcast -a ${action} --es ${messageKey} ${escapeShellArg(payload)}`;
+  const { output } = executeADBCommandOnDevice(cmd, targetDeviceId);
+
+  return { deviceId: targetDeviceId, imeId, textLength: text.length, output: output.trim() };
+}
+
+type SmartLoginResult = {
+  deviceId: string;
+  emailFieldFound: boolean;
+  passwordFieldFound: boolean;
+  submitFound: boolean;
+  usedIme: boolean;
+  output: string[];
+};
+
+function isPasswordCandidate(node: UiNode): boolean {
+  const haystack = `${node.text} ${node.resourceId} ${node.contentDesc}`.toLowerCase();
+  return /pass|kennwort|pwd/.test(haystack);
+}
+
+function isEmailCandidate(node: UiNode): boolean {
+  const haystack = `${node.text} ${node.resourceId} ${node.contentDesc}`.toLowerCase();
+  return /mail|e-mail|email|user|benutzer|login/.test(haystack);
+}
+
+function isSubmitCandidate(node: UiNode, labels: string[]): boolean {
+  const haystack = `${node.text} ${node.resourceId} ${node.contentDesc}`.toLowerCase();
+  return labels.some(label => haystack.includes(label));
+}
+
+function pickBest(nodes: UiNode[], predicate: (node: UiNode) => boolean): UiNode | undefined {
+  const candidates = nodes.filter(node => node.bounds && predicate(node));
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  return candidates.sort((a, b) => {
+    const ay = a.bounds ? a.bounds.y1 : 0;
+    const by = b.bounds ? b.bounds.y1 : 0;
+    return ay - by;
+  })[0];
+}
+
+export function smartLogin(options: {
+  deviceId?: string;
+  email: string;
+  password: string;
+  submitLabels?: string[];
+  imeId?: string;
+  hideKeyboard?: boolean;
+}): SmartLoginResult {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const { xml } = dumpUiHierarchy(targetDeviceId);
+  const nodes = extractUiNodes(xml);
+  const output: string[] = [];
+  const submitLabels =
+    options.submitLabels ?? ['anmelden', 'login', 'sign in', 'weiter', 'continue'];
+
+  const emailField = pickBest(nodes, isEmailCandidate);
+  const passwordField = pickBest(nodes, isPasswordCandidate);
+  const submitButton = pickBest(nodes, node => isSubmitCandidate(node, submitLabels));
+
+  let usedIme = false;
+
+  if (emailField) {
+    tapUiNode(targetDeviceId, emailField);
+    try {
+      const imeResult = adbKeyboardInput(options.email, targetDeviceId, {
+        imeId: options.imeId,
+        setIme: true,
+        useBase64: true,
+      });
+      usedIme = true;
+      output.push(imeResult.output);
+    } catch (error: any) {
+      const res = inputText(options.email, targetDeviceId);
+      output.push(res.output);
+    }
+  }
+
+  if (passwordField) {
+    tapUiNode(targetDeviceId, passwordField);
+    try {
+      const imeResult = adbKeyboardInput(options.password, targetDeviceId, {
+        imeId: options.imeId,
+        setIme: true,
+        useBase64: true,
+      });
+      usedIme = true;
+      output.push(imeResult.output);
+    } catch (error: any) {
+      const res = inputText(options.password, targetDeviceId);
+      output.push(res.output);
+    }
+  }
+
+  if (options.hideKeyboard !== false) {
+    sendKeyevent('4', targetDeviceId);
+  }
+
+  if (submitButton) {
+    tapUiNode(targetDeviceId, submitButton);
+  }
+
+  return {
+    deviceId: targetDeviceId,
+    emailFieldFound: Boolean(emailField),
+    passwordFieldFound: Boolean(passwordField),
+    submitFound: Boolean(submitButton),
+    usedIme,
+    output,
+  };
+}
+
 // Capture screenshot from a device
 export function captureScreenshot(deviceId?: string): Buffer {
   try {

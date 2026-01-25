@@ -141,6 +141,24 @@ import {
   ClearDeviceAliasInputSchema,
   ClearDeviceAliasOutputSchema,
   ClearDeviceAliasToolSchema,
+  ListImesInputSchema,
+  ListImesOutputSchema,
+  ListImesToolSchema,
+  SetImeInputSchema,
+  SetImeOutputSchema,
+  SetImeToolSchema,
+  EnableImeInputSchema,
+  EnableImeOutputSchema,
+  EnableImeToolSchema,
+  AdbKeyboardInputSchema,
+  AdbKeyboardOutputSchema,
+  AdbKeyboardToolSchema,
+  SetAdbKeyboardModeInputSchema,
+  SetAdbKeyboardModeOutputSchema,
+  SetAdbKeyboardModeToolSchema,
+  SmartLoginInputSchema,
+  SmartLoginOutputSchema,
+  SmartLoginToolSchema,
   ReversePortInputSchema,
   ReversePortOutputSchema,
   ReversePortToolSchema,
@@ -199,6 +217,12 @@ import {
   waitForNodeCount as adbWaitForNodeCount,
   tapBySelectorIndex as adbTapBySelectorIndex,
   getCachedUiDump as adbGetCachedUiDump,
+  listImes as adbListImes,
+  setIme as adbSetIme,
+  enableIme as adbEnableIme,
+  adbKeyboardInput as adbKeyboardInput,
+  getCurrentIme as adbGetCurrentIme,
+  smartLogin as adbSmartLogin,
   uninstallApp as adbUninstallApp,
 } from './utils/adb.js';
 import { listPm2Apps, startPm2HotMode, stopPm2App } from './utils/pm2.js';
@@ -212,12 +236,13 @@ class AndroidMcpServer {
     string,
     { timestamp: number; shot: z.infer<typeof TakeScreenshotOutputSchema> }
   >;
+  private imeRestoreMap: Map<string, string>;
 
   constructor() {
     this.server = new Server(
       {
         name: 'the-android-mcp',
-        version: '0.1.15',
+        version: '0.1.16',
       },
       {
         capabilities: {
@@ -228,6 +253,7 @@ class AndroidMcpServer {
 
     this.deviceAliases = new Map();
     this.screenshotCache = new Map();
+    this.imeRestoreMap = new Map();
     this.setupToolHandlers();
   }
 
@@ -263,6 +289,36 @@ class AndroidMcpServer {
           name: 'clear_device_alias',
           description: 'Clear a device alias',
           inputSchema: ClearDeviceAliasToolSchema,
+        },
+        {
+          name: 'list_imes',
+          description: 'List available Android IMEs',
+          inputSchema: ListImesToolSchema,
+        },
+        {
+          name: 'set_ime',
+          description: 'Set the current Android IME',
+          inputSchema: SetImeToolSchema,
+        },
+        {
+          name: 'enable_ime',
+          description: 'Enable an Android IME',
+          inputSchema: EnableImeToolSchema,
+        },
+        {
+          name: 'adb_keyboard_input',
+          description: 'Input text via ADB Keyboard IME',
+          inputSchema: AdbKeyboardToolSchema,
+        },
+        {
+          name: 'set_adb_keyboard_mode',
+          description: 'Enable/disable ADB keyboard mode (restore previous IME)',
+          inputSchema: SetAdbKeyboardModeToolSchema,
+        },
+        {
+          name: 'smart_login',
+          description: 'Auto-fill login screen quickly (email/password/submit)',
+          inputSchema: SmartLoginToolSchema,
         },
         {
           name: 'find_android_apk',
@@ -562,6 +618,84 @@ class AndroidMcpServer {
           case 'clear_device_alias': {
             const input = ClearDeviceAliasInputSchema.parse(args);
             const result = await this.clearDeviceAlias(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'list_imes': {
+            const input = ListImesInputSchema.parse(args);
+            const result = await this.listImes(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'set_ime': {
+            const input = SetImeInputSchema.parse(args);
+            const result = await this.setIme(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'enable_ime': {
+            const input = EnableImeInputSchema.parse(args);
+            const result = await this.enableIme(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'adb_keyboard_input': {
+            const input = AdbKeyboardInputSchema.parse(args);
+            const result = await this.adbKeyboardInput(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'set_adb_keyboard_mode': {
+            const input = SetAdbKeyboardModeInputSchema.parse(args);
+            const result = await this.setAdbKeyboardMode(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'smart_login': {
+            const input = SmartLoginInputSchema.parse(args);
+            const result = await this.smartLogin(input);
             return {
               content: [
                 {
@@ -1314,6 +1448,91 @@ class AndroidMcpServer {
   ): Promise<z.infer<typeof ClearDeviceAliasOutputSchema>> {
     const removed = this.deviceAliases.delete(input.alias);
     return ClearDeviceAliasOutputSchema.parse({ alias: input.alias, removed });
+  }
+
+  private async listImes(
+    input: z.infer<typeof ListImesInputSchema>
+  ): Promise<z.infer<typeof ListImesOutputSchema>> {
+    const result = adbListImes(input.deviceId);
+    return ListImesOutputSchema.parse(result);
+  }
+
+  private async setIme(
+    input: z.infer<typeof SetImeInputSchema>
+  ): Promise<z.infer<typeof SetImeOutputSchema>> {
+    const result = adbSetIme(input.imeId, input.deviceId);
+    return SetImeOutputSchema.parse(result);
+  }
+
+  private async enableIme(
+    input: z.infer<typeof EnableImeInputSchema>
+  ): Promise<z.infer<typeof EnableImeOutputSchema>> {
+    const result = adbEnableIme(input.imeId, input.deviceId);
+    return EnableImeOutputSchema.parse(result);
+  }
+
+  private async adbKeyboardInput(
+    input: z.infer<typeof AdbKeyboardInputSchema>
+  ): Promise<z.infer<typeof AdbKeyboardOutputSchema>> {
+    const result = adbKeyboardInput(input.text, input.deviceId, {
+      imeId: input.imeId,
+      setIme: input.setIme,
+      useBase64: input.useBase64,
+    });
+    return AdbKeyboardOutputSchema.parse(result);
+  }
+
+  private async setAdbKeyboardMode(
+    input: z.infer<typeof SetAdbKeyboardModeInputSchema>
+  ): Promise<z.infer<typeof SetAdbKeyboardModeOutputSchema>> {
+    const deviceId = resolveDeviceId(input.deviceId);
+    const imeId = input.imeId ?? 'com.android.adbkeyboard/.AdbIME';
+
+    if (input.enable !== false) {
+      const previousIme = adbGetCurrentIme(deviceId);
+      if (previousIme) {
+        this.imeRestoreMap.set(deviceId, previousIme);
+      }
+      adbEnableIme(imeId, deviceId);
+      const result = adbSetIme(imeId, deviceId);
+      return SetAdbKeyboardModeOutputSchema.parse({
+        deviceId,
+        imeId,
+        previousIme,
+        output: result.output,
+      });
+    }
+
+    const previousIme = this.imeRestoreMap.get(deviceId);
+    if (!previousIme) {
+      return SetAdbKeyboardModeOutputSchema.parse({
+        deviceId,
+        imeId,
+        output: 'No previous IME stored',
+      });
+    }
+    const result = adbSetIme(previousIme, deviceId);
+    this.imeRestoreMap.delete(deviceId);
+    return SetAdbKeyboardModeOutputSchema.parse({
+      deviceId,
+      imeId: previousIme,
+      previousIme,
+      output: result.output,
+    });
+  }
+
+  private async smartLogin(
+    input: z.infer<typeof SmartLoginInputSchema>
+  ): Promise<z.infer<typeof SmartLoginOutputSchema>> {
+    const result = adbSmartLogin({
+      deviceId: input.deviceId,
+      email: input.email,
+      password: input.password,
+      submitLabels: input.submitLabels,
+      imeId: input.imeId,
+      hideKeyboard: input.hideKeyboard,
+    });
+    return SmartLoginOutputSchema.parse(result);
   }
 
   private async getScreenshotWithThrottle(

@@ -1340,6 +1340,112 @@ export const ClearDeviceAliasOutputSchema = z.object({
   removed: z.boolean().describe('Whether the alias was removed'),
 });
 
+export const ListImesInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+});
+
+export const ListImesOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  imes: z.array(z.string()).describe('Available IMEs'),
+  current: z.string().optional().describe('Current IME'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const SetImeInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  imeId: z.string().min(1).describe('IME ID to set.'),
+});
+
+export const SetImeOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  imeId: z.string().describe('IME ID'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const EnableImeInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  imeId: z.string().min(1).describe('IME ID to enable.'),
+});
+
+export const EnableImeOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  imeId: z.string().describe('IME ID'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const AdbKeyboardInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  text: z.string().min(1).describe('Text to input via ADB Keyboard.'),
+  imeId: z
+    .string()
+    .optional()
+    .describe('Optional IME ID (default: com.android.adbkeyboard/.AdbIME).'),
+  setIme: z.boolean().default(true).describe('Enable and set IME before input.'),
+  useBase64: z.boolean().default(true).describe('Send via base64 broadcast.'),
+});
+
+export const AdbKeyboardOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  imeId: z.string().describe('IME ID used'),
+  textLength: z.number().describe('Length of text sent'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const SetAdbKeyboardModeInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  imeId: z
+    .string()
+    .optional()
+    .describe('Optional IME ID (default: com.android.adbkeyboard/.AdbIME).'),
+  enable: z.boolean().default(true).describe('Enable ADB keyboard mode if true; restore if false.'),
+});
+
+export const SetAdbKeyboardModeOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  imeId: z.string().describe('IME ID used'),
+  previousIme: z.string().optional().describe('Previous IME when enabling'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const SmartLoginInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  email: z.string().min(1).describe('Email/login value.'),
+  password: z.string().min(1).describe('Password value.'),
+  submitLabels: z.array(z.string()).optional().describe('Custom submit button labels.'),
+  imeId: z
+    .string()
+    .optional()
+    .describe('Optional IME ID for ADB keyboard (default: com.android.adbkeyboard/.AdbIME).'),
+  hideKeyboard: z.boolean().default(true).describe('Hide keyboard before submit.'),
+});
+
+export const SmartLoginOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  emailFieldFound: z.boolean().describe('Whether an email field was found'),
+  passwordFieldFound: z.boolean().describe('Whether a password field was found'),
+  submitFound: z.boolean().describe('Whether a submit button was found'),
+  usedIme: z.boolean().describe('Whether ADB keyboard was used'),
+  output: z.array(z.string()).describe('Raw ADB outputs'),
+});
+
 export const ReversePortOutputSchema = z.object({
   deviceId: z.string().describe('Target device ID'),
   devicePort: z.number().describe('Device port (tcp)'),
@@ -2269,6 +2375,67 @@ export const ClearDeviceAliasToolSchema = {
   required: ['alias'] as string[],
 };
 
+export const ListImesToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: { type: 'string' as const, description: 'Optional device ID.' },
+  },
+  required: [] as string[],
+};
+
+export const SetImeToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: { type: 'string' as const, description: 'Optional device ID.' },
+    imeId: { type: 'string' as const, description: 'IME ID to set.' },
+  },
+  required: ['imeId'] as string[],
+};
+
+export const EnableImeToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: { type: 'string' as const, description: 'Optional device ID.' },
+    imeId: { type: 'string' as const, description: 'IME ID to enable.' },
+  },
+  required: ['imeId'] as string[],
+};
+
+export const AdbKeyboardToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: { type: 'string' as const, description: 'Optional device ID.' },
+    text: { type: 'string' as const, description: 'Text to input via ADB Keyboard.' },
+    imeId: { type: 'string' as const, description: 'Optional IME ID.' },
+    setIme: { type: 'boolean' as const, description: 'Enable and set IME before input.' },
+    useBase64: { type: 'boolean' as const, description: 'Send via base64 broadcast.' },
+  },
+  required: ['text'] as string[],
+};
+
+export const SetAdbKeyboardModeToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: { type: 'string' as const, description: 'Optional device ID.' },
+    imeId: { type: 'string' as const, description: 'Optional IME ID.' },
+    enable: { type: 'boolean' as const, description: 'Enable ADB keyboard mode if true; restore if false.' },
+  },
+  required: [] as string[],
+};
+
+export const SmartLoginToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: { type: 'string' as const, description: 'Optional device ID.' },
+    email: { type: 'string' as const, description: 'Email/login value.' },
+    password: { type: 'string' as const, description: 'Password value.' },
+    submitLabels: { type: 'array' as const, description: 'Custom submit labels.' },
+    imeId: { type: 'string' as const, description: 'Optional IME ID.' },
+    hideKeyboard: { type: 'boolean' as const, description: 'Hide keyboard before submit.' },
+  },
+  required: ['email', 'password'] as string[],
+};
+
 export const ReversePortToolSchema = {
   type: 'object' as const,
   properties: {
@@ -2545,6 +2712,18 @@ export type ListDeviceAliasesInput = z.infer<typeof ListDeviceAliasesInputSchema
 export type ListDeviceAliasesOutput = z.infer<typeof ListDeviceAliasesOutputSchema>;
 export type ClearDeviceAliasInput = z.infer<typeof ClearDeviceAliasInputSchema>;
 export type ClearDeviceAliasOutput = z.infer<typeof ClearDeviceAliasOutputSchema>;
+export type ListImesInput = z.infer<typeof ListImesInputSchema>;
+export type ListImesOutput = z.infer<typeof ListImesOutputSchema>;
+export type SetImeInput = z.infer<typeof SetImeInputSchema>;
+export type SetImeOutput = z.infer<typeof SetImeOutputSchema>;
+export type EnableImeInput = z.infer<typeof EnableImeInputSchema>;
+export type EnableImeOutput = z.infer<typeof EnableImeOutputSchema>;
+export type AdbKeyboardInput = z.infer<typeof AdbKeyboardInputSchema>;
+export type AdbKeyboardOutput = z.infer<typeof AdbKeyboardOutputSchema>;
+export type SetAdbKeyboardModeInput = z.infer<typeof SetAdbKeyboardModeInputSchema>;
+export type SetAdbKeyboardModeOutput = z.infer<typeof SetAdbKeyboardModeOutputSchema>;
+export type SmartLoginInput = z.infer<typeof SmartLoginInputSchema>;
+export type SmartLoginOutput = z.infer<typeof SmartLoginOutputSchema>;
 export type ReversePortInput = z.infer<typeof ReversePortInputSchema>;
 export type ReversePortOutput = z.infer<typeof ReversePortOutputSchema>;
 export type ForwardPortInput = z.infer<typeof ForwardPortInputSchema>;

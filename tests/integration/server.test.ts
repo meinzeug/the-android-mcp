@@ -300,6 +300,37 @@ jest.mock('../../src/types', () => {
     ClearDeviceAliasInputSchema: z.object({
       alias: z.string(),
     }),
+    ListImesInputSchema: z.object({
+      deviceId: z.string().optional(),
+    }),
+    SetImeInputSchema: z.object({
+      deviceId: z.string().optional(),
+      imeId: z.string(),
+    }),
+    EnableImeInputSchema: z.object({
+      deviceId: z.string().optional(),
+      imeId: z.string(),
+    }),
+    AdbKeyboardInputSchema: z.object({
+      deviceId: z.string().optional(),
+      text: z.string(),
+      imeId: z.string().optional(),
+      setIme: z.boolean().optional(),
+      useBase64: z.boolean().optional(),
+    }),
+    SetAdbKeyboardModeInputSchema: z.object({
+      deviceId: z.string().optional(),
+      imeId: z.string().optional(),
+      enable: z.boolean().optional(),
+    }),
+    SmartLoginInputSchema: z.object({
+      deviceId: z.string().optional(),
+      email: z.string(),
+      password: z.string(),
+      submitLabels: z.array(z.string()).optional(),
+      imeId: z.string().optional(),
+      hideKeyboard: z.boolean().optional(),
+    }),
     ReversePortInputSchema: z.object({
       deviceId: z.string().optional(),
       devicePort: z.number(),
@@ -648,6 +679,42 @@ jest.mock('../../src/types', () => {
     ClearDeviceAliasOutputSchema: z.object({
       alias: z.string(),
       removed: z.boolean(),
+    }),
+    ListImesOutputSchema: z.object({
+      deviceId: z.string(),
+      imes: z.array(z.string()),
+      current: z.string().optional(),
+      output: z.string(),
+    }),
+    SetImeOutputSchema: z.object({
+      deviceId: z.string(),
+      imeId: z.string(),
+      output: z.string(),
+    }),
+    EnableImeOutputSchema: z.object({
+      deviceId: z.string(),
+      imeId: z.string(),
+      output: z.string(),
+    }),
+    AdbKeyboardOutputSchema: z.object({
+      deviceId: z.string(),
+      imeId: z.string(),
+      textLength: z.number(),
+      output: z.string(),
+    }),
+    SetAdbKeyboardModeOutputSchema: z.object({
+      deviceId: z.string(),
+      imeId: z.string(),
+      previousIme: z.string().optional(),
+      output: z.string(),
+    }),
+    SmartLoginOutputSchema: z.object({
+      deviceId: z.string(),
+      emailFieldFound: z.boolean(),
+      passwordFieldFound: z.boolean(),
+      submitFound: z.boolean(),
+      usedIme: z.boolean(),
+      output: z.array(z.string()),
     }),
     ReversePortOutputSchema: z.object({
       deviceId: z.string(),
@@ -1101,6 +1168,61 @@ jest.mock('../../src/types', () => {
       },
       required: ['alias'],
     },
+    ListImesToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+      },
+      required: [],
+    },
+    SetImeToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        imeId: { type: 'string' },
+      },
+      required: ['imeId'],
+    },
+    EnableImeToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        imeId: { type: 'string' },
+      },
+      required: ['imeId'],
+    },
+    AdbKeyboardToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        text: { type: 'string' },
+        imeId: { type: 'string' },
+        setIme: { type: 'boolean' },
+        useBase64: { type: 'boolean' },
+      },
+      required: ['text'],
+    },
+    SetAdbKeyboardModeToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        imeId: { type: 'string' },
+        enable: { type: 'boolean' },
+      },
+      required: [],
+    },
+    SmartLoginToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        email: { type: 'string' },
+        password: { type: 'string' },
+        submitLabels: { type: 'array' },
+        imeId: { type: 'string' },
+        hideKeyboard: { type: 'boolean' },
+      },
+      required: ['email', 'password'],
+    },
     ReversePortToolSchema: {
       type: 'object',
       properties: {
@@ -1253,6 +1375,18 @@ jest.mock('../../src/types', () => {
     ListDeviceAliasesOutput: {},
     ClearDeviceAliasInput: {},
     ClearDeviceAliasOutput: {},
+    ListImesInput: {},
+    ListImesOutput: {},
+    SetImeInput: {},
+    SetImeOutput: {},
+    EnableImeInput: {},
+    EnableImeOutput: {},
+    AdbKeyboardInput: {},
+    AdbKeyboardOutput: {},
+    SetAdbKeyboardModeInput: {},
+    SetAdbKeyboardModeOutput: {},
+    SmartLoginInput: {},
+    SmartLoginOutput: {},
     ReversePortInput: {},
     ReversePortOutput: {},
     ForwardPortInput: {},
@@ -1308,6 +1442,12 @@ describe('MCP Server Integration Tests', () => {
         expect(toolNames).toContain('resolve_device_alias');
         expect(toolNames).toContain('list_device_aliases');
         expect(toolNames).toContain('clear_device_alias');
+        expect(toolNames).toContain('list_imes');
+        expect(toolNames).toContain('set_ime');
+        expect(toolNames).toContain('enable_ime');
+        expect(toolNames).toContain('adb_keyboard_input');
+        expect(toolNames).toContain('set_adb_keyboard_mode');
+        expect(toolNames).toContain('smart_login');
         expect(toolNames).toContain('install_android_apk');
         expect(toolNames).toContain('tap_android_screen');
         expect(toolNames).toContain('batch_android_actions');
