@@ -561,6 +561,111 @@ export const GetWindowSizeOutputSchema = z.object({
   raw: z.string().describe('Raw wm size output'),
 });
 
+export const ListInstalledPackagesInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  filter: z.string().optional().describe('Optional package name filter.'),
+  thirdPartyOnly: z.boolean().optional().describe('Only third-party packages (-3).'),
+  systemOnly: z.boolean().optional().describe('Only system packages (-s).'),
+  disabledOnly: z.boolean().optional().describe('Only disabled packages (-d).'),
+  enabledOnly: z.boolean().optional().describe('Only enabled packages (-e).'),
+  includeUninstalled: z.boolean().optional().describe('Include uninstalled packages (-u).'),
+  user: z.union([z.string(), z.number()]).optional().describe('User id to query.'),
+});
+
+export const ListInstalledPackagesOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  packages: z.array(z.string()).describe('Package names'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const IsAppInstalledInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z.string().min(1).describe('Package name to check.'),
+});
+
+export const IsAppInstalledOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  packageName: z.string().describe('Package name'),
+  installed: z.boolean().describe('Whether the package is installed'),
+  path: z.string().optional().describe('APK path if installed'),
+});
+
+export const GetAppVersionInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z.string().min(1).describe('Package name to inspect.'),
+});
+
+export const GetAppVersionOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  packageName: z.string().describe('Package name'),
+  versionName: z.string().optional().describe('Version name'),
+  versionCode: z.string().optional().describe('Version code'),
+  output: z.string().describe('Raw dumpsys output'),
+});
+
+export const GetAndroidPropertyInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  property: z.string().min(1).describe('Property key (getprop).'),
+});
+
+export const GetAndroidPropertyOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  property: z.string().describe('Property key'),
+  value: z.string().describe('Property value'),
+});
+
+export const GetAndroidPropertiesInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  prefix: z.string().optional().describe('Optional property prefix filter.'),
+});
+
+export const GetAndroidPropertiesOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  properties: z.record(z.string()).describe('Properties map'),
+  output: z.string().describe('Raw getprop output'),
+});
+
+export const OpenUrlInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  url: z.string().min(1).describe('URL to open.'),
+});
+
+export const OpenUrlOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  url: z.string().describe('URL opened'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const PasteClipboardInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+});
+
+export const PasteClipboardOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  output: z.string().describe('Raw ADB output'),
+});
+
 export const DumpUiInputSchema = z.object({
   deviceId: z
     .string()
@@ -748,6 +853,26 @@ export const WaitForTextOutputSchema = z.object({
   matchCount: z.number().describe('Number of matches found'),
 });
 
+export const WaitForTextDisappearInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  text: z.string().min(1).describe('Text to wait to disappear.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
+  timeoutMs: z.number().int().positive().optional().describe('Max wait time in milliseconds.'),
+  intervalMs: z.number().int().positive().optional().describe('Polling interval in milliseconds.'),
+});
+
+export const WaitForTextDisappearOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  text: z.string().describe('Target text'),
+  matchMode: z.string().describe('Match mode used'),
+  disappeared: z.boolean().describe('Whether the text disappeared'),
+  elapsedMs: z.number().describe('Elapsed time in milliseconds'),
+  matchCount: z.number().describe('Remaining matches found'),
+});
+
 export const TypeByIdInputSchema = z.object({
   deviceId: z
     .string()
@@ -789,6 +914,26 @@ export const WaitForIdOutputSchema = z.object({
   matchCount: z.number().describe('Number of matches found'),
 });
 
+export const WaitForIdDisappearInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  resourceId: z.string().min(1).describe('Resource-id to wait to disappear.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
+  timeoutMs: z.number().int().positive().optional().describe('Max wait time in milliseconds.'),
+  intervalMs: z.number().int().positive().optional().describe('Polling interval in milliseconds.'),
+});
+
+export const WaitForIdDisappearOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  resourceId: z.string().describe('Target resource-id'),
+  matchMode: z.string().describe('Match mode used'),
+  disappeared: z.boolean().describe('Whether the id disappeared'),
+  elapsedMs: z.number().describe('Elapsed time in milliseconds'),
+  matchCount: z.number().describe('Remaining matches found'),
+});
+
 export const WaitForDescInputSchema = z.object({
   deviceId: z
     .string()
@@ -809,6 +954,26 @@ export const WaitForDescOutputSchema = z.object({
   matchCount: z.number().describe('Number of matches found'),
 });
 
+export const WaitForDescDisappearInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  contentDesc: z.string().min(1).describe('Content-desc to wait to disappear.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
+  timeoutMs: z.number().int().positive().optional().describe('Max wait time in milliseconds.'),
+  intervalMs: z.number().int().positive().optional().describe('Polling interval in milliseconds.'),
+});
+
+export const WaitForDescDisappearOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  contentDesc: z.string().describe('Target content-desc'),
+  matchMode: z.string().describe('Match mode used'),
+  disappeared: z.boolean().describe('Whether the desc disappeared'),
+  elapsedMs: z.number().describe('Elapsed time in milliseconds'),
+  matchCount: z.number().describe('Remaining matches found'),
+});
+
 export const WaitForActivityInputSchema = z.object({
   deviceId: z
     .string()
@@ -827,6 +992,26 @@ export const WaitForActivityOutputSchema = z.object({
   found: z.boolean().describe('Whether the activity was found'),
   elapsedMs: z.number().describe('Elapsed time in milliseconds'),
   current: z.string().optional().describe('Last observed activity/component'),
+});
+
+export const WaitForActivityChangeInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  previousActivity: z.string().optional().describe('Previous activity/component to compare against.'),
+  targetActivity: z.string().optional().describe('Optional target activity/component to wait for.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('contains').describe('Match mode.'),
+  timeoutMs: z.number().int().positive().optional().describe('Max wait time in milliseconds.'),
+  intervalMs: z.number().int().positive().optional().describe('Polling interval in milliseconds.'),
+});
+
+export const WaitForActivityChangeOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  previous: z.string().describe('Previous activity/component'),
+  current: z.string().describe('Current activity/component'),
+  changed: z.boolean().describe('Whether the activity changed'),
+  elapsedMs: z.number().describe('Elapsed time in milliseconds'),
 });
 
 export const PressKeySequenceInputSchema = z.object({
@@ -889,6 +1074,50 @@ export const SwipeRelativeOutputSchema = z.object({
   output: z.string().describe('Raw ADB output'),
 });
 
+export const ScrollVerticalInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  direction: z.enum(['up', 'down']).describe('Scroll direction (screen swipe).'),
+  distancePercent: z
+    .number()
+    .min(10)
+    .max(90)
+    .optional()
+    .describe('Swipe distance percentage (10-90).'),
+  durationMs: z.number().int().min(0).optional().describe('Optional swipe duration in ms.'),
+  startXPercent: z.number().min(0).max(100).optional().describe('Optional X percent for swipe.'),
+});
+
+export const ScrollVerticalOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  direction: z.string().describe('Scroll direction'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const ScrollHorizontalInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  direction: z.enum(['left', 'right']).describe('Scroll direction (screen swipe).'),
+  distancePercent: z
+    .number()
+    .min(10)
+    .max(90)
+    .optional()
+    .describe('Swipe distance percentage (10-90).'),
+  durationMs: z.number().int().min(0).optional().describe('Optional swipe duration in ms.'),
+  startYPercent: z.number().min(0).max(100).optional().describe('Optional Y percent for swipe.'),
+});
+
+export const ScrollHorizontalOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  direction: z.string().describe('Scroll direction'),
+  output: z.string().describe('Raw ADB output'),
+});
+
 export const TapCenterInputSchema = z.object({
   deviceId: z
     .string()
@@ -900,6 +1129,41 @@ export const TapCenterOutputSchema = z.object({
   deviceId: z.string().describe('Target device ID'),
   x: z.number().describe('Resolved X coordinate'),
   y: z.number().describe('Resolved Y coordinate'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const LongPressInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  x: z.number().describe('X coordinate'),
+  y: z.number().describe('Y coordinate'),
+  durationMs: z.number().int().min(200).optional().describe('Long-press duration in ms.'),
+});
+
+export const LongPressOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  x: z.number().describe('X coordinate'),
+  y: z.number().describe('Y coordinate'),
+  durationMs: z.number().describe('Long-press duration in ms'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const DoubleTapInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  x: z.number().describe('X coordinate'),
+  y: z.number().describe('Y coordinate'),
+  intervalMs: z.number().int().min(20).optional().describe('Delay between taps.'),
+});
+
+export const DoubleTapOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  x: z.number().describe('X coordinate'),
+  y: z.number().describe('Y coordinate'),
   output: z.string().describe('Raw ADB output'),
 });
 
@@ -936,6 +1200,84 @@ export const GetScreenHashOutputSchema = z.object({
   deviceId: z.string().describe('Target device ID'),
   hash: z.string().describe('UI hash'),
   length: z.number().describe('UI dump length'),
+});
+
+export const ScrollUntilTextInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  text: z.string().min(1).describe('Text to find while scrolling.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
+  direction: z.enum(['up', 'down']).default('down').describe('Scroll direction (screen swipe).'),
+  distancePercent: z
+    .number()
+    .min(10)
+    .max(90)
+    .optional()
+    .describe('Swipe distance percentage (10-90).'),
+  maxScrolls: z.number().int().min(0).optional().describe('Maximum scroll attempts.'),
+  intervalMs: z.number().int().min(0).optional().describe('Delay between scroll attempts.'),
+});
+
+export const ScrollUntilTextOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  text: z.string().describe('Target text'),
+  found: z.boolean().describe('Whether the text was found'),
+  scrolls: z.number().describe('Scroll attempts used'),
+  matchCount: z.number().describe('Matches found'),
+});
+
+export const ScrollUntilIdInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  resourceId: z.string().min(1).describe('Resource-id to find while scrolling.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
+  direction: z.enum(['up', 'down']).default('down').describe('Scroll direction (screen swipe).'),
+  distancePercent: z
+    .number()
+    .min(10)
+    .max(90)
+    .optional()
+    .describe('Swipe distance percentage (10-90).'),
+  maxScrolls: z.number().int().min(0).optional().describe('Maximum scroll attempts.'),
+  intervalMs: z.number().int().min(0).optional().describe('Delay between scroll attempts.'),
+});
+
+export const ScrollUntilIdOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  resourceId: z.string().describe('Target resource-id'),
+  found: z.boolean().describe('Whether the id was found'),
+  scrolls: z.number().describe('Scroll attempts used'),
+  matchCount: z.number().describe('Matches found'),
+});
+
+export const ScrollUntilDescInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  contentDesc: z.string().min(1).describe('Content-desc to find while scrolling.'),
+  matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
+  direction: z.enum(['up', 'down']).default('down').describe('Scroll direction (screen swipe).'),
+  distancePercent: z
+    .number()
+    .min(10)
+    .max(90)
+    .optional()
+    .describe('Swipe distance percentage (10-90).'),
+  maxScrolls: z.number().int().min(0).optional().describe('Maximum scroll attempts.'),
+  intervalMs: z.number().int().min(0).optional().describe('Delay between scroll attempts.'),
+});
+
+export const ScrollUntilDescOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  contentDesc: z.string().describe('Target content-desc'),
+  found: z.boolean().describe('Whether the desc was found'),
+  scrolls: z.number().describe('Scroll attempts used'),
+  matchCount: z.number().describe('Matches found'),
 });
 
 export const WaitForPackageInputSchema = z.object({
@@ -1403,6 +1745,84 @@ export const AdbKeyboardOutputSchema = z.object({
   output: z.string().describe('Raw ADB output'),
 });
 
+export const AdbKeyboardClearTextInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  imeId: z
+    .string()
+    .optional()
+    .describe('Optional IME ID (default: com.android.adbkeyboard/.AdbIME).'),
+  setIme: z.boolean().default(true).describe('Enable and set IME before clearing.'),
+});
+
+export const AdbKeyboardClearTextOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  imeId: z.string().describe('IME ID used'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const AdbKeyboardInputCodeInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  code: z.number().int().describe('Key code to input via ADB Keyboard.'),
+  imeId: z
+    .string()
+    .optional()
+    .describe('Optional IME ID (default: com.android.adbkeyboard/.AdbIME).'),
+  setIme: z.boolean().default(true).describe('Enable and set IME before input.'),
+});
+
+export const AdbKeyboardInputCodeOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  imeId: z.string().describe('IME ID used'),
+  code: z.number().describe('Key code sent'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const AdbKeyboardEditorActionInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  code: z.number().int().describe('Editor action code to send.'),
+  imeId: z
+    .string()
+    .optional()
+    .describe('Optional IME ID (default: com.android.adbkeyboard/.AdbIME).'),
+  setIme: z.boolean().default(true).describe('Enable and set IME before action.'),
+});
+
+export const AdbKeyboardEditorActionOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  imeId: z.string().describe('IME ID used'),
+  code: z.number().describe('Editor action code sent'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const AdbKeyboardInputCharsInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  text: z.string().min(1).describe('Text to input as codepoints.'),
+  imeId: z
+    .string()
+    .optional()
+    .describe('Optional IME ID (default: com.android.adbkeyboard/.AdbIME).'),
+  setIme: z.boolean().default(true).describe('Enable and set IME before input.'),
+});
+
+export const AdbKeyboardInputCharsOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  imeId: z.string().describe('IME ID used'),
+  codepoints: z.array(z.number()).describe('Unicode codepoints sent'),
+  output: z.string().describe('Raw ADB output'),
+});
+
 export const SetAdbKeyboardModeInputSchema = z.object({
   deviceId: z
     .string()
@@ -1663,6 +2083,95 @@ export const GetCurrentActivityToolSchema = {
 };
 
 export const GetWindowSizeToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+  },
+  required: [] as string[],
+};
+
+export const ListInstalledPackagesToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    filter: { type: 'string' as const, description: 'Optional package name filter.' },
+    thirdPartyOnly: { type: 'boolean' as const, description: 'Only third-party packages (-3).' },
+    systemOnly: { type: 'boolean' as const, description: 'Only system packages (-s).' },
+    disabledOnly: { type: 'boolean' as const, description: 'Only disabled packages (-d).' },
+    enabledOnly: { type: 'boolean' as const, description: 'Only enabled packages (-e).' },
+    includeUninstalled: { type: 'boolean' as const, description: 'Include uninstalled packages (-u).' },
+    user: { type: 'string' as const, description: 'User id to query.' },
+  },
+  required: [] as string[],
+};
+
+export const IsAppInstalledToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: { type: 'string' as const, description: 'Package name to check.' },
+  },
+  required: ['packageName'] as string[],
+};
+
+export const GetAppVersionToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: { type: 'string' as const, description: 'Package name to inspect.' },
+  },
+  required: ['packageName'] as string[],
+};
+
+export const GetAndroidPropertyToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    property: { type: 'string' as const, description: 'Property key (getprop).' },
+  },
+  required: ['property'] as string[],
+};
+
+export const GetAndroidPropertiesToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    prefix: { type: 'string' as const, description: 'Optional property prefix filter.' },
+  },
+  required: [] as string[],
+};
+
+export const OpenUrlToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    url: { type: 'string' as const, description: 'URL to open.' },
+  },
+  required: ['url'] as string[],
+};
+
+export const PasteClipboardToolSchema = {
   type: 'object' as const,
   properties: {
     deviceId: {
@@ -2115,6 +2624,26 @@ export const WaitForTextToolSchema = {
   required: ['text'] as string[],
 };
 
+export const WaitForTextDisappearToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    text: { type: 'string' as const, description: 'Text to wait to disappear.' },
+    matchMode: {
+      type: 'string' as const,
+      enum: ['exact', 'contains', 'regex'],
+      default: 'exact',
+      description: 'Match mode.',
+    },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time in milliseconds.' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval in milliseconds.' },
+  },
+  required: ['text'] as string[],
+};
+
 export const TypeByIdToolSchema = {
   type: 'object' as const,
   properties: {
@@ -2159,6 +2688,26 @@ export const WaitForIdToolSchema = {
   required: ['resourceId'] as string[],
 };
 
+export const WaitForIdDisappearToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    resourceId: { type: 'string' as const, description: 'Resource-id to wait to disappear.' },
+    matchMode: {
+      type: 'string' as const,
+      enum: ['exact', 'contains', 'regex'],
+      default: 'exact',
+      description: 'Match mode.',
+    },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time in milliseconds.' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval in milliseconds.' },
+  },
+  required: ['resourceId'] as string[],
+};
+
 export const WaitForDescToolSchema = {
   type: 'object' as const,
   properties: {
@@ -2167,6 +2716,26 @@ export const WaitForDescToolSchema = {
       description: 'Optional device ID. If not provided, uses the first available device.',
     },
     contentDesc: { type: 'string' as const, description: 'Content-desc to wait for.' },
+    matchMode: {
+      type: 'string' as const,
+      enum: ['exact', 'contains', 'regex'],
+      default: 'exact',
+      description: 'Match mode.',
+    },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time in milliseconds.' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval in milliseconds.' },
+  },
+  required: ['contentDesc'] as string[],
+};
+
+export const WaitForDescDisappearToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    contentDesc: { type: 'string' as const, description: 'Content-desc to wait to disappear.' },
     matchMode: {
       type: 'string' as const,
       enum: ['exact', 'contains', 'regex'],
@@ -2197,6 +2766,27 @@ export const WaitForActivityToolSchema = {
     intervalMs: { type: 'number' as const, description: 'Polling interval in milliseconds.' },
   },
   required: ['activity'] as string[],
+};
+
+export const WaitForActivityChangeToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    previousActivity: { type: 'string' as const, description: 'Previous activity/component.' },
+    targetActivity: { type: 'string' as const, description: 'Target activity/component.' },
+    matchMode: {
+      type: 'string' as const,
+      enum: ['exact', 'contains', 'regex'],
+      default: 'contains',
+      description: 'Match mode.',
+    },
+    timeoutMs: { type: 'number' as const, description: 'Max wait time in milliseconds.' },
+    intervalMs: { type: 'number' as const, description: 'Polling interval in milliseconds.' },
+  },
+  required: [] as string[],
 };
 
 export const PressKeySequenceToolSchema = {
@@ -2242,6 +2832,36 @@ export const SwipeRelativeToolSchema = {
   required: ['startXPercent', 'startYPercent', 'endXPercent', 'endYPercent'] as string[],
 };
 
+export const ScrollVerticalToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    direction: { type: 'string' as const, enum: ['up', 'down'], description: 'Scroll direction.' },
+    distancePercent: { type: 'number' as const, description: 'Swipe distance percent.' },
+    durationMs: { type: 'number' as const, description: 'Optional swipe duration in ms.' },
+    startXPercent: { type: 'number' as const, description: 'Optional X percent for swipe.' },
+  },
+  required: ['direction'] as string[],
+};
+
+export const ScrollHorizontalToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    direction: { type: 'string' as const, enum: ['left', 'right'], description: 'Scroll direction.' },
+    distancePercent: { type: 'number' as const, description: 'Swipe distance percent.' },
+    durationMs: { type: 'number' as const, description: 'Optional swipe duration in ms.' },
+    startYPercent: { type: 'number' as const, description: 'Optional Y percent for swipe.' },
+  },
+  required: ['direction'] as string[],
+};
+
 export const TapCenterToolSchema = {
   type: 'object' as const,
   properties: {
@@ -2251,6 +2871,34 @@ export const TapCenterToolSchema = {
     },
   },
   required: [] as string[],
+};
+
+export const LongPressToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    x: { type: 'number' as const, description: 'X coordinate.' },
+    y: { type: 'number' as const, description: 'Y coordinate.' },
+    durationMs: { type: 'number' as const, description: 'Long-press duration in ms.' },
+  },
+  required: ['x', 'y'] as string[],
+};
+
+export const DoubleTapToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    x: { type: 'number' as const, description: 'X coordinate.' },
+    y: { type: 'number' as const, description: 'Y coordinate.' },
+    intervalMs: { type: 'number' as const, description: 'Delay between taps.' },
+  },
+  required: ['x', 'y'] as string[],
 };
 
 export const WaitForUiStableToolSchema = {
@@ -2276,6 +2924,72 @@ export const GetScreenHashToolSchema = {
     },
   },
   required: [] as string[],
+};
+
+export const ScrollUntilTextToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    text: { type: 'string' as const, description: 'Text to find while scrolling.' },
+    matchMode: {
+      type: 'string' as const,
+      enum: ['exact', 'contains', 'regex'],
+      default: 'exact',
+      description: 'Match mode.',
+    },
+    direction: { type: 'string' as const, enum: ['up', 'down'], description: 'Scroll direction.' },
+    distancePercent: { type: 'number' as const, description: 'Swipe distance percent.' },
+    maxScrolls: { type: 'number' as const, description: 'Maximum scroll attempts.' },
+    intervalMs: { type: 'number' as const, description: 'Delay between scroll attempts.' },
+  },
+  required: ['text'] as string[],
+};
+
+export const ScrollUntilIdToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    resourceId: { type: 'string' as const, description: 'Resource-id to find while scrolling.' },
+    matchMode: {
+      type: 'string' as const,
+      enum: ['exact', 'contains', 'regex'],
+      default: 'exact',
+      description: 'Match mode.',
+    },
+    direction: { type: 'string' as const, enum: ['up', 'down'], description: 'Scroll direction.' },
+    distancePercent: { type: 'number' as const, description: 'Swipe distance percent.' },
+    maxScrolls: { type: 'number' as const, description: 'Maximum scroll attempts.' },
+    intervalMs: { type: 'number' as const, description: 'Delay between scroll attempts.' },
+  },
+  required: ['resourceId'] as string[],
+};
+
+export const ScrollUntilDescToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    contentDesc: { type: 'string' as const, description: 'Content-desc to find while scrolling.' },
+    matchMode: {
+      type: 'string' as const,
+      enum: ['exact', 'contains', 'regex'],
+      default: 'exact',
+      description: 'Match mode.',
+    },
+    direction: { type: 'string' as const, enum: ['up', 'down'], description: 'Scroll direction.' },
+    distancePercent: { type: 'number' as const, description: 'Swipe distance percent.' },
+    maxScrolls: { type: 'number' as const, description: 'Maximum scroll attempts.' },
+    intervalMs: { type: 'number' as const, description: 'Delay between scroll attempts.' },
+  },
+  required: ['contentDesc'] as string[],
 };
 
 export const WaitForPackageToolSchema = {
@@ -2438,6 +3152,49 @@ export const AdbKeyboardToolSchema = {
     imeId: { type: 'string' as const, description: 'Optional IME ID.' },
     setIme: { type: 'boolean' as const, description: 'Enable and set IME before input.' },
     useBase64: { type: 'boolean' as const, description: 'Send via base64 broadcast.' },
+  },
+  required: ['text'] as string[],
+};
+
+export const AdbKeyboardClearTextToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: { type: 'string' as const, description: 'Optional device ID.' },
+    imeId: { type: 'string' as const, description: 'Optional IME ID.' },
+    setIme: { type: 'boolean' as const, description: 'Enable and set IME before clearing.' },
+  },
+  required: [] as string[],
+};
+
+export const AdbKeyboardInputCodeToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: { type: 'string' as const, description: 'Optional device ID.' },
+    code: { type: 'number' as const, description: 'Key code to input.' },
+    imeId: { type: 'string' as const, description: 'Optional IME ID.' },
+    setIme: { type: 'boolean' as const, description: 'Enable and set IME before input.' },
+  },
+  required: ['code'] as string[],
+};
+
+export const AdbKeyboardEditorActionToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: { type: 'string' as const, description: 'Optional device ID.' },
+    code: { type: 'number' as const, description: 'Editor action code.' },
+    imeId: { type: 'string' as const, description: 'Optional IME ID.' },
+    setIme: { type: 'boolean' as const, description: 'Enable and set IME before action.' },
+  },
+  required: ['code'] as string[],
+};
+
+export const AdbKeyboardInputCharsToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: { type: 'string' as const, description: 'Optional device ID.' },
+    text: { type: 'string' as const, description: 'Text to input as codepoints.' },
+    imeId: { type: 'string' as const, description: 'Optional IME ID.' },
+    setIme: { type: 'boolean' as const, description: 'Enable and set IME before input.' },
   },
   required: ['text'] as string[],
 };
@@ -2688,6 +3445,20 @@ export type GetCurrentActivityInput = z.infer<typeof GetCurrentActivityInputSche
 export type GetCurrentActivityOutput = z.infer<typeof GetCurrentActivityOutputSchema>;
 export type GetWindowSizeInput = z.infer<typeof GetWindowSizeInputSchema>;
 export type GetWindowSizeOutput = z.infer<typeof GetWindowSizeOutputSchema>;
+export type ListInstalledPackagesInput = z.infer<typeof ListInstalledPackagesInputSchema>;
+export type ListInstalledPackagesOutput = z.infer<typeof ListInstalledPackagesOutputSchema>;
+export type IsAppInstalledInput = z.infer<typeof IsAppInstalledInputSchema>;
+export type IsAppInstalledOutput = z.infer<typeof IsAppInstalledOutputSchema>;
+export type GetAppVersionInput = z.infer<typeof GetAppVersionInputSchema>;
+export type GetAppVersionOutput = z.infer<typeof GetAppVersionOutputSchema>;
+export type GetAndroidPropertyInput = z.infer<typeof GetAndroidPropertyInputSchema>;
+export type GetAndroidPropertyOutput = z.infer<typeof GetAndroidPropertyOutputSchema>;
+export type GetAndroidPropertiesInput = z.infer<typeof GetAndroidPropertiesInputSchema>;
+export type GetAndroidPropertiesOutput = z.infer<typeof GetAndroidPropertiesOutputSchema>;
+export type OpenUrlInput = z.infer<typeof OpenUrlInputSchema>;
+export type OpenUrlOutput = z.infer<typeof OpenUrlOutputSchema>;
+export type PasteClipboardInput = z.infer<typeof PasteClipboardInputSchema>;
+export type PasteClipboardOutput = z.infer<typeof PasteClipboardOutputSchema>;
 export type DumpUiInput = z.infer<typeof DumpUiInputSchema>;
 export type DumpUiOutput = z.infer<typeof DumpUiOutputSchema>;
 export type StopAppInput = z.infer<typeof StopAppInputSchema>;
@@ -2721,26 +3492,48 @@ export type TapByDescInput = z.infer<typeof TapByDescInputSchema>;
 export type TapByDescOutput = z.infer<typeof TapByDescOutputSchema>;
 export type WaitForTextInput = z.infer<typeof WaitForTextInputSchema>;
 export type WaitForTextOutput = z.infer<typeof WaitForTextOutputSchema>;
+export type WaitForTextDisappearInput = z.infer<typeof WaitForTextDisappearInputSchema>;
+export type WaitForTextDisappearOutput = z.infer<typeof WaitForTextDisappearOutputSchema>;
 export type TypeByIdInput = z.infer<typeof TypeByIdInputSchema>;
 export type TypeByIdOutput = z.infer<typeof TypeByIdOutputSchema>;
 export type WaitForIdInput = z.infer<typeof WaitForIdInputSchema>;
 export type WaitForIdOutput = z.infer<typeof WaitForIdOutputSchema>;
+export type WaitForIdDisappearInput = z.infer<typeof WaitForIdDisappearInputSchema>;
+export type WaitForIdDisappearOutput = z.infer<typeof WaitForIdDisappearOutputSchema>;
 export type WaitForDescInput = z.infer<typeof WaitForDescInputSchema>;
 export type WaitForDescOutput = z.infer<typeof WaitForDescOutputSchema>;
+export type WaitForDescDisappearInput = z.infer<typeof WaitForDescDisappearInputSchema>;
+export type WaitForDescDisappearOutput = z.infer<typeof WaitForDescDisappearOutputSchema>;
 export type WaitForActivityInput = z.infer<typeof WaitForActivityInputSchema>;
 export type WaitForActivityOutput = z.infer<typeof WaitForActivityOutputSchema>;
+export type WaitForActivityChangeInput = z.infer<typeof WaitForActivityChangeInputSchema>;
+export type WaitForActivityChangeOutput = z.infer<typeof WaitForActivityChangeOutputSchema>;
 export type PressKeySequenceInput = z.infer<typeof PressKeySequenceInputSchema>;
 export type PressKeySequenceOutput = z.infer<typeof PressKeySequenceOutputSchema>;
 export type TapRelativeInput = z.infer<typeof TapRelativeInputSchema>;
 export type TapRelativeOutput = z.infer<typeof TapRelativeOutputSchema>;
 export type SwipeRelativeInput = z.infer<typeof SwipeRelativeInputSchema>;
 export type SwipeRelativeOutput = z.infer<typeof SwipeRelativeOutputSchema>;
+export type ScrollVerticalInput = z.infer<typeof ScrollVerticalInputSchema>;
+export type ScrollVerticalOutput = z.infer<typeof ScrollVerticalOutputSchema>;
+export type ScrollHorizontalInput = z.infer<typeof ScrollHorizontalInputSchema>;
+export type ScrollHorizontalOutput = z.infer<typeof ScrollHorizontalOutputSchema>;
 export type TapCenterInput = z.infer<typeof TapCenterInputSchema>;
 export type TapCenterOutput = z.infer<typeof TapCenterOutputSchema>;
+export type LongPressInput = z.infer<typeof LongPressInputSchema>;
+export type LongPressOutput = z.infer<typeof LongPressOutputSchema>;
+export type DoubleTapInput = z.infer<typeof DoubleTapInputSchema>;
+export type DoubleTapOutput = z.infer<typeof DoubleTapOutputSchema>;
 export type WaitForUiStableInput = z.infer<typeof WaitForUiStableInputSchema>;
 export type WaitForUiStableOutput = z.infer<typeof WaitForUiStableOutputSchema>;
 export type GetScreenHashInput = z.infer<typeof GetScreenHashInputSchema>;
 export type GetScreenHashOutput = z.infer<typeof GetScreenHashOutputSchema>;
+export type ScrollUntilTextInput = z.infer<typeof ScrollUntilTextInputSchema>;
+export type ScrollUntilTextOutput = z.infer<typeof ScrollUntilTextOutputSchema>;
+export type ScrollUntilIdInput = z.infer<typeof ScrollUntilIdInputSchema>;
+export type ScrollUntilIdOutput = z.infer<typeof ScrollUntilIdOutputSchema>;
+export type ScrollUntilDescInput = z.infer<typeof ScrollUntilDescInputSchema>;
+export type ScrollUntilDescOutput = z.infer<typeof ScrollUntilDescOutputSchema>;
 export type WaitForPackageInput = z.infer<typeof WaitForPackageInputSchema>;
 export type WaitForPackageOutput = z.infer<typeof WaitForPackageOutputSchema>;
 export type FlowStep = z.infer<typeof FlowStepSchema>;
@@ -2771,6 +3564,14 @@ export type EnableImeInput = z.infer<typeof EnableImeInputSchema>;
 export type EnableImeOutput = z.infer<typeof EnableImeOutputSchema>;
 export type AdbKeyboardInput = z.infer<typeof AdbKeyboardInputSchema>;
 export type AdbKeyboardOutput = z.infer<typeof AdbKeyboardOutputSchema>;
+export type AdbKeyboardClearTextInput = z.infer<typeof AdbKeyboardClearTextInputSchema>;
+export type AdbKeyboardClearTextOutput = z.infer<typeof AdbKeyboardClearTextOutputSchema>;
+export type AdbKeyboardInputCodeInput = z.infer<typeof AdbKeyboardInputCodeInputSchema>;
+export type AdbKeyboardInputCodeOutput = z.infer<typeof AdbKeyboardInputCodeOutputSchema>;
+export type AdbKeyboardEditorActionInput = z.infer<typeof AdbKeyboardEditorActionInputSchema>;
+export type AdbKeyboardEditorActionOutput = z.infer<typeof AdbKeyboardEditorActionOutputSchema>;
+export type AdbKeyboardInputCharsInput = z.infer<typeof AdbKeyboardInputCharsInputSchema>;
+export type AdbKeyboardInputCharsOutput = z.infer<typeof AdbKeyboardInputCharsOutputSchema>;
 export type SetAdbKeyboardModeInput = z.infer<typeof SetAdbKeyboardModeInputSchema>;
 export type SetAdbKeyboardModeOutput = z.infer<typeof SetAdbKeyboardModeOutputSchema>;
 export type SmartLoginInput = z.infer<typeof SmartLoginInputSchema>;

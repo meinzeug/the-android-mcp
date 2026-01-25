@@ -21,6 +21,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unit and integration tests
 - Documentation and examples
 
+## [2.0.1] - 2026-01-25
+### Added
+- 20+ new MCP tools: keyboard IME helpers, wait-for-disappear, scroll helpers, long-press/double-tap, scroll-until, app/package inspectors, property lookups, and URL open/paste tools.
+
+### Improved
+- Smarter login field detection (EditText/password hints) for faster `smart_login` flows.
+- Submit button selection now prefers clickable button nodes near login fields.
+
+## [2.0.0] - 2026-01-25
+### Added
+- Smart login tools (`smart_login`, `detect_login_fields`, `smart_login_fast`).
+- ADB keyboard IME controls and text input helper for fast typing.
+- Device aliasing and fast-flow batch actions for speed.
+
 ## [0.1.5] - 2026-01-25
 ### Added
 - Root-level GUI launcher bin to avoid publish-time warnings.

@@ -331,6 +331,10 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `set_ime`                 | Set current Android IME                   | `imeId`, `deviceId` (optional)                                             |
 | `enable_ime`              | Enable Android IME                        | `imeId`, `deviceId` (optional)                                             |
 | `adb_keyboard_input`      | Input text via ADB Keyboard IME           | `text`, `imeId` (optional), `setIme` (optional)                            |
+| `adb_keyboard_clear_text` | Clear text via ADB Keyboard IME           | `imeId` (optional), `setIme` (optional), `deviceId` (optional)             |
+| `adb_keyboard_input_code` | Send key code via ADB Keyboard IME        | `code`, `imeId` (optional), `setIme` (optional), `deviceId` (optional)     |
+| `adb_keyboard_editor_action` | Send editor action via ADB Keyboard IME | `code`, `imeId` (optional), `setIme` (optional), `deviceId` (optional)     |
+| `adb_keyboard_input_chars`| Send unicode codepoints via ADB Keyboard  | `text`, `imeId` (optional), `setIme` (optional), `deviceId` (optional)     |
 | `set_adb_keyboard_mode`   | Enable/disable ADB keyboard mode          | `enable` (optional), `imeId` (optional)                                    |
 | `smart_login`             | Auto-fill login screen quickly            | `email`, `password`, `submitLabels` (optional)                             |
 | `detect_login_fields`     | Detect login fields and submit button     | `submitLabels` (optional), `deviceId` (optional)                           |
@@ -341,6 +345,13 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `start_android_app`       | Starts an app (optionally activity)       | `packageName`, `activity` (optional), `deviceId` (optional)                |
 | `get_android_current_activity` | Gets the focused activity           | `deviceId` (optional)                                                      |
 | `get_android_window_size` | Gets device window size                   | `deviceId` (optional)                                                      |
+| `list_installed_packages` | List installed package names              | filters (optional), `deviceId` (optional)                                  |
+| `is_app_installed`        | Check if package is installed             | `packageName`, `deviceId` (optional)                                       |
+| `get_app_version`         | Get app version info                      | `packageName`, `deviceId` (optional)                                       |
+| `get_android_property`    | Read a system property                    | `property`, `deviceId` (optional)                                          |
+| `get_android_properties`  | Read system properties by prefix          | `prefix` (optional), `deviceId` (optional)                                 |
+| `open_url`                | Open URL via Android intent               | `url`, `deviceId` (optional)                                               |
+| `paste_clipboard`         | Paste clipboard content                   | `deviceId` (optional)                                                      |
 | `dump_android_ui_hierarchy` | Dumps UI hierarchy XML                  | `deviceId` (optional), `maxChars` (optional)                               |
 | `stop_android_app`        | Force-stops an app                        | `packageName`, `deviceId` (optional)                                       |
 | `clear_android_app_data`  | Clears app data                           | `packageName`, `deviceId` (optional)                                       |
@@ -357,16 +368,27 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `tap_by_id`               | Tap UI node by resource-id                | `resourceId`, `index` (optional), `deviceId` (optional)                    |
 | `tap_by_desc`             | Tap UI node by content-desc               | `contentDesc`, `matchMode` (optional), `index` (optional), `deviceId` (optional) |
 | `wait_for_text`           | Wait for text via UI dump polling         | `text`, `matchMode` (optional), `timeoutMs`/`intervalMs` (optional)        |
+| `wait_for_text_disappear` | Wait for text to disappear                | `text`, `matchMode` (optional), `timeoutMs`/`intervalMs` (optional)        |
 | `type_by_id`              | Tap a field by id and type text           | `resourceId`, `text`, `matchMode`/`index` (optional), `deviceId` (optional)|
 | `wait_for_id`             | Wait for resource-id via UI dump polling  | `resourceId`, `matchMode` (optional), `timeoutMs`/`intervalMs` (optional)  |
+| `wait_for_id_disappear`   | Wait for resource-id to disappear         | `resourceId`, `matchMode` (optional), `timeoutMs`/`intervalMs` (optional)  |
 | `wait_for_desc`           | Wait for content-desc via UI dump polling | `contentDesc`, `matchMode` (optional), `timeoutMs`/`intervalMs` (optional) |
+| `wait_for_desc_disappear` | Wait for content-desc to disappear        | `contentDesc`, `matchMode` (optional), `timeoutMs`/`intervalMs` (optional) |
 | `wait_for_activity`       | Wait for current activity/component       | `activity`, `matchMode` (optional), `timeoutMs`/`intervalMs` (optional)    |
+| `wait_for_activity_change` | Wait for activity to change              | `previousActivity`/`targetActivity` (optional), `timeoutMs`/`intervalMs`   |
 | `press_key_sequence`      | Press multiple keyevents in sequence      | `keyCodes`, `intervalMs` (optional), `deviceId` (optional)                 |
 | `tap_relative`            | Tap using percentage coordinates          | `xPercent`, `yPercent`, `deviceId` (optional)                              |
 | `swipe_relative`          | Swipe using percentage coordinates        | `startXPercent`, `startYPercent`, `endXPercent`, `endYPercent`, `durationMs`|
+| `scroll_vertical`         | Scroll vertically via percentage swipe    | `direction`, `distancePercent` (optional), `deviceId` (optional)           |
+| `scroll_horizontal`       | Scroll horizontally via percentage swipe  | `direction`, `distancePercent` (optional), `deviceId` (optional)           |
 | `tap_center`              | Tap the center of the screen              | `deviceId` (optional)                                                      |
+| `long_press`              | Long-press on coordinate                  | `x`, `y`, `durationMs` (optional), `deviceId` (optional)                   |
+| `double_tap`              | Double-tap on coordinate                  | `x`, `y`, `intervalMs` (optional), `deviceId` (optional)                   |
 | `wait_for_ui_stable`      | Wait for UI dump to stabilize             | `stableIterations`, `intervalMs`, `timeoutMs` (optional)                   |
 | `get_screen_hash`         | Get UI hash from current dump             | `deviceId` (optional)                                                      |
+| `scroll_until_text`       | Scroll until text appears                 | `text`, `matchMode` (optional), `maxScrolls` (optional)                    |
+| `scroll_until_id`         | Scroll until resource-id appears          | `resourceId`, `matchMode` (optional), `maxScrolls` (optional)              |
+| `scroll_until_desc`       | Scroll until content-desc appears         | `contentDesc`, `matchMode` (optional), `maxScrolls` (optional)             |
 | `wait_for_package`        | Wait for package in foreground            | `packageName`, `timeoutMs`/`intervalMs` (optional)                         |
 | `run_flow_plan`           | Execute a multi-step UI plan quickly      | `steps`, `stopOnFailure` (optional), `deviceId`/`deviceAlias` (optional)   |
 | `query_ui`                | Query UI nodes by selector                | `selector`, `maxResults` (optional), `deviceId` (optional)                 |

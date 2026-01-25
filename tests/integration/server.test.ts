@@ -106,6 +106,39 @@ jest.mock('../../src/types', () => {
     GetWindowSizeInputSchema: z.object({
       deviceId: z.string().optional(),
     }),
+    ListInstalledPackagesInputSchema: z.object({
+      deviceId: z.string().optional(),
+      filter: z.string().optional(),
+      thirdPartyOnly: z.boolean().optional(),
+      systemOnly: z.boolean().optional(),
+      disabledOnly: z.boolean().optional(),
+      enabledOnly: z.boolean().optional(),
+      includeUninstalled: z.boolean().optional(),
+      user: z.union([z.string(), z.number()]).optional(),
+    }),
+    IsAppInstalledInputSchema: z.object({
+      deviceId: z.string().optional(),
+      packageName: z.string(),
+    }),
+    GetAppVersionInputSchema: z.object({
+      deviceId: z.string().optional(),
+      packageName: z.string(),
+    }),
+    GetAndroidPropertyInputSchema: z.object({
+      deviceId: z.string().optional(),
+      property: z.string(),
+    }),
+    GetAndroidPropertiesInputSchema: z.object({
+      deviceId: z.string().optional(),
+      prefix: z.string().optional(),
+    }),
+    OpenUrlInputSchema: z.object({
+      deviceId: z.string().optional(),
+      url: z.string(),
+    }),
+    PasteClipboardInputSchema: z.object({
+      deviceId: z.string().optional(),
+    }),
     DumpUiInputSchema: z.object({
       deviceId: z.string().optional(),
       maxChars: z.number().optional(),
@@ -196,6 +229,13 @@ jest.mock('../../src/types', () => {
       timeoutMs: z.number().optional(),
       intervalMs: z.number().optional(),
     }),
+    WaitForTextDisappearInputSchema: z.object({
+      deviceId: z.string().optional(),
+      text: z.string(),
+      matchMode: z.string().optional(),
+      timeoutMs: z.number().optional(),
+      intervalMs: z.number().optional(),
+    }),
     TypeByIdInputSchema: z.object({
       deviceId: z.string().optional(),
       resourceId: z.string(),
@@ -210,7 +250,21 @@ jest.mock('../../src/types', () => {
       timeoutMs: z.number().optional(),
       intervalMs: z.number().optional(),
     }),
+    WaitForIdDisappearInputSchema: z.object({
+      deviceId: z.string().optional(),
+      resourceId: z.string(),
+      matchMode: z.string().optional(),
+      timeoutMs: z.number().optional(),
+      intervalMs: z.number().optional(),
+    }),
     WaitForDescInputSchema: z.object({
+      deviceId: z.string().optional(),
+      contentDesc: z.string(),
+      matchMode: z.string().optional(),
+      timeoutMs: z.number().optional(),
+      intervalMs: z.number().optional(),
+    }),
+    WaitForDescDisappearInputSchema: z.object({
       deviceId: z.string().optional(),
       contentDesc: z.string(),
       matchMode: z.string().optional(),
@@ -220,6 +274,14 @@ jest.mock('../../src/types', () => {
     WaitForActivityInputSchema: z.object({
       deviceId: z.string().optional(),
       activity: z.string(),
+      matchMode: z.string().optional(),
+      timeoutMs: z.number().optional(),
+      intervalMs: z.number().optional(),
+    }),
+    WaitForActivityChangeInputSchema: z.object({
+      deviceId: z.string().optional(),
+      previousActivity: z.string().optional(),
+      targetActivity: z.string().optional(),
       matchMode: z.string().optional(),
       timeoutMs: z.number().optional(),
       intervalMs: z.number().optional(),
@@ -243,8 +305,34 @@ jest.mock('../../src/types', () => {
       endYPercent: z.number(),
       durationMs: z.number().optional(),
     }),
+    ScrollVerticalInputSchema: z.object({
+      deviceId: z.string().optional(),
+      direction: z.string(),
+      distancePercent: z.number().optional(),
+      durationMs: z.number().optional(),
+      startXPercent: z.number().optional(),
+    }),
+    ScrollHorizontalInputSchema: z.object({
+      deviceId: z.string().optional(),
+      direction: z.string(),
+      distancePercent: z.number().optional(),
+      durationMs: z.number().optional(),
+      startYPercent: z.number().optional(),
+    }),
     TapCenterInputSchema: z.object({
       deviceId: z.string().optional(),
+    }),
+    LongPressInputSchema: z.object({
+      deviceId: z.string().optional(),
+      x: z.number(),
+      y: z.number(),
+      durationMs: z.number().optional(),
+    }),
+    DoubleTapInputSchema: z.object({
+      deviceId: z.string().optional(),
+      x: z.number(),
+      y: z.number(),
+      intervalMs: z.number().optional(),
     }),
     WaitForUiStableInputSchema: z.object({
       deviceId: z.string().optional(),
@@ -254,6 +342,33 @@ jest.mock('../../src/types', () => {
     }),
     GetScreenHashInputSchema: z.object({
       deviceId: z.string().optional(),
+    }),
+    ScrollUntilTextInputSchema: z.object({
+      deviceId: z.string().optional(),
+      text: z.string(),
+      matchMode: z.string().optional(),
+      direction: z.string().optional(),
+      distancePercent: z.number().optional(),
+      maxScrolls: z.number().optional(),
+      intervalMs: z.number().optional(),
+    }),
+    ScrollUntilIdInputSchema: z.object({
+      deviceId: z.string().optional(),
+      resourceId: z.string(),
+      matchMode: z.string().optional(),
+      direction: z.string().optional(),
+      distancePercent: z.number().optional(),
+      maxScrolls: z.number().optional(),
+      intervalMs: z.number().optional(),
+    }),
+    ScrollUntilDescInputSchema: z.object({
+      deviceId: z.string().optional(),
+      contentDesc: z.string(),
+      matchMode: z.string().optional(),
+      direction: z.string().optional(),
+      distancePercent: z.number().optional(),
+      maxScrolls: z.number().optional(),
+      intervalMs: z.number().optional(),
     }),
     WaitForPackageInputSchema: z.object({
       deviceId: z.string().optional(),
@@ -317,6 +432,29 @@ jest.mock('../../src/types', () => {
       imeId: z.string().optional(),
       setIme: z.boolean().optional(),
       useBase64: z.boolean().optional(),
+    }),
+    AdbKeyboardClearTextInputSchema: z.object({
+      deviceId: z.string().optional(),
+      imeId: z.string().optional(),
+      setIme: z.boolean().optional(),
+    }),
+    AdbKeyboardInputCodeInputSchema: z.object({
+      deviceId: z.string().optional(),
+      code: z.number(),
+      imeId: z.string().optional(),
+      setIme: z.boolean().optional(),
+    }),
+    AdbKeyboardEditorActionInputSchema: z.object({
+      deviceId: z.string().optional(),
+      code: z.number(),
+      imeId: z.string().optional(),
+      setIme: z.boolean().optional(),
+    }),
+    AdbKeyboardInputCharsInputSchema: z.object({
+      deviceId: z.string().optional(),
+      text: z.string(),
+      imeId: z.string().optional(),
+      setIme: z.boolean().optional(),
     }),
     SetAdbKeyboardModeInputSchema: z.object({
       deviceId: z.string().optional(),
@@ -449,6 +587,43 @@ jest.mock('../../src/types', () => {
       overrideHeight: z.number().optional(),
       raw: z.string(),
     }),
+    ListInstalledPackagesOutputSchema: z.object({
+      deviceId: z.string(),
+      packages: z.array(z.string()),
+      output: z.string(),
+    }),
+    IsAppInstalledOutputSchema: z.object({
+      deviceId: z.string(),
+      packageName: z.string(),
+      installed: z.boolean(),
+      path: z.string().optional(),
+    }),
+    GetAppVersionOutputSchema: z.object({
+      deviceId: z.string(),
+      packageName: z.string(),
+      versionName: z.string().optional(),
+      versionCode: z.string().optional(),
+      output: z.string(),
+    }),
+    GetAndroidPropertyOutputSchema: z.object({
+      deviceId: z.string(),
+      property: z.string(),
+      value: z.string(),
+    }),
+    GetAndroidPropertiesOutputSchema: z.object({
+      deviceId: z.string(),
+      properties: z.record(z.string()),
+      output: z.string(),
+    }),
+    OpenUrlOutputSchema: z.object({
+      deviceId: z.string(),
+      url: z.string(),
+      output: z.string(),
+    }),
+    PasteClipboardOutputSchema: z.object({
+      deviceId: z.string(),
+      output: z.string(),
+    }),
     DumpUiOutputSchema: z.object({
       deviceId: z.string(),
       xml: z.string(),
@@ -558,6 +733,14 @@ jest.mock('../../src/types', () => {
       elapsedMs: z.number(),
       matchCount: z.number(),
     }),
+    WaitForTextDisappearOutputSchema: z.object({
+      deviceId: z.string(),
+      text: z.string(),
+      matchMode: z.string(),
+      disappeared: z.boolean(),
+      elapsedMs: z.number(),
+      matchCount: z.number(),
+    }),
     TypeByIdOutputSchema: z.object({
       deviceId: z.string(),
       resourceId: z.string(),
@@ -575,11 +758,27 @@ jest.mock('../../src/types', () => {
       elapsedMs: z.number(),
       matchCount: z.number(),
     }),
+    WaitForIdDisappearOutputSchema: z.object({
+      deviceId: z.string(),
+      resourceId: z.string(),
+      matchMode: z.string(),
+      disappeared: z.boolean(),
+      elapsedMs: z.number(),
+      matchCount: z.number(),
+    }),
     WaitForDescOutputSchema: z.object({
       deviceId: z.string(),
       contentDesc: z.string(),
       matchMode: z.string(),
       found: z.boolean(),
+      elapsedMs: z.number(),
+      matchCount: z.number(),
+    }),
+    WaitForDescDisappearOutputSchema: z.object({
+      deviceId: z.string(),
+      contentDesc: z.string(),
+      matchMode: z.string(),
+      disappeared: z.boolean(),
       elapsedMs: z.number(),
       matchCount: z.number(),
     }),
@@ -590,6 +789,13 @@ jest.mock('../../src/types', () => {
       found: z.boolean(),
       elapsedMs: z.number(),
       current: z.string().optional(),
+    }),
+    WaitForActivityChangeOutputSchema: z.object({
+      deviceId: z.string(),
+      previous: z.string(),
+      current: z.string(),
+      changed: z.boolean(),
+      elapsedMs: z.number(),
     }),
     PressKeySequenceOutputSchema: z.object({
       deviceId: z.string(),
@@ -617,7 +823,30 @@ jest.mock('../../src/types', () => {
       durationMs: z.number().optional(),
       output: z.string(),
     }),
+    ScrollVerticalOutputSchema: z.object({
+      deviceId: z.string(),
+      direction: z.string(),
+      output: z.string(),
+    }),
+    ScrollHorizontalOutputSchema: z.object({
+      deviceId: z.string(),
+      direction: z.string(),
+      output: z.string(),
+    }),
     TapCenterOutputSchema: z.object({
+      deviceId: z.string(),
+      x: z.number(),
+      y: z.number(),
+      output: z.string(),
+    }),
+    LongPressOutputSchema: z.object({
+      deviceId: z.string(),
+      x: z.number(),
+      y: z.number(),
+      durationMs: z.number(),
+      output: z.string(),
+    }),
+    DoubleTapOutputSchema: z.object({
       deviceId: z.string(),
       x: z.number(),
       y: z.number(),
@@ -633,6 +862,27 @@ jest.mock('../../src/types', () => {
       deviceId: z.string(),
       hash: z.string(),
       length: z.number(),
+    }),
+    ScrollUntilTextOutputSchema: z.object({
+      deviceId: z.string(),
+      text: z.string(),
+      found: z.boolean(),
+      scrolls: z.number(),
+      matchCount: z.number(),
+    }),
+    ScrollUntilIdOutputSchema: z.object({
+      deviceId: z.string(),
+      resourceId: z.string(),
+      found: z.boolean(),
+      scrolls: z.number(),
+      matchCount: z.number(),
+    }),
+    ScrollUntilDescOutputSchema: z.object({
+      deviceId: z.string(),
+      contentDesc: z.string(),
+      found: z.boolean(),
+      scrolls: z.number(),
+      matchCount: z.number(),
     }),
     WaitForPackageOutputSchema: z.object({
       deviceId: z.string(),
@@ -712,6 +962,29 @@ jest.mock('../../src/types', () => {
       deviceId: z.string(),
       imeId: z.string(),
       textLength: z.number(),
+      output: z.string(),
+    }),
+    AdbKeyboardClearTextOutputSchema: z.object({
+      deviceId: z.string(),
+      imeId: z.string(),
+      output: z.string(),
+    }),
+    AdbKeyboardInputCodeOutputSchema: z.object({
+      deviceId: z.string(),
+      imeId: z.string(),
+      code: z.number(),
+      output: z.string(),
+    }),
+    AdbKeyboardEditorActionOutputSchema: z.object({
+      deviceId: z.string(),
+      imeId: z.string(),
+      code: z.number(),
+      output: z.string(),
+    }),
+    AdbKeyboardInputCharsOutputSchema: z.object({
+      deviceId: z.string(),
+      imeId: z.string(),
+      codepoints: z.array(z.number()),
       output: z.string(),
     }),
     SetAdbKeyboardModeOutputSchema: z.object({
@@ -850,6 +1123,67 @@ jest.mock('../../src/types', () => {
       required: [],
     },
     GetWindowSizeToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+      },
+      required: [],
+    },
+    ListInstalledPackagesToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        filter: { type: 'string' },
+        thirdPartyOnly: { type: 'boolean' },
+        systemOnly: { type: 'boolean' },
+        disabledOnly: { type: 'boolean' },
+        enabledOnly: { type: 'boolean' },
+        includeUninstalled: { type: 'boolean' },
+        user: { type: 'string' },
+      },
+      required: [],
+    },
+    IsAppInstalledToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        packageName: { type: 'string' },
+      },
+      required: ['packageName'],
+    },
+    GetAppVersionToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        packageName: { type: 'string' },
+      },
+      required: ['packageName'],
+    },
+    GetAndroidPropertyToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        property: { type: 'string' },
+      },
+      required: ['property'],
+    },
+    GetAndroidPropertiesToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        prefix: { type: 'string' },
+      },
+      required: [],
+    },
+    OpenUrlToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        url: { type: 'string' },
+      },
+      required: ['url'],
+    },
+    PasteClipboardToolSchema: {
       type: 'object',
       properties: {
         deviceId: { type: 'string' },
@@ -1010,6 +1344,17 @@ jest.mock('../../src/types', () => {
       },
       required: ['text'],
     },
+    WaitForTextDisappearToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        text: { type: 'string' },
+        matchMode: { type: 'string' },
+        timeoutMs: { type: 'number' },
+        intervalMs: { type: 'number' },
+      },
+      required: ['text'],
+    },
     TypeByIdToolSchema: {
       type: 'object',
       properties: {
@@ -1032,7 +1377,29 @@ jest.mock('../../src/types', () => {
       },
       required: ['resourceId'],
     },
+    WaitForIdDisappearToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        resourceId: { type: 'string' },
+        matchMode: { type: 'string' },
+        timeoutMs: { type: 'number' },
+        intervalMs: { type: 'number' },
+      },
+      required: ['resourceId'],
+    },
     WaitForDescToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        contentDesc: { type: 'string' },
+        matchMode: { type: 'string' },
+        timeoutMs: { type: 'number' },
+        intervalMs: { type: 'number' },
+      },
+      required: ['contentDesc'],
+    },
+    WaitForDescDisappearToolSchema: {
       type: 'object',
       properties: {
         deviceId: { type: 'string' },
@@ -1053,6 +1420,18 @@ jest.mock('../../src/types', () => {
         intervalMs: { type: 'number' },
       },
       required: ['activity'],
+    },
+    WaitForActivityChangeToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        previousActivity: { type: 'string' },
+        targetActivity: { type: 'string' },
+        matchMode: { type: 'string' },
+        timeoutMs: { type: 'number' },
+        intervalMs: { type: 'number' },
+      },
+      required: [],
     },
     PressKeySequenceToolSchema: {
       type: 'object',
@@ -1085,12 +1464,54 @@ jest.mock('../../src/types', () => {
       },
       required: ['startXPercent', 'startYPercent', 'endXPercent', 'endYPercent'],
     },
+    ScrollVerticalToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        direction: { type: 'string' },
+        distancePercent: { type: 'number' },
+        durationMs: { type: 'number' },
+        startXPercent: { type: 'number' },
+      },
+      required: ['direction'],
+    },
+    ScrollHorizontalToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        direction: { type: 'string' },
+        distancePercent: { type: 'number' },
+        durationMs: { type: 'number' },
+        startYPercent: { type: 'number' },
+      },
+      required: ['direction'],
+    },
     TapCenterToolSchema: {
       type: 'object',
       properties: {
         deviceId: { type: 'string' },
       },
       required: [],
+    },
+    LongPressToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        x: { type: 'number' },
+        y: { type: 'number' },
+        durationMs: { type: 'number' },
+      },
+      required: ['x', 'y'],
+    },
+    DoubleTapToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        x: { type: 'number' },
+        y: { type: 'number' },
+        intervalMs: { type: 'number' },
+      },
+      required: ['x', 'y'],
     },
     WaitForUiStableToolSchema: {
       type: 'object',
@@ -1108,6 +1529,45 @@ jest.mock('../../src/types', () => {
         deviceId: { type: 'string' },
       },
       required: [],
+    },
+    ScrollUntilTextToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        text: { type: 'string' },
+        matchMode: { type: 'string' },
+        direction: { type: 'string' },
+        distancePercent: { type: 'number' },
+        maxScrolls: { type: 'number' },
+        intervalMs: { type: 'number' },
+      },
+      required: ['text'],
+    },
+    ScrollUntilIdToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        resourceId: { type: 'string' },
+        matchMode: { type: 'string' },
+        direction: { type: 'string' },
+        distancePercent: { type: 'number' },
+        maxScrolls: { type: 'number' },
+        intervalMs: { type: 'number' },
+      },
+      required: ['resourceId'],
+    },
+    ScrollUntilDescToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        contentDesc: { type: 'string' },
+        matchMode: { type: 'string' },
+        direction: { type: 'string' },
+        distancePercent: { type: 'number' },
+        maxScrolls: { type: 'number' },
+        intervalMs: { type: 'number' },
+      },
+      required: ['contentDesc'],
     },
     WaitForPackageToolSchema: {
       type: 'object',
@@ -1225,6 +1685,45 @@ jest.mock('../../src/types', () => {
         imeId: { type: 'string' },
         setIme: { type: 'boolean' },
         useBase64: { type: 'boolean' },
+      },
+      required: ['text'],
+    },
+    AdbKeyboardClearTextToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        imeId: { type: 'string' },
+        setIme: { type: 'boolean' },
+      },
+      required: [],
+    },
+    AdbKeyboardInputCodeToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        code: { type: 'number' },
+        imeId: { type: 'string' },
+        setIme: { type: 'boolean' },
+      },
+      required: ['code'],
+    },
+    AdbKeyboardEditorActionToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        code: { type: 'number' },
+        imeId: { type: 'string' },
+        setIme: { type: 'boolean' },
+      },
+      required: ['code'],
+    },
+    AdbKeyboardInputCharsToolSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        text: { type: 'string' },
+        imeId: { type: 'string' },
+        setIme: { type: 'boolean' },
       },
       required: ['text'],
     },
@@ -1496,6 +1995,10 @@ describe('MCP Server Integration Tests', () => {
         expect(toolNames).toContain('set_ime');
         expect(toolNames).toContain('enable_ime');
         expect(toolNames).toContain('adb_keyboard_input');
+        expect(toolNames).toContain('adb_keyboard_clear_text');
+        expect(toolNames).toContain('adb_keyboard_input_code');
+        expect(toolNames).toContain('adb_keyboard_editor_action');
+        expect(toolNames).toContain('adb_keyboard_input_chars');
         expect(toolNames).toContain('set_adb_keyboard_mode');
         expect(toolNames).toContain('smart_login');
         expect(toolNames).toContain('detect_login_fields');
@@ -1511,16 +2014,27 @@ describe('MCP Server Integration Tests', () => {
         expect(toolNames).toContain('tap_by_id');
         expect(toolNames).toContain('tap_by_desc');
         expect(toolNames).toContain('wait_for_text');
+        expect(toolNames).toContain('wait_for_text_disappear');
         expect(toolNames).toContain('type_by_id');
         expect(toolNames).toContain('wait_for_id');
+        expect(toolNames).toContain('wait_for_id_disappear');
         expect(toolNames).toContain('wait_for_desc');
+        expect(toolNames).toContain('wait_for_desc_disappear');
         expect(toolNames).toContain('wait_for_activity');
+        expect(toolNames).toContain('wait_for_activity_change');
         expect(toolNames).toContain('press_key_sequence');
         expect(toolNames).toContain('tap_relative');
         expect(toolNames).toContain('swipe_relative');
+        expect(toolNames).toContain('scroll_vertical');
+        expect(toolNames).toContain('scroll_horizontal');
         expect(toolNames).toContain('tap_center');
+        expect(toolNames).toContain('long_press');
+        expect(toolNames).toContain('double_tap');
         expect(toolNames).toContain('wait_for_ui_stable');
         expect(toolNames).toContain('get_screen_hash');
+        expect(toolNames).toContain('scroll_until_text');
+        expect(toolNames).toContain('scroll_until_id');
+        expect(toolNames).toContain('scroll_until_desc');
         expect(toolNames).toContain('wait_for_package');
         expect(toolNames).toContain('run_flow_plan');
         expect(toolNames).toContain('query_ui');
@@ -1529,6 +2043,13 @@ describe('MCP Server Integration Tests', () => {
         expect(toolNames).toContain('ui_dump_cached');
         expect(toolNames).toContain('get_android_current_activity');
         expect(toolNames).toContain('get_android_window_size');
+        expect(toolNames).toContain('list_installed_packages');
+        expect(toolNames).toContain('is_app_installed');
+        expect(toolNames).toContain('get_app_version');
+        expect(toolNames).toContain('get_android_property');
+        expect(toolNames).toContain('get_android_properties');
+        expect(toolNames).toContain('open_url');
+        expect(toolNames).toContain('paste_clipboard');
         expect(toolNames).toContain('dump_android_ui_hierarchy');
         expect(toolNames).toContain('get_android_logcat');
         expect(toolNames).toContain('list_android_activities');

@@ -326,6 +326,102 @@ export function adbKeyboardInput(
   return { deviceId: targetDeviceId, imeId, textLength: text.length, output: output.trim() };
 }
 
+export function adbKeyboardClearText(
+  deviceId?: string,
+  options: { imeId?: string; setIme?: boolean } = {}
+): { deviceId: string; imeId: string; output: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const imeId = options.imeId ?? 'com.android.adbkeyboard/.AdbIME';
+  if (options.setIme !== false) {
+    try {
+      enableIme(imeId, targetDeviceId);
+    } catch {
+      // ignore enable failures; setIme may still work if already enabled
+    }
+    setIme(imeId, targetDeviceId);
+  }
+
+  const { output } = executeADBCommandOnDevice('shell am broadcast -a ADB_CLEAR_TEXT', targetDeviceId);
+  return { deviceId: targetDeviceId, imeId, output: output.trim() };
+}
+
+export function adbKeyboardInputCode(
+  code: number,
+  deviceId?: string,
+  options: { imeId?: string; setIme?: boolean } = {}
+): { deviceId: string; imeId: string; code: number; output: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const imeId = options.imeId ?? 'com.android.adbkeyboard/.AdbIME';
+  if (options.setIme !== false) {
+    try {
+      enableIme(imeId, targetDeviceId);
+    } catch {
+      // ignore enable failures; setIme may still work if already enabled
+    }
+    setIme(imeId, targetDeviceId);
+  }
+
+  const { output } = executeADBCommandOnDevice(
+    `shell am broadcast -a ADB_INPUT_CODE --ei code ${code}`,
+    targetDeviceId
+  );
+  return { deviceId: targetDeviceId, imeId, code, output: output.trim() };
+}
+
+export function adbKeyboardEditorAction(
+  code: number,
+  deviceId?: string,
+  options: { imeId?: string; setIme?: boolean } = {}
+): { deviceId: string; imeId: string; code: number; output: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const imeId = options.imeId ?? 'com.android.adbkeyboard/.AdbIME';
+  if (options.setIme !== false) {
+    try {
+      enableIme(imeId, targetDeviceId);
+    } catch {
+      // ignore enable failures; setIme may still work if already enabled
+    }
+    setIme(imeId, targetDeviceId);
+  }
+
+  const { output } = executeADBCommandOnDevice(
+    `shell am broadcast -a ADB_EDITOR_CODE --ei code ${code}`,
+    targetDeviceId
+  );
+  return { deviceId: targetDeviceId, imeId, code, output: output.trim() };
+}
+
+export function adbKeyboardInputChars(
+  text: string,
+  deviceId?: string,
+  options: { imeId?: string; setIme?: boolean } = {}
+): { deviceId: string; imeId: string; codepoints: number[]; output: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const imeId = options.imeId ?? 'com.android.adbkeyboard/.AdbIME';
+  if (options.setIme !== false) {
+    try {
+      enableIme(imeId, targetDeviceId);
+    } catch {
+      // ignore enable failures; setIme may still work if already enabled
+    }
+    setIme(imeId, targetDeviceId);
+  }
+
+  const codepoints: number[] = [];
+  for (const char of text) {
+    const code = char.codePointAt(0);
+    if (typeof code === 'number') {
+      codepoints.push(code);
+    }
+  }
+  const payload = codepoints.join(',');
+  const { output } = executeADBCommandOnDevice(
+    `shell am broadcast -a ADB_INPUT_CHARS --eia chars ${escapeShellArg(payload)}`,
+    targetDeviceId
+  );
+  return { deviceId: targetDeviceId, imeId, codepoints, output: output.trim() };
+}
+
 type SmartLoginResult = {
   deviceId: string;
   emailFieldFound: boolean;
@@ -336,13 +432,25 @@ type SmartLoginResult = {
 };
 
 function isPasswordCandidate(node: UiNode): boolean {
-  const haystack = `${node.text} ${node.resourceId} ${node.contentDesc}`.toLowerCase();
+  if (node.password) {
+    return true;
+  }
+  const haystack = `${node.text} ${node.resourceId} ${node.contentDesc} ${node.className}`
+    .toLowerCase()
+    .trim();
   return /pass|kennwort|pwd/.test(haystack);
 }
 
 function isEmailCandidate(node: UiNode): boolean {
-  const haystack = `${node.text} ${node.resourceId} ${node.contentDesc}`.toLowerCase();
+  const haystack = `${node.text} ${node.resourceId} ${node.contentDesc} ${node.className}`
+    .toLowerCase()
+    .trim();
   return /mail|e-mail|email|user|benutzer|login/.test(haystack);
+}
+
+function isTextInput(node: UiNode): boolean {
+  const className = node.className.toLowerCase();
+  return className.includes('edittext') || className.includes('autocompletetextview');
 }
 
 function isSubmitCandidate(node: UiNode, labels: string[]): boolean {
@@ -378,6 +486,16 @@ function pickLargest(nodes: UiNode[], predicate: (node: UiNode) => boolean): UiN
   })[0];
 }
 
+function pickTextInputs(nodes: UiNode[]): UiNode[] {
+  return nodes
+    .filter(node => node.bounds && isTextInput(node))
+    .sort((a, b) => {
+      const ay = a.bounds ? a.bounds.y1 : 0;
+      const by = b.bounds ? b.bounds.y1 : 0;
+      return ay - by;
+    });
+}
+
 export function detectLoginFields(options: {
   deviceId?: string;
   submitLabels?: string[];
@@ -393,9 +511,56 @@ export function detectLoginFields(options: {
   const submitLabels =
     options.submitLabels ?? ['anmelden', 'login', 'sign in', 'weiter', 'continue'];
 
-  const emailField = pickBest(nodes, isEmailCandidate);
-  const passwordField = pickBest(nodes, isPasswordCandidate);
-  const submitButton = pickLargest(nodes, node => isSubmitCandidate(node, submitLabels));
+  const textInputs = pickTextInputs(nodes);
+  let passwordField = pickBest(textInputs, isPasswordCandidate) ?? pickBest(nodes, isPasswordCandidate);
+  let emailField = pickBest(textInputs, isEmailCandidate) ?? pickBest(nodes, isEmailCandidate);
+
+  if (!passwordField && textInputs.length >= 2) {
+    passwordField = textInputs[textInputs.length - 1];
+  }
+
+  if (!emailField && textInputs.length >= 1) {
+    emailField = textInputs.find(node => node !== passwordField) ?? textInputs[0];
+  }
+
+  const passwordBounds = passwordField?.bounds;
+  if (passwordBounds && textInputs.length > 0) {
+    const abovePassword = textInputs.filter(
+      node =>
+        node !== passwordField &&
+        node.bounds &&
+        node.bounds.y1 <= passwordBounds.y1
+    );
+    if (abovePassword.length > 0) {
+      emailField = abovePassword[abovePassword.length - 1];
+    }
+  }
+
+  const submitMinY = passwordBounds ? passwordBounds.y2 - 4 : 0;
+  const submitButton =
+    pickLargest(
+      nodes,
+      node =>
+        !isTextInput(node) &&
+        node.bounds !== undefined &&
+        node.bounds.y1 >= submitMinY &&
+        isSubmitCandidate(node, submitLabels) &&
+        (node.clickable || node.className.toLowerCase().includes('button'))
+    ) ??
+    pickLargest(nodes, node =>
+      !isTextInput(node) &&
+      node.bounds !== undefined &&
+      node.bounds.y1 >= submitMinY &&
+      node.clickable &&
+      node.className.toLowerCase().includes('button')
+    ) ??
+    pickLargest(nodes, node =>
+      !isTextInput(node) &&
+      node.bounds !== undefined &&
+      node.bounds.y1 >= submitMinY &&
+      node.clickable &&
+      isSubmitCandidate(node, submitLabels)
+    );
 
   return { deviceId: targetDeviceId, emailField, passwordField, submitButton };
 }
@@ -646,6 +811,139 @@ export function getDeviceInfo(deviceId: string): Partial<AndroidDevice> {
       { originalError: error instanceof Error ? error.message : String(error) }
     );
   }
+}
+
+export function listInstalledPackages(
+  deviceId?: string,
+  options: {
+    filter?: string;
+    thirdPartyOnly?: boolean;
+    systemOnly?: boolean;
+    disabledOnly?: boolean;
+    enabledOnly?: boolean;
+    includeUninstalled?: boolean;
+    user?: string | number;
+  } = {}
+): { deviceId: string; packages: string[]; output: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const flags: string[] = [];
+  if (options.thirdPartyOnly) flags.push('-3');
+  if (options.systemOnly) flags.push('-s');
+  if (options.disabledOnly) flags.push('-d');
+  if (options.enabledOnly) flags.push('-e');
+  if (options.includeUninstalled) flags.push('-u');
+  if (options.user !== undefined) flags.push(`--user ${options.user}`);
+  const filterArg = options.filter ? ` ${escapeShellArg(options.filter)}` : '';
+  const { output } = executeADBCommandOnDevice(
+    `shell pm list packages ${flags.join(' ')}${filterArg}`.trim(),
+    targetDeviceId,
+    { timeout: 10000 }
+  );
+  const packages = output
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.startsWith('package:'))
+    .map(line => line.replace(/^package:/, '').trim());
+  return { deviceId: targetDeviceId, packages, output: output.trim() };
+}
+
+export function isAppInstalled(
+  packageName: string,
+  deviceId?: string
+): { deviceId: string; packageName: string; installed: boolean; path?: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { output } = executeADBCommandOnDevice(
+    `shell pm path ${escapeShellArg(packageName)}`,
+    targetDeviceId,
+    { timeout: 8000 }
+  );
+  const lines = output
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+  const pathLine = lines.find(line => line.startsWith('package:'));
+  return {
+    deviceId: targetDeviceId,
+    packageName,
+    installed: Boolean(pathLine),
+    path: pathLine ? pathLine.replace(/^package:/, '').trim() : undefined,
+  };
+}
+
+export function getAppVersion(
+  packageName: string,
+  deviceId?: string
+): { deviceId: string; packageName: string; versionName?: string; versionCode?: string; output: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { output } = executeADBCommandOnDevice(
+    `shell dumpsys package ${escapeShellArg(packageName)}`,
+    targetDeviceId,
+    { timeout: 10000 }
+  );
+  const versionNameMatch = output.match(/versionName=([^\s]+)/);
+  const versionCodeMatch = output.match(/versionCode=(\\d+)(?:\\s|minSdk|targetSdk)/);
+  return {
+    deviceId: targetDeviceId,
+    packageName,
+    versionName: versionNameMatch ? versionNameMatch[1] : undefined,
+    versionCode: versionCodeMatch ? versionCodeMatch[1] : undefined,
+    output: output.trim(),
+  };
+}
+
+export function getAndroidProperty(
+  property: string,
+  deviceId?: string
+): { deviceId: string; property: string; value: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { output } = executeADBCommandOnDevice(
+    `shell getprop ${escapeShellArg(property)}`,
+    targetDeviceId
+  );
+  return { deviceId: targetDeviceId, property, value: output.trim() };
+}
+
+export function getAndroidProperties(
+  deviceId?: string,
+  options: { prefix?: string } = {}
+): { deviceId: string; properties: Record<string, string>; output: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { output } = executeADBCommandOnDevice('shell getprop', targetDeviceId);
+  const properties: Record<string, string> = {};
+  output
+    .split('\n')
+    .map(line => line.trim())
+    .forEach(line => {
+      const match = line.match(/^\[([^\]]+)\]: \[(.*)\]$/);
+      if (!match) return;
+      const key = match[1];
+      const value = match[2];
+      if (!options.prefix || key.startsWith(options.prefix)) {
+        properties[key] = value;
+      }
+    });
+  return { deviceId: targetDeviceId, properties, output: output.trim() };
+}
+
+export function openUrl(
+  url: string,
+  deviceId?: string
+): { deviceId: string; url: string; output: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const { output } = executeADBCommandOnDevice(
+    `shell am start -a android.intent.action.VIEW -d ${escapeShellArg(url)}`,
+    targetDeviceId,
+    { timeout: 8000 }
+  );
+  return { deviceId: targetDeviceId, url, output: output.trim() };
+}
+
+export function pasteClipboard(
+  deviceId?: string
+): { deviceId: string; output: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const output = executeADBCommand(`-s ${targetDeviceId} shell input keyevent 279`);
+  return { deviceId: targetDeviceId, output: output.trim() };
 }
 
 export function getCurrentActivity(deviceId?: string): {
@@ -1370,6 +1668,9 @@ type UiNode = {
   text: string;
   resourceId: string;
   contentDesc: string;
+  className: string;
+  clickable: boolean;
+  password: boolean;
   bounds?: { x1: number; y1: number; x2: number; y2: number };
 };
 
@@ -1383,10 +1684,16 @@ function extractUiNodes(xml: string): UiNode[] {
     const textMatch = node.match(/text="([^"]*)"/);
     const idMatch = node.match(/resource-id="([^"]*)"/);
     const descMatch = node.match(/content-desc="([^"]*)"/);
+    const classMatch = node.match(/class="([^"]*)"/);
+    const clickableMatch = node.match(/clickable="([^"]*)"/);
+    const passwordMatch = node.match(/password="([^"]*)"/);
     const boundsMatch = node.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
     const text = textMatch ? textMatch[1] : '';
     const resourceId = idMatch ? idMatch[1] : '';
     const contentDesc = descMatch ? descMatch[1] : '';
+    const className = classMatch ? classMatch[1] : '';
+    const clickable = clickableMatch ? clickableMatch[1] === 'true' : false;
+    const password = passwordMatch ? passwordMatch[1] === 'true' : false;
     let bounds;
 
     if (boundsMatch) {
@@ -1398,7 +1705,7 @@ function extractUiNodes(xml: string): UiNode[] {
       };
     }
 
-    nodes.push({ text, resourceId, contentDesc, bounds });
+    nodes.push({ text, resourceId, contentDesc, className, clickable, password, bounds });
   }
 
   return nodes;
@@ -1567,6 +1874,47 @@ export function waitForText(
   };
 }
 
+export function waitForTextDisappear(
+  text: string,
+  deviceId?: string,
+  options: { matchMode?: MatchMode; timeoutMs?: number; intervalMs?: number } = {}
+): { deviceId: string; text: string; matchMode: MatchMode; disappeared: boolean; elapsedMs: number; matchCount: number } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const matchMode = options.matchMode ?? 'exact';
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const intervalMs = options.intervalMs ?? 300;
+  const start = Date.now();
+
+  while (Date.now() - start <= timeoutMs) {
+    const { xml } = dumpUiHierarchy(targetDeviceId);
+    const nodes = extractUiNodes(xml);
+    const matches = findNodesBy(nodes, 'text', text, matchMode);
+    if (matches.length === 0) {
+      return {
+        deviceId: targetDeviceId,
+        text,
+        matchMode,
+        disappeared: true,
+        elapsedMs: Date.now() - start,
+        matchCount: 0,
+      };
+    }
+    executeADBCommand(`-s ${targetDeviceId} shell sleep ${intervalMs / 1000}`);
+  }
+
+  const { xml } = dumpUiHierarchy(targetDeviceId);
+  const nodes = extractUiNodes(xml);
+  const matches = findNodesBy(nodes, 'text', text, matchMode);
+  return {
+    deviceId: targetDeviceId,
+    text,
+    matchMode,
+    disappeared: false,
+    elapsedMs: Date.now() - start,
+    matchCount: matches.length,
+  };
+}
+
 export function waitForId(
   resourceId: string,
   deviceId?: string,
@@ -1612,6 +1960,54 @@ export function waitForId(
   };
 }
 
+export function waitForIdDisappear(
+  resourceId: string,
+  deviceId?: string,
+  options: { matchMode?: MatchMode; timeoutMs?: number; intervalMs?: number } = {}
+): {
+  deviceId: string;
+  resourceId: string;
+  matchMode: MatchMode;
+  disappeared: boolean;
+  elapsedMs: number;
+  matchCount: number;
+} {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const matchMode = options.matchMode ?? 'exact';
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const intervalMs = options.intervalMs ?? 300;
+  const start = Date.now();
+
+  while (Date.now() - start <= timeoutMs) {
+    const { xml } = dumpUiHierarchy(targetDeviceId);
+    const nodes = extractUiNodes(xml);
+    const matches = findNodesBy(nodes, 'resourceId', resourceId, matchMode);
+    if (matches.length === 0) {
+      return {
+        deviceId: targetDeviceId,
+        resourceId,
+        matchMode,
+        disappeared: true,
+        elapsedMs: Date.now() - start,
+        matchCount: 0,
+      };
+    }
+    executeADBCommand(`-s ${targetDeviceId} shell sleep ${intervalMs / 1000}`);
+  }
+
+  const { xml } = dumpUiHierarchy(targetDeviceId);
+  const nodes = extractUiNodes(xml);
+  const matches = findNodesBy(nodes, 'resourceId', resourceId, matchMode);
+  return {
+    deviceId: targetDeviceId,
+    resourceId,
+    matchMode,
+    disappeared: false,
+    elapsedMs: Date.now() - start,
+    matchCount: matches.length,
+  };
+}
+
 export function waitForDesc(
   contentDesc: string,
   deviceId?: string,
@@ -1654,6 +2050,54 @@ export function waitForDesc(
     found: false,
     elapsedMs: Date.now() - start,
     matchCount: 0,
+  };
+}
+
+export function waitForDescDisappear(
+  contentDesc: string,
+  deviceId?: string,
+  options: { matchMode?: MatchMode; timeoutMs?: number; intervalMs?: number } = {}
+): {
+  deviceId: string;
+  contentDesc: string;
+  matchMode: MatchMode;
+  disappeared: boolean;
+  elapsedMs: number;
+  matchCount: number;
+} {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const matchMode = options.matchMode ?? 'exact';
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const intervalMs = options.intervalMs ?? 300;
+  const start = Date.now();
+
+  while (Date.now() - start <= timeoutMs) {
+    const { xml } = dumpUiHierarchy(targetDeviceId);
+    const nodes = extractUiNodes(xml);
+    const matches = findNodesBy(nodes, 'contentDesc', contentDesc, matchMode);
+    if (matches.length === 0) {
+      return {
+        deviceId: targetDeviceId,
+        contentDesc,
+        matchMode,
+        disappeared: true,
+        elapsedMs: Date.now() - start,
+        matchCount: 0,
+      };
+    }
+    executeADBCommand(`-s ${targetDeviceId} shell sleep ${intervalMs / 1000}`);
+  }
+
+  const { xml } = dumpUiHierarchy(targetDeviceId);
+  const nodes = extractUiNodes(xml);
+  const matches = findNodesBy(nodes, 'contentDesc', contentDesc, matchMode);
+  return {
+    deviceId: targetDeviceId,
+    contentDesc,
+    matchMode,
+    disappeared: false,
+    elapsedMs: Date.now() - start,
+    matchCount: matches.length,
   };
 }
 
@@ -1703,6 +2147,64 @@ export function waitForActivity(
   };
 }
 
+export function waitForActivityChange(
+  deviceId?: string,
+  options: {
+    previousActivity?: string;
+    targetActivity?: string;
+    matchMode?: MatchMode;
+    timeoutMs?: number;
+    intervalMs?: number;
+  } = {}
+): { deviceId: string; previous: string; current: string; changed: boolean; elapsedMs: number } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const matchMode = options.matchMode ?? 'exact';
+  const timeoutMs = options.timeoutMs ?? 8000;
+  const intervalMs = options.intervalMs ?? 300;
+  const start = Date.now();
+
+  const initial = options.previousActivity ?? (() => {
+    const current = getCurrentActivity(targetDeviceId);
+    return current.component ?? current.activity ?? current.packageName ?? current.raw ?? '';
+  })();
+
+  while (Date.now() - start <= timeoutMs) {
+    const current = getCurrentActivity(targetDeviceId);
+    const candidate =
+      current.component ?? current.activity ?? current.packageName ?? current.raw ?? '';
+    if (options.targetActivity) {
+      if (matchesValue(candidate, options.targetActivity, matchMode)) {
+        return {
+          deviceId: targetDeviceId,
+          previous: initial,
+          current: candidate,
+          changed: true,
+          elapsedMs: Date.now() - start,
+        };
+      }
+    } else if (candidate && candidate !== initial) {
+      return {
+        deviceId: targetDeviceId,
+        previous: initial,
+        current: candidate,
+        changed: true,
+        elapsedMs: Date.now() - start,
+      };
+    }
+    executeADBCommand(`-s ${targetDeviceId} shell sleep ${intervalMs / 1000}`);
+  }
+
+  const fallback = getCurrentActivity(targetDeviceId);
+  const current =
+    fallback.component ?? fallback.activity ?? fallback.packageName ?? fallback.raw ?? '';
+  return {
+    deviceId: targetDeviceId,
+    previous: initial,
+    current,
+    changed: current !== initial,
+    elapsedMs: Date.now() - start,
+  };
+}
 export function pressKeySequence(
   keyCodes: Array<string | number>,
   deviceId?: string,
@@ -1782,6 +2284,34 @@ export function swipeRelative(
   };
 }
 
+export function scrollVertical(
+  direction: 'up' | 'down',
+  deviceId?: string,
+  options: { distancePercent?: number; durationMs?: number; startXPercent?: number } = {}
+): { deviceId: string; direction: 'up' | 'down'; output: string } {
+  const distance = Math.max(10, Math.min(90, options.distancePercent ?? 45));
+  const half = distance / 2;
+  const startY = 50 + (direction === 'up' ? half : -half);
+  const endY = 50 - (direction === 'up' ? half : -half);
+  const startX = options.startXPercent ?? 50;
+  const result = swipeRelative(startX, startY, startX, endY, deviceId, options.durationMs);
+  return { deviceId: result.deviceId, direction, output: result.output };
+}
+
+export function scrollHorizontal(
+  direction: 'left' | 'right',
+  deviceId?: string,
+  options: { distancePercent?: number; durationMs?: number; startYPercent?: number } = {}
+): { deviceId: string; direction: 'left' | 'right'; output: string } {
+  const distance = Math.max(10, Math.min(90, options.distancePercent ?? 45));
+  const half = distance / 2;
+  const startX = 50 + (direction === 'left' ? half : -half);
+  const endX = 50 - (direction === 'left' ? half : -half);
+  const startY = options.startYPercent ?? 50;
+  const result = swipeRelative(startX, startY, endX, startY, deviceId, options.durationMs);
+  return { deviceId: result.deviceId, direction, output: result.output };
+}
+
 export function tapCenter(
   deviceId?: string
 ): { deviceId: string; x: number; y: number; output: string } {
@@ -1792,6 +2322,35 @@ export function tapCenter(
   const output = executeADBCommand(`-s ${targetDeviceId} shell input tap ${x} ${y}`);
 
   return { deviceId: targetDeviceId, x, y, output: output.trim() };
+}
+
+export function longPress(
+  x: number,
+  y: number,
+  deviceId?: string,
+  options: { durationMs?: number } = {}
+): { deviceId: string; x: number; y: number; durationMs: number; output: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const durationMs = options.durationMs ?? 700;
+  const output = executeADBCommand(
+    `-s ${targetDeviceId} shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`
+  );
+  return { deviceId: targetDeviceId, x, y, durationMs, output: output.trim() };
+}
+
+export function doubleTap(
+  x: number,
+  y: number,
+  deviceId?: string,
+  options: { intervalMs?: number } = {}
+): { deviceId: string; x: number; y: number; output: string } {
+  const actions: BatchAction[] = [
+    { type: 'tap', x, y },
+    { type: 'sleep', durationMs: options.intervalMs ?? 80 },
+    { type: 'tap', x, y },
+  ];
+  const result = batchInputActions(actions, deviceId);
+  return { deviceId: result.deviceId, x, y, output: result.output };
 }
 
 export function waitForUiStable(
@@ -1867,6 +2426,123 @@ export function waitForPackage(
     elapsedMs: Date.now() - start,
     current: fallback.packageName ?? fallback.raw,
   };
+}
+
+export function scrollUntilText(
+  text: string,
+  deviceId?: string,
+  options: {
+    matchMode?: MatchMode;
+    direction?: 'up' | 'down';
+    distancePercent?: number;
+    maxScrolls?: number;
+    intervalMs?: number;
+  } = {}
+): { deviceId: string; text: string; found: boolean; scrolls: number; matchCount: number } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const matchMode = options.matchMode ?? 'exact';
+  const maxScrolls = options.maxScrolls ?? 6;
+  const intervalMs = options.intervalMs ?? 250;
+  const direction = options.direction ?? 'down';
+
+  for (let i = 0; i <= maxScrolls; i += 1) {
+    const { xml } = dumpUiHierarchy(targetDeviceId);
+    const nodes = extractUiNodes(xml);
+    const matches = findNodesBy(nodes, 'text', text, matchMode);
+    if (matches.length > 0) {
+      return {
+        deviceId: targetDeviceId,
+        text,
+        found: true,
+        scrolls: i,
+        matchCount: matches.length,
+      };
+    }
+    if (i < maxScrolls) {
+      scrollVertical(direction, targetDeviceId, { distancePercent: options.distancePercent });
+      executeADBCommand(`-s ${targetDeviceId} shell sleep ${intervalMs / 1000}`);
+    }
+  }
+
+  return { deviceId: targetDeviceId, text, found: false, scrolls: maxScrolls, matchCount: 0 };
+}
+
+export function scrollUntilId(
+  resourceId: string,
+  deviceId?: string,
+  options: {
+    matchMode?: MatchMode;
+    direction?: 'up' | 'down';
+    distancePercent?: number;
+    maxScrolls?: number;
+    intervalMs?: number;
+  } = {}
+): { deviceId: string; resourceId: string; found: boolean; scrolls: number; matchCount: number } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const matchMode = options.matchMode ?? 'exact';
+  const maxScrolls = options.maxScrolls ?? 6;
+  const intervalMs = options.intervalMs ?? 250;
+  const direction = options.direction ?? 'down';
+
+  for (let i = 0; i <= maxScrolls; i += 1) {
+    const { xml } = dumpUiHierarchy(targetDeviceId);
+    const nodes = extractUiNodes(xml);
+    const matches = findNodesBy(nodes, 'resourceId', resourceId, matchMode);
+    if (matches.length > 0) {
+      return {
+        deviceId: targetDeviceId,
+        resourceId,
+        found: true,
+        scrolls: i,
+        matchCount: matches.length,
+      };
+    }
+    if (i < maxScrolls) {
+      scrollVertical(direction, targetDeviceId, { distancePercent: options.distancePercent });
+      executeADBCommand(`-s ${targetDeviceId} shell sleep ${intervalMs / 1000}`);
+    }
+  }
+
+  return { deviceId: targetDeviceId, resourceId, found: false, scrolls: maxScrolls, matchCount: 0 };
+}
+
+export function scrollUntilDesc(
+  contentDesc: string,
+  deviceId?: string,
+  options: {
+    matchMode?: MatchMode;
+    direction?: 'up' | 'down';
+    distancePercent?: number;
+    maxScrolls?: number;
+    intervalMs?: number;
+  } = {}
+): { deviceId: string; contentDesc: string; found: boolean; scrolls: number; matchCount: number } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const matchMode = options.matchMode ?? 'exact';
+  const maxScrolls = options.maxScrolls ?? 6;
+  const intervalMs = options.intervalMs ?? 250;
+  const direction = options.direction ?? 'down';
+
+  for (let i = 0; i <= maxScrolls; i += 1) {
+    const { xml } = dumpUiHierarchy(targetDeviceId);
+    const nodes = extractUiNodes(xml);
+    const matches = findNodesBy(nodes, 'contentDesc', contentDesc, matchMode);
+    if (matches.length > 0) {
+      return {
+        deviceId: targetDeviceId,
+        contentDesc,
+        found: true,
+        scrolls: i,
+        matchCount: matches.length,
+      };
+    }
+    if (i < maxScrolls) {
+      scrollVertical(direction, targetDeviceId, { distancePercent: options.distancePercent });
+      executeADBCommand(`-s ${targetDeviceId} shell sleep ${intervalMs / 1000}`);
+    }
+  }
+
+  return { deviceId: targetDeviceId, contentDesc, found: false, scrolls: maxScrolls, matchCount: 0 };
 }
 
 function hashString(value: string): string {

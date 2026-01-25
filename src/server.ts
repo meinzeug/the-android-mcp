@@ -32,6 +32,27 @@ import {
   GetWindowSizeInputSchema,
   GetWindowSizeOutputSchema,
   GetWindowSizeToolSchema,
+  ListInstalledPackagesInputSchema,
+  ListInstalledPackagesOutputSchema,
+  ListInstalledPackagesToolSchema,
+  IsAppInstalledInputSchema,
+  IsAppInstalledOutputSchema,
+  IsAppInstalledToolSchema,
+  GetAppVersionInputSchema,
+  GetAppVersionOutputSchema,
+  GetAppVersionToolSchema,
+  GetAndroidPropertyInputSchema,
+  GetAndroidPropertyOutputSchema,
+  GetAndroidPropertyToolSchema,
+  GetAndroidPropertiesInputSchema,
+  GetAndroidPropertiesOutputSchema,
+  GetAndroidPropertiesToolSchema,
+  OpenUrlInputSchema,
+  OpenUrlOutputSchema,
+  OpenUrlToolSchema,
+  PasteClipboardInputSchema,
+  PasteClipboardOutputSchema,
+  PasteClipboardToolSchema,
   DumpUiInputSchema,
   DumpUiOutputSchema,
   DumpUiToolSchema,
@@ -80,18 +101,30 @@ import {
   WaitForTextInputSchema,
   WaitForTextOutputSchema,
   WaitForTextToolSchema,
+  WaitForTextDisappearInputSchema,
+  WaitForTextDisappearOutputSchema,
+  WaitForTextDisappearToolSchema,
   TypeByIdInputSchema,
   TypeByIdOutputSchema,
   TypeByIdToolSchema,
   WaitForIdInputSchema,
   WaitForIdOutputSchema,
   WaitForIdToolSchema,
+  WaitForIdDisappearInputSchema,
+  WaitForIdDisappearOutputSchema,
+  WaitForIdDisappearToolSchema,
   WaitForDescInputSchema,
   WaitForDescOutputSchema,
   WaitForDescToolSchema,
+  WaitForDescDisappearInputSchema,
+  WaitForDescDisappearOutputSchema,
+  WaitForDescDisappearToolSchema,
   WaitForActivityInputSchema,
   WaitForActivityOutputSchema,
   WaitForActivityToolSchema,
+  WaitForActivityChangeInputSchema,
+  WaitForActivityChangeOutputSchema,
+  WaitForActivityChangeToolSchema,
   PressKeySequenceInputSchema,
   PressKeySequenceOutputSchema,
   PressKeySequenceToolSchema,
@@ -101,15 +134,36 @@ import {
   SwipeRelativeInputSchema,
   SwipeRelativeOutputSchema,
   SwipeRelativeToolSchema,
+  ScrollVerticalInputSchema,
+  ScrollVerticalOutputSchema,
+  ScrollVerticalToolSchema,
+  ScrollHorizontalInputSchema,
+  ScrollHorizontalOutputSchema,
+  ScrollHorizontalToolSchema,
   TapCenterInputSchema,
   TapCenterOutputSchema,
   TapCenterToolSchema,
+  LongPressInputSchema,
+  LongPressOutputSchema,
+  LongPressToolSchema,
+  DoubleTapInputSchema,
+  DoubleTapOutputSchema,
+  DoubleTapToolSchema,
   WaitForUiStableInputSchema,
   WaitForUiStableOutputSchema,
   WaitForUiStableToolSchema,
   GetScreenHashInputSchema,
   GetScreenHashOutputSchema,
   GetScreenHashToolSchema,
+  ScrollUntilTextInputSchema,
+  ScrollUntilTextOutputSchema,
+  ScrollUntilTextToolSchema,
+  ScrollUntilIdInputSchema,
+  ScrollUntilIdOutputSchema,
+  ScrollUntilIdToolSchema,
+  ScrollUntilDescInputSchema,
+  ScrollUntilDescOutputSchema,
+  ScrollUntilDescToolSchema,
   WaitForPackageInputSchema,
   WaitForPackageOutputSchema,
   WaitForPackageToolSchema,
@@ -153,6 +207,18 @@ import {
   AdbKeyboardInputSchema,
   AdbKeyboardOutputSchema,
   AdbKeyboardToolSchema,
+  AdbKeyboardClearTextInputSchema,
+  AdbKeyboardClearTextOutputSchema,
+  AdbKeyboardClearTextToolSchema,
+  AdbKeyboardInputCodeInputSchema,
+  AdbKeyboardInputCodeOutputSchema,
+  AdbKeyboardInputCodeToolSchema,
+  AdbKeyboardEditorActionInputSchema,
+  AdbKeyboardEditorActionOutputSchema,
+  AdbKeyboardEditorActionToolSchema,
+  AdbKeyboardInputCharsInputSchema,
+  AdbKeyboardInputCharsOutputSchema,
+  AdbKeyboardInputCharsToolSchema,
   SetAdbKeyboardModeInputSchema,
   SetAdbKeyboardModeOutputSchema,
   SetAdbKeyboardModeToolSchema,
@@ -227,10 +293,32 @@ import {
   setIme as adbSetIme,
   enableIme as adbEnableIme,
   adbKeyboardInput as adbKeyboardInput,
+  adbKeyboardClearText as adbKeyboardClearText,
+  adbKeyboardInputCode as adbKeyboardInputCode,
+  adbKeyboardEditorAction as adbKeyboardEditorAction,
+  adbKeyboardInputChars as adbKeyboardInputChars,
   getCurrentIme as adbGetCurrentIme,
   smartLogin as adbSmartLogin,
   detectLoginFields as adbDetectLoginFields,
   smartLoginFast as adbSmartLoginFast,
+  waitForTextDisappear as adbWaitForTextDisappear,
+  waitForIdDisappear as adbWaitForIdDisappear,
+  waitForDescDisappear as adbWaitForDescDisappear,
+  waitForActivityChange as adbWaitForActivityChange,
+  scrollVertical as adbScrollVertical,
+  scrollHorizontal as adbScrollHorizontal,
+  scrollUntilText as adbScrollUntilText,
+  scrollUntilId as adbScrollUntilId,
+  scrollUntilDesc as adbScrollUntilDesc,
+  listInstalledPackages as adbListInstalledPackages,
+  isAppInstalled as adbIsAppInstalled,
+  getAppVersion as adbGetAppVersion,
+  getAndroidProperty as adbGetAndroidProperty,
+  getAndroidProperties as adbGetAndroidProperties,
+  openUrl as adbOpenUrl,
+  longPress as adbLongPress,
+  doubleTap as adbDoubleTap,
+  pasteClipboard as adbPasteClipboard,
   uninstallApp as adbUninstallApp,
 } from './utils/adb.js';
 import { listPm2Apps, startPm2HotMode, stopPm2App } from './utils/pm2.js';
@@ -250,7 +338,7 @@ class AndroidMcpServer {
     this.server = new Server(
       {
         name: 'the-android-mcp',
-        version: '2.0.0',
+        version: '2.0.1',
       },
       {
         capabilities: {
@@ -319,6 +407,26 @@ class AndroidMcpServer {
           inputSchema: AdbKeyboardToolSchema,
         },
         {
+          name: 'adb_keyboard_clear_text',
+          description: 'Clear text via ADB Keyboard IME',
+          inputSchema: AdbKeyboardClearTextToolSchema,
+        },
+        {
+          name: 'adb_keyboard_input_code',
+          description: 'Send a key code via ADB Keyboard IME',
+          inputSchema: AdbKeyboardInputCodeToolSchema,
+        },
+        {
+          name: 'adb_keyboard_editor_action',
+          description: 'Send an editor action code via ADB Keyboard IME',
+          inputSchema: AdbKeyboardEditorActionToolSchema,
+        },
+        {
+          name: 'adb_keyboard_input_chars',
+          description: 'Send unicode codepoints via ADB Keyboard IME',
+          inputSchema: AdbKeyboardInputCharsToolSchema,
+        },
+        {
           name: 'set_adb_keyboard_mode',
           description: 'Enable/disable ADB keyboard mode (restore previous IME)',
           inputSchema: SetAdbKeyboardModeToolSchema,
@@ -367,6 +475,41 @@ class AndroidMcpServer {
           name: 'get_android_window_size',
           description: 'Get device window size (physical/override)',
           inputSchema: GetWindowSizeToolSchema,
+        },
+        {
+          name: 'list_installed_packages',
+          description: 'List installed package names',
+          inputSchema: ListInstalledPackagesToolSchema,
+        },
+        {
+          name: 'is_app_installed',
+          description: 'Check if a package is installed',
+          inputSchema: IsAppInstalledToolSchema,
+        },
+        {
+          name: 'get_app_version',
+          description: 'Get app version info via dumpsys',
+          inputSchema: GetAppVersionToolSchema,
+        },
+        {
+          name: 'get_android_property',
+          description: 'Read a system property (getprop)',
+          inputSchema: GetAndroidPropertyToolSchema,
+        },
+        {
+          name: 'get_android_properties',
+          description: 'Read system properties (optionally filtered by prefix)',
+          inputSchema: GetAndroidPropertiesToolSchema,
+        },
+        {
+          name: 'open_url',
+          description: 'Open a URL via Android intent',
+          inputSchema: OpenUrlToolSchema,
+        },
+        {
+          name: 'paste_clipboard',
+          description: 'Paste clipboard content via keyevent',
+          inputSchema: PasteClipboardToolSchema,
         },
         {
           name: 'dump_android_ui_hierarchy',
@@ -449,6 +592,11 @@ class AndroidMcpServer {
           inputSchema: WaitForTextToolSchema,
         },
         {
+          name: 'wait_for_text_disappear',
+          description: 'Wait for UI text to disappear via UI dump polling',
+          inputSchema: WaitForTextDisappearToolSchema,
+        },
+        {
           name: 'type_by_id',
           description: 'Tap a field by resource-id and type text',
           inputSchema: TypeByIdToolSchema,
@@ -459,14 +607,29 @@ class AndroidMcpServer {
           inputSchema: WaitForIdToolSchema,
         },
         {
+          name: 'wait_for_id_disappear',
+          description: 'Wait for UI resource-id to disappear via UI dump polling',
+          inputSchema: WaitForIdDisappearToolSchema,
+        },
+        {
           name: 'wait_for_desc',
           description: 'Wait for UI content-desc to appear via UI dump polling',
           inputSchema: WaitForDescToolSchema,
         },
         {
+          name: 'wait_for_desc_disappear',
+          description: 'Wait for UI content-desc to disappear via UI dump polling',
+          inputSchema: WaitForDescDisappearToolSchema,
+        },
+        {
           name: 'wait_for_activity',
           description: 'Wait for current activity/component',
           inputSchema: WaitForActivityToolSchema,
+        },
+        {
+          name: 'wait_for_activity_change',
+          description: 'Wait for activity/component to change (or match target)',
+          inputSchema: WaitForActivityChangeToolSchema,
         },
         {
           name: 'press_key_sequence',
@@ -484,9 +647,29 @@ class AndroidMcpServer {
           inputSchema: SwipeRelativeToolSchema,
         },
         {
+          name: 'scroll_vertical',
+          description: 'Scroll vertically using percentage swipe',
+          inputSchema: ScrollVerticalToolSchema,
+        },
+        {
+          name: 'scroll_horizontal',
+          description: 'Scroll horizontally using percentage swipe',
+          inputSchema: ScrollHorizontalToolSchema,
+        },
+        {
           name: 'tap_center',
           description: 'Tap the center of the screen',
           inputSchema: TapCenterToolSchema,
+        },
+        {
+          name: 'long_press',
+          description: 'Long-press on a coordinate',
+          inputSchema: LongPressToolSchema,
+        },
+        {
+          name: 'double_tap',
+          description: 'Double tap on a coordinate',
+          inputSchema: DoubleTapToolSchema,
         },
         {
           name: 'wait_for_ui_stable',
@@ -497,6 +680,21 @@ class AndroidMcpServer {
           name: 'get_screen_hash',
           description: 'Get a UI hash from the current UI dump',
           inputSchema: GetScreenHashToolSchema,
+        },
+        {
+          name: 'scroll_until_text',
+          description: 'Scroll until text appears',
+          inputSchema: ScrollUntilTextToolSchema,
+        },
+        {
+          name: 'scroll_until_id',
+          description: 'Scroll until resource-id appears',
+          inputSchema: ScrollUntilIdToolSchema,
+        },
+        {
+          name: 'scroll_until_desc',
+          description: 'Scroll until content-desc appears',
+          inputSchema: ScrollUntilDescToolSchema,
         },
         {
           name: 'wait_for_package',
@@ -698,6 +896,58 @@ class AndroidMcpServer {
             };
           }
 
+          case 'adb_keyboard_clear_text': {
+            const input = AdbKeyboardClearTextInputSchema.parse(args);
+            const result = await this.adbKeyboardClearText(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'adb_keyboard_input_code': {
+            const input = AdbKeyboardInputCodeInputSchema.parse(args);
+            const result = await this.adbKeyboardInputCode(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'adb_keyboard_editor_action': {
+            const input = AdbKeyboardEditorActionInputSchema.parse(args);
+            const result = await this.adbKeyboardEditorAction(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'adb_keyboard_input_chars': {
+            const input = AdbKeyboardInputCharsInputSchema.parse(args);
+            const result = await this.adbKeyboardInputChars(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
           case 'set_adb_keyboard_mode': {
             const input = SetAdbKeyboardModeInputSchema.parse(args);
             const result = await this.setAdbKeyboardMode(input);
@@ -818,6 +1068,97 @@ class AndroidMcpServer {
           case 'get_android_window_size': {
             const input = GetWindowSizeInputSchema.parse(args);
             const result = await this.getWindowSize(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'list_installed_packages': {
+            const input = ListInstalledPackagesInputSchema.parse(args);
+            const result = await this.listInstalledPackages(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'is_app_installed': {
+            const input = IsAppInstalledInputSchema.parse(args);
+            const result = await this.isAppInstalled(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'get_app_version': {
+            const input = GetAppVersionInputSchema.parse(args);
+            const result = await this.getAppVersion(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'get_android_property': {
+            const input = GetAndroidPropertyInputSchema.parse(args);
+            const result = await this.getAndroidProperty(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'get_android_properties': {
+            const input = GetAndroidPropertiesInputSchema.parse(args);
+            const result = await this.getAndroidProperties(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'open_url': {
+            const input = OpenUrlInputSchema.parse(args);
+            const result = await this.openUrl(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'paste_clipboard': {
+            const input = PasteClipboardInputSchema.parse(args);
+            const result = await this.pasteClipboard(input);
             return {
               content: [
                 {
@@ -1121,6 +1462,19 @@ class AndroidMcpServer {
             };
           }
 
+          case 'wait_for_text_disappear': {
+            const input = WaitForTextDisappearInputSchema.parse(args);
+            const result = await this.waitForTextDisappear(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
           case 'type_by_id': {
             const input = TypeByIdInputSchema.parse(args);
             const result = await this.typeById(input);
@@ -1147,6 +1501,19 @@ class AndroidMcpServer {
             };
           }
 
+          case 'wait_for_id_disappear': {
+            const input = WaitForIdDisappearInputSchema.parse(args);
+            const result = await this.waitForIdDisappear(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
           case 'wait_for_desc': {
             const input = WaitForDescInputSchema.parse(args);
             const result = await this.waitForDesc(input);
@@ -1163,6 +1530,32 @@ class AndroidMcpServer {
           case 'wait_for_activity': {
             const input = WaitForActivityInputSchema.parse(args);
             const result = await this.waitForActivity(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'wait_for_desc_disappear': {
+            const input = WaitForDescDisappearInputSchema.parse(args);
+            const result = await this.waitForDescDisappear(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'wait_for_activity_change': {
+            const input = WaitForActivityChangeInputSchema.parse(args);
+            const result = await this.waitForActivityChange(input);
             return {
               content: [
                 {
@@ -1212,6 +1605,32 @@ class AndroidMcpServer {
             };
           }
 
+          case 'scroll_vertical': {
+            const input = ScrollVerticalInputSchema.parse(args);
+            const result = await this.scrollVertical(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'scroll_horizontal': {
+            const input = ScrollHorizontalInputSchema.parse(args);
+            const result = await this.scrollHorizontal(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
           case 'tap_center': {
             const input = TapCenterInputSchema.parse(args);
             const result = await this.tapCenter(input);
@@ -1241,6 +1660,71 @@ class AndroidMcpServer {
           case 'get_screen_hash': {
             const input = GetScreenHashInputSchema.parse(args);
             const result = await this.getScreenHash(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'long_press': {
+            const input = LongPressInputSchema.parse(args);
+            const result = await this.longPress(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'double_tap': {
+            const input = DoubleTapInputSchema.parse(args);
+            const result = await this.doubleTap(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'scroll_until_text': {
+            const input = ScrollUntilTextInputSchema.parse(args);
+            const result = await this.scrollUntilText(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'scroll_until_id': {
+            const input = ScrollUntilIdInputSchema.parse(args);
+            const result = await this.scrollUntilId(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'scroll_until_desc': {
+            const input = ScrollUntilDescInputSchema.parse(args);
+            const result = await this.scrollUntilDesc(input);
             return {
               content: [
                 {
@@ -1526,6 +2010,46 @@ class AndroidMcpServer {
     return AdbKeyboardOutputSchema.parse(result);
   }
 
+  private async adbKeyboardClearText(
+    input: z.infer<typeof AdbKeyboardClearTextInputSchema>
+  ): Promise<z.infer<typeof AdbKeyboardClearTextOutputSchema>> {
+    const result = adbKeyboardClearText(input.deviceId, {
+      imeId: input.imeId,
+      setIme: input.setIme,
+    });
+    return AdbKeyboardClearTextOutputSchema.parse(result);
+  }
+
+  private async adbKeyboardInputCode(
+    input: z.infer<typeof AdbKeyboardInputCodeInputSchema>
+  ): Promise<z.infer<typeof AdbKeyboardInputCodeOutputSchema>> {
+    const result = adbKeyboardInputCode(input.code, input.deviceId, {
+      imeId: input.imeId,
+      setIme: input.setIme,
+    });
+    return AdbKeyboardInputCodeOutputSchema.parse(result);
+  }
+
+  private async adbKeyboardEditorAction(
+    input: z.infer<typeof AdbKeyboardEditorActionInputSchema>
+  ): Promise<z.infer<typeof AdbKeyboardEditorActionOutputSchema>> {
+    const result = adbKeyboardEditorAction(input.code, input.deviceId, {
+      imeId: input.imeId,
+      setIme: input.setIme,
+    });
+    return AdbKeyboardEditorActionOutputSchema.parse(result);
+  }
+
+  private async adbKeyboardInputChars(
+    input: z.infer<typeof AdbKeyboardInputCharsInputSchema>
+  ): Promise<z.infer<typeof AdbKeyboardInputCharsOutputSchema>> {
+    const result = adbKeyboardInputChars(input.text, input.deviceId, {
+      imeId: input.imeId,
+      setIme: input.setIme,
+    });
+    return AdbKeyboardInputCharsOutputSchema.parse(result);
+  }
+
   private async setAdbKeyboardMode(
     input: z.infer<typeof SetAdbKeyboardModeInputSchema>
   ): Promise<z.infer<typeof SetAdbKeyboardModeOutputSchema>> {
@@ -1674,6 +2198,63 @@ class AndroidMcpServer {
   ): Promise<z.infer<typeof GetWindowSizeOutputSchema>> {
     const result = adbGetWindowSize(input.deviceId);
     return GetWindowSizeOutputSchema.parse(result);
+  }
+
+  private async listInstalledPackages(
+    input: z.infer<typeof ListInstalledPackagesInputSchema>
+  ): Promise<z.infer<typeof ListInstalledPackagesOutputSchema>> {
+    const result = adbListInstalledPackages(input.deviceId, {
+      filter: input.filter,
+      thirdPartyOnly: input.thirdPartyOnly,
+      systemOnly: input.systemOnly,
+      disabledOnly: input.disabledOnly,
+      enabledOnly: input.enabledOnly,
+      includeUninstalled: input.includeUninstalled,
+      user: input.user,
+    });
+    return ListInstalledPackagesOutputSchema.parse(result);
+  }
+
+  private async isAppInstalled(
+    input: z.infer<typeof IsAppInstalledInputSchema>
+  ): Promise<z.infer<typeof IsAppInstalledOutputSchema>> {
+    const result = adbIsAppInstalled(input.packageName, input.deviceId);
+    return IsAppInstalledOutputSchema.parse(result);
+  }
+
+  private async getAppVersion(
+    input: z.infer<typeof GetAppVersionInputSchema>
+  ): Promise<z.infer<typeof GetAppVersionOutputSchema>> {
+    const result = adbGetAppVersion(input.packageName, input.deviceId);
+    return GetAppVersionOutputSchema.parse(result);
+  }
+
+  private async getAndroidProperty(
+    input: z.infer<typeof GetAndroidPropertyInputSchema>
+  ): Promise<z.infer<typeof GetAndroidPropertyOutputSchema>> {
+    const result = adbGetAndroidProperty(input.property, input.deviceId);
+    return GetAndroidPropertyOutputSchema.parse(result);
+  }
+
+  private async getAndroidProperties(
+    input: z.infer<typeof GetAndroidPropertiesInputSchema>
+  ): Promise<z.infer<typeof GetAndroidPropertiesOutputSchema>> {
+    const result = adbGetAndroidProperties(input.deviceId, { prefix: input.prefix });
+    return GetAndroidPropertiesOutputSchema.parse(result);
+  }
+
+  private async openUrl(
+    input: z.infer<typeof OpenUrlInputSchema>
+  ): Promise<z.infer<typeof OpenUrlOutputSchema>> {
+    const result = adbOpenUrl(input.url, input.deviceId);
+    return OpenUrlOutputSchema.parse(result);
+  }
+
+  private async pasteClipboard(
+    input: z.infer<typeof PasteClipboardInputSchema>
+  ): Promise<z.infer<typeof PasteClipboardOutputSchema>> {
+    const result = adbPasteClipboard(input.deviceId);
+    return PasteClipboardOutputSchema.parse(result);
   }
 
   private async dumpUiHierarchy(
@@ -1921,6 +2502,17 @@ class AndroidMcpServer {
     return WaitForTextOutputSchema.parse(result);
   }
 
+  private async waitForTextDisappear(
+    input: z.infer<typeof WaitForTextDisappearInputSchema>
+  ): Promise<z.infer<typeof WaitForTextDisappearOutputSchema>> {
+    const result = adbWaitForTextDisappear(input.text, input.deviceId, {
+      matchMode: input.matchMode,
+      timeoutMs: input.timeoutMs,
+      intervalMs: input.intervalMs,
+    });
+    return WaitForTextDisappearOutputSchema.parse(result);
+  }
+
   private async typeById(
     input: z.infer<typeof TypeByIdInputSchema>
   ): Promise<z.infer<typeof TypeByIdOutputSchema>> {
@@ -1942,6 +2534,17 @@ class AndroidMcpServer {
     return WaitForIdOutputSchema.parse(result);
   }
 
+  private async waitForIdDisappear(
+    input: z.infer<typeof WaitForIdDisappearInputSchema>
+  ): Promise<z.infer<typeof WaitForIdDisappearOutputSchema>> {
+    const result = adbWaitForIdDisappear(input.resourceId, input.deviceId, {
+      matchMode: input.matchMode,
+      timeoutMs: input.timeoutMs,
+      intervalMs: input.intervalMs,
+    });
+    return WaitForIdDisappearOutputSchema.parse(result);
+  }
+
   private async waitForDesc(
     input: z.infer<typeof WaitForDescInputSchema>
   ): Promise<z.infer<typeof WaitForDescOutputSchema>> {
@@ -1953,6 +2556,17 @@ class AndroidMcpServer {
     return WaitForDescOutputSchema.parse(result);
   }
 
+  private async waitForDescDisappear(
+    input: z.infer<typeof WaitForDescDisappearInputSchema>
+  ): Promise<z.infer<typeof WaitForDescDisappearOutputSchema>> {
+    const result = adbWaitForDescDisappear(input.contentDesc, input.deviceId, {
+      matchMode: input.matchMode,
+      timeoutMs: input.timeoutMs,
+      intervalMs: input.intervalMs,
+    });
+    return WaitForDescDisappearOutputSchema.parse(result);
+  }
+
   private async waitForActivity(
     input: z.infer<typeof WaitForActivityInputSchema>
   ): Promise<z.infer<typeof WaitForActivityOutputSchema>> {
@@ -1962,6 +2576,19 @@ class AndroidMcpServer {
       intervalMs: input.intervalMs,
     });
     return WaitForActivityOutputSchema.parse(result);
+  }
+
+  private async waitForActivityChange(
+    input: z.infer<typeof WaitForActivityChangeInputSchema>
+  ): Promise<z.infer<typeof WaitForActivityChangeOutputSchema>> {
+    const result = adbWaitForActivityChange(input.deviceId, {
+      previousActivity: input.previousActivity,
+      targetActivity: input.targetActivity,
+      matchMode: input.matchMode,
+      timeoutMs: input.timeoutMs,
+      intervalMs: input.intervalMs,
+    });
+    return WaitForActivityChangeOutputSchema.parse(result);
   }
 
   private async pressKeySequence(
@@ -1995,11 +2622,51 @@ class AndroidMcpServer {
     return SwipeRelativeOutputSchema.parse(result);
   }
 
+  private async scrollVertical(
+    input: z.infer<typeof ScrollVerticalInputSchema>
+  ): Promise<z.infer<typeof ScrollVerticalOutputSchema>> {
+    const result = adbScrollVertical(input.direction, input.deviceId, {
+      distancePercent: input.distancePercent,
+      durationMs: input.durationMs,
+      startXPercent: input.startXPercent,
+    });
+    return ScrollVerticalOutputSchema.parse(result);
+  }
+
+  private async scrollHorizontal(
+    input: z.infer<typeof ScrollHorizontalInputSchema>
+  ): Promise<z.infer<typeof ScrollHorizontalOutputSchema>> {
+    const result = adbScrollHorizontal(input.direction, input.deviceId, {
+      distancePercent: input.distancePercent,
+      durationMs: input.durationMs,
+      startYPercent: input.startYPercent,
+    });
+    return ScrollHorizontalOutputSchema.parse(result);
+  }
+
   private async tapCenter(
     input: z.infer<typeof TapCenterInputSchema>
   ): Promise<z.infer<typeof TapCenterOutputSchema>> {
     const result = adbTapCenter(input.deviceId);
     return TapCenterOutputSchema.parse(result);
+  }
+
+  private async longPress(
+    input: z.infer<typeof LongPressInputSchema>
+  ): Promise<z.infer<typeof LongPressOutputSchema>> {
+    const result = adbLongPress(input.x, input.y, input.deviceId, {
+      durationMs: input.durationMs,
+    });
+    return LongPressOutputSchema.parse(result);
+  }
+
+  private async doubleTap(
+    input: z.infer<typeof DoubleTapInputSchema>
+  ): Promise<z.infer<typeof DoubleTapOutputSchema>> {
+    const result = adbDoubleTap(input.x, input.y, input.deviceId, {
+      intervalMs: input.intervalMs,
+    });
+    return DoubleTapOutputSchema.parse(result);
   }
 
   private async waitForUiStable(
@@ -2018,6 +2685,45 @@ class AndroidMcpServer {
   ): Promise<z.infer<typeof GetScreenHashOutputSchema>> {
     const result = adbGetScreenHash(input.deviceId);
     return GetScreenHashOutputSchema.parse(result);
+  }
+
+  private async scrollUntilText(
+    input: z.infer<typeof ScrollUntilTextInputSchema>
+  ): Promise<z.infer<typeof ScrollUntilTextOutputSchema>> {
+    const result = adbScrollUntilText(input.text, input.deviceId, {
+      matchMode: input.matchMode,
+      direction: input.direction,
+      distancePercent: input.distancePercent,
+      maxScrolls: input.maxScrolls,
+      intervalMs: input.intervalMs,
+    });
+    return ScrollUntilTextOutputSchema.parse(result);
+  }
+
+  private async scrollUntilId(
+    input: z.infer<typeof ScrollUntilIdInputSchema>
+  ): Promise<z.infer<typeof ScrollUntilIdOutputSchema>> {
+    const result = adbScrollUntilId(input.resourceId, input.deviceId, {
+      matchMode: input.matchMode,
+      direction: input.direction,
+      distancePercent: input.distancePercent,
+      maxScrolls: input.maxScrolls,
+      intervalMs: input.intervalMs,
+    });
+    return ScrollUntilIdOutputSchema.parse(result);
+  }
+
+  private async scrollUntilDesc(
+    input: z.infer<typeof ScrollUntilDescInputSchema>
+  ): Promise<z.infer<typeof ScrollUntilDescOutputSchema>> {
+    const result = adbScrollUntilDesc(input.contentDesc, input.deviceId, {
+      matchMode: input.matchMode,
+      direction: input.direction,
+      distancePercent: input.distancePercent,
+      maxScrolls: input.maxScrolls,
+      intervalMs: input.intervalMs,
+    });
+    return ScrollUntilDescOutputSchema.parse(result);
   }
 
   private async waitForPackage(
