@@ -18,6 +18,7 @@ import {
   inputText,
   getLogcat,
   listPackageActivities,
+  detectLoginFields,
 } from '../../src/utils/adb';
 import { ADBNotFoundError, DeviceNotFoundError, NoDevicesFoundError } from '../../src/types';
 
@@ -214,6 +215,42 @@ emulator-5554	device product:sdk_gphone_x86
         .mockReturnValueOnce(Buffer.from(output)); // devices -l call
 
       expect(() => getFirstAvailableDevice()).toThrow('No available devices found');
+    });
+  });
+
+  describe('detectLoginFields', () => {
+    it('should split distinct fields even when bounds are identical', () => {
+      const xml = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy>
+  <node text=\"\" resource-id=\"email\" class=\"android.widget.EditText\" clickable=\"true\" password=\"false\" bounds=\"[10,100][400,180]\" />
+  <node text=\"\" resource-id=\"password\" class=\"android.widget.EditText\" clickable=\"true\" password=\"true\" bounds=\"[10,100][400,180]\" />
+  <node text=\"Login\" resource-id=\"submit\" class=\"android.widget.Button\" clickable=\"true\" bounds=\"[10,200][400,260]\" />
+</hierarchy>`;
+
+      mockExecSync.mockImplementation((command: any) => {
+        if (command === 'adb version') {
+          return Buffer.from('Android Debug Bridge version 1.0.41');
+        }
+        if (String(command).includes('adb devices -l')) {
+          return Buffer.from('List of devices attached\ndevice-1\tdevice product:test model:test transport_id:1');
+        }
+        if (String(command).includes('uiautomator dump')) {
+          return Buffer.from('dumped');
+        }
+        if (String(command).includes('exec-out cat')) {
+          return Buffer.from(xml);
+        }
+        if (String(command).includes('shell rm')) {
+          return Buffer.from('');
+        }
+        throw new Error(`Unexpected command: ${command}`);
+      });
+
+      const result = detectLoginFields({ deviceId: 'device-1' });
+
+      expect(result.emailField?.resourceId).toBe('email');
+      expect(result.passwordField?.resourceId).toBe('password');
+      expect(result.submitButton?.resourceId).toBe('submit');
     });
   });
 

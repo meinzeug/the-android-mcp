@@ -499,6 +499,19 @@ function containsBounds(
   );
 }
 
+function boundsEqual(
+  left?: { x1: number; y1: number; x2: number; y2: number },
+  right?: { x1: number; y1: number; x2: number; y2: number }
+): boolean {
+  if (!left || !right) return false;
+  return (
+    left.x1 === right.x1 &&
+    left.y1 === right.y1 &&
+    left.x2 === right.x2 &&
+    left.y2 === right.y2
+  );
+}
+
 function findClickableContainer(nodes: UiNode[], target: UiNode): UiNode | undefined {
   if (target.clickable) return target;
   if (!target.bounds) return undefined;
@@ -556,6 +569,15 @@ export function detectLoginFields(options: {
     emailField = textInputs.find(node => node !== passwordField) ?? textInputs[0];
   }
 
+  if (emailField && passwordField) {
+    const sameTarget =
+      emailField === passwordField || boundsEqual(emailField.bounds, passwordField.bounds);
+    if (sameTarget && textInputs.length >= 2) {
+      emailField = textInputs[0];
+      passwordField = textInputs[textInputs.length - 1];
+    }
+  }
+
   const passwordBounds = passwordField?.bounds;
   if (passwordBounds && textInputs.length > 0) {
     const abovePassword = textInputs.filter(
@@ -566,6 +588,14 @@ export function detectLoginFields(options: {
     );
     if (abovePassword.length > 0) {
       emailField = abovePassword[abovePassword.length - 1];
+    }
+  }
+
+  if (emailField && passwordField && emailField.bounds && passwordField.bounds) {
+    if (emailField.bounds.y1 > passwordField.bounds.y1) {
+      const swap = emailField;
+      emailField = passwordField;
+      passwordField = swap;
     }
   }
 
@@ -699,6 +729,7 @@ export function smartLoginFast(options: {
   if (options.useAdbKeyboard) {
     if (emailField) {
       tapUiNode(targetDeviceId, emailField);
+      adbKeyboardClearText(targetDeviceId, { setIme: true });
       const imeResult = adbKeyboardInput(options.email, targetDeviceId, {
         setIme: true,
         useBase64: true,
@@ -708,6 +739,7 @@ export function smartLoginFast(options: {
     }
     if (passwordField) {
       tapUiNode(targetDeviceId, passwordField);
+      adbKeyboardClearText(targetDeviceId, { setIme: true });
       const imeResult = adbKeyboardInput(options.password, targetDeviceId, {
         setIme: true,
         useBase64: true,
