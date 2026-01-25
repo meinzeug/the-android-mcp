@@ -129,6 +129,18 @@ import {
   UiDumpCachedInputSchema,
   UiDumpCachedOutputSchema,
   UiDumpCachedToolSchema,
+  SetDeviceAliasInputSchema,
+  SetDeviceAliasOutputSchema,
+  SetDeviceAliasToolSchema,
+  ResolveDeviceAliasInputSchema,
+  ResolveDeviceAliasOutputSchema,
+  ResolveDeviceAliasToolSchema,
+  ListDeviceAliasesInputSchema,
+  ListDeviceAliasesOutputSchema,
+  ListDeviceAliasesToolSchema,
+  ClearDeviceAliasInputSchema,
+  ClearDeviceAliasOutputSchema,
+  ClearDeviceAliasToolSchema,
   ReversePortInputSchema,
   ReversePortOutputSchema,
   ReversePortToolSchema,
@@ -195,12 +207,17 @@ import { formatErrorForResponse } from './utils/error.js';
 
 class AndroidMcpServer {
   private server: Server;
+  private deviceAliases: Map<string, string>;
+  private screenshotCache: Map<
+    string,
+    { timestamp: number; shot: z.infer<typeof TakeScreenshotOutputSchema> }
+  >;
 
   constructor() {
     this.server = new Server(
       {
         name: 'the-android-mcp',
-        version: '0.1.14',
+        version: '0.1.15',
       },
       {
         capabilities: {
@@ -209,6 +226,8 @@ class AndroidMcpServer {
       }
     );
 
+    this.deviceAliases = new Map();
+    this.screenshotCache = new Map();
     this.setupToolHandlers();
   }
 
@@ -224,6 +243,26 @@ class AndroidMcpServer {
           name: 'list_android_devices',
           description: 'List all connected Android devices and emulators',
           inputSchema: ListDevicesToolSchema,
+        },
+        {
+          name: 'set_device_alias',
+          description: 'Set a device alias for later reuse',
+          inputSchema: SetDeviceAliasToolSchema,
+        },
+        {
+          name: 'resolve_device_alias',
+          description: 'Resolve a device alias to a device ID',
+          inputSchema: ResolveDeviceAliasToolSchema,
+        },
+        {
+          name: 'list_device_aliases',
+          description: 'List configured device aliases',
+          inputSchema: ListDeviceAliasesToolSchema,
+        },
+        {
+          name: 'clear_device_alias',
+          description: 'Clear a device alias',
+          inputSchema: ClearDeviceAliasToolSchema,
         },
         {
           name: 'find_android_apk',
@@ -471,6 +510,58 @@ class AndroidMcpServer {
           case 'list_android_devices': {
             const input = ListDevicesInputSchema.parse(args);
             const result = await this.listDevices(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'set_device_alias': {
+            const input = SetDeviceAliasInputSchema.parse(args);
+            const result = await this.setDeviceAlias(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'resolve_device_alias': {
+            const input = ResolveDeviceAliasInputSchema.parse(args);
+            const result = await this.resolveDeviceAlias(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'list_device_aliases': {
+            const input = ListDeviceAliasesInputSchema.parse(args);
+            const result = await this.listDeviceAliases(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'clear_device_alias': {
+            const input = ClearDeviceAliasInputSchema.parse(args);
+            const result = await this.clearDeviceAlias(input);
             return {
               content: [
                 {
@@ -789,6 +880,7 @@ class AndroidMcpServer {
                     filePath: result.uiDump.filePath,
                   }
                 : undefined,
+              stepResults: result.stepResults,
             };
 
             content.push({
@@ -1178,6 +1270,68 @@ class AndroidMcpServer {
     return ListDevicesOutputSchema.parse(result);
   }
 
+  private resolveDeviceIdInput(deviceId?: string, deviceAlias?: string): string {
+    if (deviceAlias) {
+      const resolved = this.deviceAliases.get(deviceAlias);
+      if (!resolved) {
+        throw new Error(`Unknown device alias '${deviceAlias}'`);
+      }
+      return resolveDeviceId(resolved);
+    }
+    return resolveDeviceId(deviceId);
+  }
+
+  private async setDeviceAlias(
+    input: z.infer<typeof SetDeviceAliasInputSchema>
+  ): Promise<z.infer<typeof SetDeviceAliasOutputSchema>> {
+    const resolved = resolveDeviceId(input.deviceId);
+    this.deviceAliases.set(input.alias, resolved);
+    return SetDeviceAliasOutputSchema.parse({ alias: input.alias, deviceId: resolved });
+  }
+
+  private async resolveDeviceAlias(
+    input: z.infer<typeof ResolveDeviceAliasInputSchema>
+  ): Promise<z.infer<typeof ResolveDeviceAliasOutputSchema>> {
+    const resolved = this.deviceAliases.get(input.alias);
+    if (!resolved) {
+      throw new Error(`Unknown device alias '${input.alias}'`);
+    }
+    return ResolveDeviceAliasOutputSchema.parse({ alias: input.alias, deviceId: resolved });
+  }
+
+  private async listDeviceAliases(
+    _input: z.infer<typeof ListDeviceAliasesInputSchema>
+  ): Promise<z.infer<typeof ListDeviceAliasesOutputSchema>> {
+    const aliases: Record<string, string> = {};
+    for (const [alias, deviceId] of this.deviceAliases.entries()) {
+      aliases[alias] = deviceId;
+    }
+    return ListDeviceAliasesOutputSchema.parse({ aliases });
+  }
+
+  private async clearDeviceAlias(
+    input: z.infer<typeof ClearDeviceAliasInputSchema>
+  ): Promise<z.infer<typeof ClearDeviceAliasOutputSchema>> {
+    const removed = this.deviceAliases.delete(input.alias);
+    return ClearDeviceAliasOutputSchema.parse({ alias: input.alias, removed });
+  }
+
+  private async getScreenshotWithThrottle(
+    deviceId: string,
+    throttleMs?: number
+  ): Promise<z.infer<typeof TakeScreenshotOutputSchema>> {
+    const cached = this.screenshotCache.get(deviceId);
+    if (cached && typeof throttleMs === 'number' && throttleMs > 0) {
+      if (Date.now() - cached.timestamp <= throttleMs) {
+        return cached.shot;
+      }
+    }
+
+    const shot = await captureScreenshotResponse(deviceId);
+    this.screenshotCache.set(deviceId, { timestamp: Date.now(), shot });
+    return shot;
+  }
+
   private async findApk(
     input: z.infer<typeof FindApkInputSchema>
   ): Promise<z.infer<typeof FindApkOutputSchema>> {
@@ -1302,7 +1456,12 @@ class AndroidMcpServer {
       screenshotBefore = await captureScreenshotResponse(targetDeviceId);
     }
 
-    const result = adbBatchInputActions(input.actions, targetDeviceId, {
+    const actions = [...input.actions];
+    if (input.preActionWaitMs && input.preActionWaitMs > 0) {
+      actions.unshift({ type: 'sleep', durationMs: input.preActionWaitMs });
+    }
+
+    const result = adbBatchInputActions(actions, targetDeviceId, {
       timeoutMs: input.timeoutMs,
       resolvedDeviceId: targetDeviceId,
     });
@@ -1346,27 +1505,80 @@ class AndroidMcpServer {
   private async fastFlow(
     input: z.infer<typeof FastFlowInputSchema>
   ): Promise<z.infer<typeof FastFlowOutputSchema>> {
-    const targetDeviceId = resolveDeviceId(input.deviceId);
-    const actions = [...input.actions];
+    const targetDeviceId = this.resolveDeviceIdInput(input.deviceId, input.deviceAlias);
+    const actions = input.actions ? [...input.actions] : [];
+    if (actions.length === 0 && (!input.steps || input.steps.length === 0)) {
+      throw new Error('fast_flow requires at least one action or step.');
+    }
     let screenshotBefore;
     let screenshotAfter;
     let uiDump;
+    let stepResults;
 
     if (input.captureBefore) {
-      screenshotBefore = await captureScreenshotResponse(targetDeviceId);
+      screenshotBefore = await this.getScreenshotWithThrottle(
+        targetDeviceId,
+        input.screenshotThrottleMs
+      );
     }
 
-    if (input.postActionWaitMs && input.postActionWaitMs > 0) {
+    if (input.preActionWaitMs && input.preActionWaitMs > 0) {
+      actions.unshift({ type: 'sleep', durationMs: input.preActionWaitMs });
+    }
+
+    if (input.postActionWaitMs && input.postActionWaitMs > 0 && actions.length > 0) {
       actions.push({ type: 'sleep', durationMs: input.postActionWaitMs });
     }
 
-    const result = adbBatchInputActions(actions, targetDeviceId, {
-      timeoutMs: input.timeoutMs,
-      resolvedDeviceId: targetDeviceId,
-    });
+    if (input.steps && input.steps.length > 0) {
+      stepResults = [];
+      const retries = input.stepRetries ?? 0;
+      for (const step of input.steps) {
+        let lastResult: z.infer<typeof RunFlowPlanOutputSchema> | undefined;
+        let attempt = 0;
+        while (attempt <= retries) {
+          lastResult = adbRunFlowPlan([step], targetDeviceId, { stopOnFailure: true });
+          const stepResult = lastResult.steps[0];
+          if (stepResult?.ok) {
+            stepResults.push(stepResult);
+            break;
+          }
+          attempt += 1;
+          if (attempt > retries) {
+            if (stepResult) {
+              stepResults.push(stepResult);
+            }
+            break;
+          }
+          if (input.retryDelayMs && input.retryDelayMs > 0) {
+            adbBatchInputActions(
+              [{ type: 'sleep', durationMs: input.retryDelayMs }],
+              targetDeviceId,
+              { timeoutMs: input.timeoutMs, resolvedDeviceId: targetDeviceId }
+            );
+          }
+        }
+
+        const lastStep = stepResults[stepResults.length - 1];
+        if (input.stepRetries !== undefined && input.stepRetries >= 0 && lastStep && !lastStep.ok) {
+          break;
+        }
+      }
+    }
+
+    const result =
+      actions.length > 0
+        ? adbBatchInputActions(actions, targetDeviceId, {
+            timeoutMs: input.timeoutMs,
+            resolvedDeviceId: targetDeviceId,
+          })
+        : { deviceId: targetDeviceId, actions: [], output: '' };
 
     if (input.captureAfter) {
-      screenshotAfter = await captureScreenshotResponse(targetDeviceId);
+      screenshotAfter = await this.getScreenshotWithThrottle(
+        targetDeviceId,
+        input.screenshotThrottleMs
+      );
     }
 
     if (input.includeUiDump) {
@@ -1378,6 +1590,7 @@ class AndroidMcpServer {
       screenshotBefore,
       screenshotAfter,
       uiDump,
+      stepResults,
     });
   }
 
@@ -1533,7 +1746,8 @@ class AndroidMcpServer {
   private async runFlowPlan(
     input: z.infer<typeof RunFlowPlanInputSchema>
   ): Promise<z.infer<typeof RunFlowPlanOutputSchema>> {
-    const result = adbRunFlowPlan(input.steps, input.deviceId, {
+    const targetDeviceId = this.resolveDeviceIdInput(input.deviceId, input.deviceAlias);
+    const result = adbRunFlowPlan(input.steps, targetDeviceId, {
       stopOnFailure: input.stopOnFailure,
     });
     return RunFlowPlanOutputSchema.parse(result);

@@ -323,6 +323,10 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | ------------------------- | ----------------------------------------- | -------------------------------------------------------------------------- |
 | `take_android_screenshot` | Captures device screenshot                | `deviceId` (optional)                                                      |
 | `list_android_devices`    | Lists connected devices                   | None                                                                       |
+| `set_device_alias`        | Set a device alias                        | `alias`, `deviceId` (optional)                                             |
+| `resolve_device_alias`    | Resolve device alias                      | `alias`                                                                    |
+| `list_device_aliases`     | List device aliases                       | None                                                                       |
+| `clear_device_alias`      | Clear a device alias                      | `alias`                                                                    |
 | `find_android_apk`        | Finds the most recent APK in a project    | `projectRoot` (optional)                                                   |
 | `install_android_apk`     | Installs an APK on a device               | `apkPath`/`apkUrl` (optional), `deviceId` (optional), install flags, `timeoutMs` |
 | `uninstall_android_app`   | Uninstalls an app by package name         | `packageName`, `deviceId` (optional), `keepData` (optional)                |
@@ -336,11 +340,11 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `swipe_android_screen`    | Sends a swipe gesture                     | `startX`, `startY`, `endX`, `endY`, `durationMs` (optional), `deviceId`    |
 | `input_android_text`      | Types text into focused input             | `text`, `deviceId` (optional)                                              |
 | `send_android_keyevent`   | Sends an Android keyevent                 | `keyCode`, `deviceId` (optional)                                           |
-| `batch_android_actions`   | Runs multiple input actions in one call   | `actions`, `deviceId` (optional), `captureBefore`/`captureAfter` (optional), `timeoutMs` |
+| `batch_android_actions`   | Runs multiple input actions in one call   | `actions`, `preActionWaitMs` (optional), `deviceId` (optional), `captureBefore`/`captureAfter` (optional), `timeoutMs` |
 | `pm2_start_hot_mode`      | Start hot mode build via PM2              | `projectRoot`/`configPath` (optional), `appName` (optional)                |
 | `pm2_stop_app`            | Stop a PM2 app by name                     | `appName`                                                                  |
 | `pm2_list`                | List PM2 apps                              | None                                                                       |
-| `fast_flow`               | Run fast UI flow (batch + optional dumps)  | `actions`, `captureBefore`/`captureAfter`, `includeUiDump` (optional)      |
+| `fast_flow`               | Run fast UI flow (batch + optional dumps)  | `actions`/`steps`, `stepRetries`, `screenshotThrottleMs` (optional)         |
 | `tap_by_text`             | Tap UI node by visible text               | `text`, `matchMode` (optional), `index` (optional), `deviceId` (optional)  |
 | `tap_by_id`               | Tap UI node by resource-id                | `resourceId`, `index` (optional), `deviceId` (optional)                    |
 | `tap_by_desc`             | Tap UI node by content-desc               | `contentDesc`, `matchMode` (optional), `index` (optional), `deviceId` (optional) |
@@ -356,7 +360,7 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `wait_for_ui_stable`      | Wait for UI dump to stabilize             | `stableIterations`, `intervalMs`, `timeoutMs` (optional)                   |
 | `get_screen_hash`         | Get UI hash from current dump             | `deviceId` (optional)                                                      |
 | `wait_for_package`        | Wait for package in foreground            | `packageName`, `timeoutMs`/`intervalMs` (optional)                         |
-| `run_flow_plan`           | Execute a multi-step UI plan quickly      | `steps`, `stopOnFailure` (optional), `deviceId` (optional)                 |
+| `run_flow_plan`           | Execute a multi-step UI plan quickly      | `steps`, `stopOnFailure` (optional), `deviceId`/`deviceAlias` (optional)   |
 | `query_ui`                | Query UI nodes by selector                | `selector`, `maxResults` (optional), `deviceId` (optional)                 |
 | `wait_for_node_count`     | Wait for selector match count             | `selector`, `count`, `comparator` (optional)                               |
 | `tap_by_selector_index`   | Tap selector match by index               | `selector`, `index` (optional), `deviceId` (optional)                      |

@@ -329,6 +329,12 @@ export const BatchActionsInputSchema = z.object({
     .optional()
     .describe('Optional device ID. If not provided, uses the first available device.'),
   actions: z.array(BatchActionSchema).min(1).describe('Ordered list of actions to run.'),
+  preActionWaitMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Optional wait before running the batch actions (milliseconds).'),
   timeoutMs: z
     .number()
     .int()
@@ -665,13 +671,37 @@ export const FastFlowInputSchema = z.object({
     .string()
     .optional()
     .describe('Optional device ID. If not provided, uses the first available device.'),
-  actions: z.array(BatchActionSchema).min(1).describe('Ordered list of actions to run.'),
+  deviceAlias: z.string().optional().describe('Optional device alias to resolve.'),
+  actions: z
+    .array(BatchActionSchema)
+    .optional()
+    .describe('Ordered list of actions to run.'),
+  steps: z.array(FlowStepSchema).optional().describe('Optional flow steps (selectors/waits).'),
+  stepRetries: z.number().int().min(0).default(0).describe('Retries per step.'),
+  retryDelayMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Delay between step retries (milliseconds).'),
+  preActionWaitMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Optional wait before running actions (milliseconds).'),
   timeoutMs: z
     .number()
     .int()
     .positive()
     .optional()
     .describe('Optional timeout in milliseconds for the batch command.'),
+  screenshotThrottleMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Reuse cached screenshots within this window (milliseconds).'),
   captureBefore: z
     .boolean()
     .default(false)
@@ -705,6 +735,18 @@ export const FastFlowOutputSchema = z.object({
   screenshotBefore: TakeScreenshotOutputSchema.optional().describe('Screenshot before actions'),
   screenshotAfter: TakeScreenshotOutputSchema.optional().describe('Screenshot after actions'),
   uiDump: DumpUiOutputSchema.optional().describe('UI hierarchy dump after actions'),
+  stepResults: z
+    .array(
+      z.object({
+        id: z.string().optional(),
+        type: z.string(),
+        ok: z.boolean(),
+        message: z.string().optional(),
+        elapsedMs: z.number().optional(),
+      })
+    )
+    .optional()
+    .describe('Optional step execution results.'),
 });
 
 export const TapByTextInputSchema = z.object({
@@ -1148,6 +1190,7 @@ export const RunFlowPlanInputSchema = z.object({
     .string()
     .optional()
     .describe('Optional device ID. If not provided, uses the first available device.'),
+  deviceAlias: z.string().optional().describe('Optional device alias to resolve.'),
   steps: z.array(FlowStepSchema).min(1).describe('Ordered list of steps to execute.'),
   stopOnFailure: z.boolean().default(true).describe('Stop when a step fails.'),
 });
@@ -1257,6 +1300,43 @@ export const UiDumpCachedOutputSchema = z.object({
   truncated: z.boolean().optional().describe('Whether XML was truncated'),
   filePath: z.string().describe('Remote dump file path'),
   ageMs: z.number().describe('Age of cached dump in ms'),
+});
+
+export const SetDeviceAliasInputSchema = z.object({
+  alias: z.string().min(1).describe('Alias to assign.'),
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID to bind. Defaults to first available device.'),
+});
+
+export const SetDeviceAliasOutputSchema = z.object({
+  alias: z.string().describe('Alias'),
+  deviceId: z.string().describe('Resolved device ID'),
+});
+
+export const ResolveDeviceAliasInputSchema = z.object({
+  alias: z.string().min(1).describe('Alias to resolve.'),
+});
+
+export const ResolveDeviceAliasOutputSchema = z.object({
+  alias: z.string().describe('Alias'),
+  deviceId: z.string().describe('Resolved device ID'),
+});
+
+export const ListDeviceAliasesInputSchema = z.object({});
+
+export const ListDeviceAliasesOutputSchema = z.object({
+  aliases: z.record(z.string(), z.string()).describe('Alias map'),
+});
+
+export const ClearDeviceAliasInputSchema = z.object({
+  alias: z.string().min(1).describe('Alias to clear.'),
+});
+
+export const ClearDeviceAliasOutputSchema = z.object({
+  alias: z.string().describe('Alias'),
+  removed: z.boolean().describe('Whether the alias was removed'),
 });
 
 export const ReversePortOutputSchema = z.object({
@@ -1642,6 +1722,10 @@ export const BatchActionsToolSchema = {
         ],
       },
     },
+    preActionWaitMs: {
+      type: 'number' as const,
+      description: 'Optional wait before running the batch actions (milliseconds).',
+    },
     timeoutMs: {
       type: 'number' as const,
       description: 'Optional timeout in milliseconds for the batch command.',
@@ -1703,6 +1787,10 @@ export const FastFlowToolSchema = {
       type: 'string' as const,
       description: 'Optional device ID. If not provided, uses the first available device.',
     },
+    deviceAlias: {
+      type: 'string' as const,
+      description: 'Optional device alias to resolve.',
+    },
     actions: {
       type: 'array' as const,
       description: 'Ordered list of actions to run.',
@@ -1756,9 +1844,30 @@ export const FastFlowToolSchema = {
         ],
       },
     },
+    steps: {
+      type: 'array' as const,
+      description: 'Optional flow steps (selectors/waits).',
+    },
+    stepRetries: {
+      type: 'number' as const,
+      description: 'Retries per step.',
+      default: 0,
+    },
+    retryDelayMs: {
+      type: 'number' as const,
+      description: 'Delay between step retries (milliseconds).',
+    },
+    preActionWaitMs: {
+      type: 'number' as const,
+      description: 'Optional wait before running actions (milliseconds).',
+    },
     timeoutMs: {
       type: 'number' as const,
       description: 'Optional timeout in milliseconds for the batch command.',
+    },
+    screenshotThrottleMs: {
+      type: 'number' as const,
+      description: 'Reuse cached screenshots within this window (milliseconds).',
     },
     captureBefore: {
       type: 'boolean' as const,
@@ -1784,7 +1893,7 @@ export const FastFlowToolSchema = {
       description: 'Optional maximum number of characters to return from the UI dump.',
     },
   },
-  required: ['actions'] as string[],
+  required: [] as string[],
 };
 
 export const TapByTextToolSchema = {
@@ -2054,6 +2163,10 @@ export const RunFlowPlanToolSchema = {
       type: 'string' as const,
       description: 'Optional device ID. If not provided, uses the first available device.',
     },
+    deviceAlias: {
+      type: 'string' as const,
+      description: 'Optional device alias to resolve.',
+    },
     steps: {
       type: 'array' as const,
       description: 'Ordered list of steps to execute.',
@@ -2122,6 +2235,37 @@ export const UiDumpCachedToolSchema = {
     maxChars: { type: 'number' as const, description: 'Optional maximum number of characters.' },
   },
   required: [] as string[],
+};
+
+export const SetDeviceAliasToolSchema = {
+  type: 'object' as const,
+  properties: {
+    alias: { type: 'string' as const, description: 'Alias to assign.' },
+    deviceId: { type: 'string' as const, description: 'Optional device ID to bind.' },
+  },
+  required: ['alias'] as string[],
+};
+
+export const ResolveDeviceAliasToolSchema = {
+  type: 'object' as const,
+  properties: {
+    alias: { type: 'string' as const, description: 'Alias to resolve.' },
+  },
+  required: ['alias'] as string[],
+};
+
+export const ListDeviceAliasesToolSchema = {
+  type: 'object' as const,
+  properties: {},
+  required: [] as string[],
+};
+
+export const ClearDeviceAliasToolSchema = {
+  type: 'object' as const,
+  properties: {
+    alias: { type: 'string' as const, description: 'Alias to clear.' },
+  },
+  required: ['alias'] as string[],
 };
 
 export const ReversePortToolSchema = {
@@ -2392,6 +2536,14 @@ export type TapBySelectorIndexInput = z.infer<typeof TapBySelectorIndexInputSche
 export type TapBySelectorIndexOutput = z.infer<typeof TapBySelectorIndexOutputSchema>;
 export type UiDumpCachedInput = z.infer<typeof UiDumpCachedInputSchema>;
 export type UiDumpCachedOutput = z.infer<typeof UiDumpCachedOutputSchema>;
+export type SetDeviceAliasInput = z.infer<typeof SetDeviceAliasInputSchema>;
+export type SetDeviceAliasOutput = z.infer<typeof SetDeviceAliasOutputSchema>;
+export type ResolveDeviceAliasInput = z.infer<typeof ResolveDeviceAliasInputSchema>;
+export type ResolveDeviceAliasOutput = z.infer<typeof ResolveDeviceAliasOutputSchema>;
+export type ListDeviceAliasesInput = z.infer<typeof ListDeviceAliasesInputSchema>;
+export type ListDeviceAliasesOutput = z.infer<typeof ListDeviceAliasesOutputSchema>;
+export type ClearDeviceAliasInput = z.infer<typeof ClearDeviceAliasInputSchema>;
+export type ClearDeviceAliasOutput = z.infer<typeof ClearDeviceAliasOutputSchema>;
 export type ReversePortInput = z.infer<typeof ReversePortInputSchema>;
 export type ReversePortOutput = z.infer<typeof ReversePortOutputSchema>;
 export type ForwardPortInput = z.infer<typeof ForwardPortInputSchema>;
