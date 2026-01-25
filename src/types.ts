@@ -666,88 +666,6 @@ export const Pm2ListOutputSchema = z.object({
   output: z.string().describe('Raw PM2 output'),
 });
 
-export const FastFlowInputSchema = z.object({
-  deviceId: z
-    .string()
-    .optional()
-    .describe('Optional device ID. If not provided, uses the first available device.'),
-  deviceAlias: z.string().optional().describe('Optional device alias to resolve.'),
-  actions: z
-    .array(BatchActionSchema)
-    .optional()
-    .describe('Ordered list of actions to run.'),
-  steps: z.array(FlowStepSchema).optional().describe('Optional flow steps (selectors/waits).'),
-  stepRetries: z.number().int().min(0).default(0).describe('Retries per step.'),
-  retryDelayMs: z
-    .number()
-    .int()
-    .min(0)
-    .optional()
-    .describe('Delay between step retries (milliseconds).'),
-  preActionWaitMs: z
-    .number()
-    .int()
-    .min(0)
-    .optional()
-    .describe('Optional wait before running actions (milliseconds).'),
-  timeoutMs: z
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .describe('Optional timeout in milliseconds for the batch command.'),
-  screenshotThrottleMs: z
-    .number()
-    .int()
-    .min(0)
-    .optional()
-    .describe('Reuse cached screenshots within this window (milliseconds).'),
-  captureBefore: z
-    .boolean()
-    .default(false)
-    .describe('Capture a screenshot before running the actions.'),
-  captureAfter: z
-    .boolean()
-    .default(false)
-    .describe('Capture a screenshot after running the actions.'),
-  postActionWaitMs: z
-    .number()
-    .int()
-    .min(0)
-    .optional()
-    .describe('Optional wait after actions before capture/dump (milliseconds).'),
-  includeUiDump: z
-    .boolean()
-    .default(false)
-    .describe('Include a UI hierarchy dump after the actions.'),
-  uiDumpMaxChars: z
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .describe('Optional maximum number of characters to return from the UI dump.'),
-});
-
-export const FastFlowOutputSchema = z.object({
-  deviceId: z.string().describe('Target device ID'),
-  actions: z.array(BatchActionSchema).describe('Actions that were executed'),
-  output: z.string().describe('Raw ADB output'),
-  screenshotBefore: TakeScreenshotOutputSchema.optional().describe('Screenshot before actions'),
-  screenshotAfter: TakeScreenshotOutputSchema.optional().describe('Screenshot after actions'),
-  uiDump: DumpUiOutputSchema.optional().describe('UI hierarchy dump after actions'),
-  stepResults: z
-    .array(
-      z.object({
-        id: z.string().optional(),
-        type: z.string(),
-        ok: z.boolean(),
-        message: z.string().optional(),
-        elapsedMs: z.number().optional(),
-      })
-    )
-    .optional()
-    .describe('Optional step execution results.'),
-});
 
 export const TapByTextInputSchema = z.object({
   deviceId: z
@@ -1206,6 +1124,89 @@ export const RunFlowPlanOutputSchema = z.object({
       elapsedMs: z.number().optional(),
     })
   ),
+});
+
+export const FastFlowInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  deviceAlias: z.string().optional().describe('Optional device alias to resolve.'),
+  actions: z
+    .array(BatchActionSchema)
+    .optional()
+    .describe('Ordered list of actions to run.'),
+  steps: z.array(FlowStepSchema).optional().describe('Optional flow steps (selectors/waits).'),
+  stepRetries: z.number().int().min(0).default(0).describe('Retries per step.'),
+  retryDelayMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Delay between step retries (milliseconds).'),
+  preActionWaitMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Optional wait before running actions (milliseconds).'),
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Optional timeout in milliseconds for the batch command.'),
+  screenshotThrottleMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Reuse cached screenshots within this window (milliseconds).'),
+  captureBefore: z
+    .boolean()
+    .default(false)
+    .describe('Capture a screenshot before running the actions.'),
+  captureAfter: z
+    .boolean()
+    .default(false)
+    .describe('Capture a screenshot after running the actions.'),
+  postActionWaitMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Optional wait after actions before capture/dump (milliseconds).'),
+  includeUiDump: z
+    .boolean()
+    .default(false)
+    .describe('Include a UI hierarchy dump after the actions.'),
+  uiDumpMaxChars: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Optional maximum number of characters to return from the UI dump.'),
+});
+
+export const FastFlowOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  actions: z.array(BatchActionSchema).describe('Actions that were executed'),
+  output: z.string().describe('Raw ADB output'),
+  screenshotBefore: TakeScreenshotOutputSchema.optional().describe('Screenshot before actions'),
+  screenshotAfter: TakeScreenshotOutputSchema.optional().describe('Screenshot after actions'),
+  uiDump: DumpUiOutputSchema.optional().describe('UI hierarchy dump after actions'),
+  stepResults: z
+    .array(
+      z.object({
+        id: z.string().optional(),
+        type: z.string(),
+        ok: z.boolean(),
+        message: z.string().optional(),
+        elapsedMs: z.number().optional(),
+      })
+    )
+    .optional()
+    .describe('Optional step execution results.'),
 });
 
 export const UiSelectorSchema = z.object({
