@@ -142,6 +142,7 @@ jest.mock('../../src/types', () => {
     BatchActionsInputSchema: z.object({
       deviceId: z.string().optional(),
       actions: z.array(z.any()),
+      preActionWaitMs: z.number().optional(),
       timeoutMs: z.number().optional(),
       captureBefore: z.boolean().optional(),
       captureAfter: z.boolean().optional(),
@@ -157,8 +158,14 @@ jest.mock('../../src/types', () => {
     Pm2ListInputSchema: z.object({}),
     FastFlowInputSchema: z.object({
       deviceId: z.string().optional(),
+      deviceAlias: z.string().optional(),
       actions: z.array(z.any()),
+      steps: z.array(z.any()).optional(),
+      stepRetries: z.number().optional(),
+      retryDelayMs: z.number().optional(),
+      preActionWaitMs: z.number().optional(),
       timeoutMs: z.number().optional(),
+      screenshotThrottleMs: z.number().optional(),
       captureBefore: z.boolean().optional(),
       captureAfter: z.boolean().optional(),
       postActionWaitMs: z.number().optional(),
@@ -256,6 +263,7 @@ jest.mock('../../src/types', () => {
     }),
     RunFlowPlanInputSchema: z.object({
       deviceId: z.string().optional(),
+      deviceAlias: z.string().optional(),
       steps: z.array(z.any()),
       stopOnFailure: z.boolean().optional(),
     }),
@@ -280,6 +288,17 @@ jest.mock('../../src/types', () => {
     UiDumpCachedInputSchema: z.object({
       deviceId: z.string().optional(),
       maxChars: z.number().optional(),
+    }),
+    SetDeviceAliasInputSchema: z.object({
+      alias: z.string(),
+      deviceId: z.string().optional(),
+    }),
+    ResolveDeviceAliasInputSchema: z.object({
+      alias: z.string(),
+    }),
+    ListDeviceAliasesInputSchema: z.object({}),
+    ClearDeviceAliasInputSchema: z.object({
+      alias: z.string(),
     }),
     ReversePortInputSchema: z.object({
       deviceId: z.string().optional(),
@@ -457,6 +476,7 @@ jest.mock('../../src/types', () => {
       screenshotBefore: z.any().optional(),
       screenshotAfter: z.any().optional(),
       uiDump: z.any().optional(),
+      stepResults: z.any().optional(),
     }),
     TapByTextOutputSchema: z.object({
       deviceId: z.string(),
@@ -613,6 +633,21 @@ jest.mock('../../src/types', () => {
       truncated: z.boolean().optional(),
       filePath: z.string(),
       ageMs: z.number(),
+    }),
+    SetDeviceAliasOutputSchema: z.object({
+      alias: z.string(),
+      deviceId: z.string(),
+    }),
+    ResolveDeviceAliasOutputSchema: z.object({
+      alias: z.string(),
+      deviceId: z.string(),
+    }),
+    ListDeviceAliasesOutputSchema: z.object({
+      aliases: z.any(),
+    }),
+    ClearDeviceAliasOutputSchema: z.object({
+      alias: z.string(),
+      removed: z.boolean(),
     }),
     ReversePortOutputSchema: z.object({
       deviceId: z.string(),
@@ -794,6 +829,7 @@ jest.mock('../../src/types', () => {
       properties: {
         deviceId: { type: 'string' },
         actions: { type: 'array' },
+        preActionWaitMs: { type: 'number' },
         timeoutMs: { type: 'number' },
         captureBefore: { type: 'boolean' },
         captureAfter: { type: 'boolean' },
@@ -825,15 +861,21 @@ jest.mock('../../src/types', () => {
       type: 'object',
       properties: {
         deviceId: { type: 'string' },
+        deviceAlias: { type: 'string' },
         actions: { type: 'array' },
+        steps: { type: 'array' },
+        stepRetries: { type: 'number' },
+        retryDelayMs: { type: 'number' },
+        preActionWaitMs: { type: 'number' },
         timeoutMs: { type: 'number' },
+        screenshotThrottleMs: { type: 'number' },
         captureBefore: { type: 'boolean' },
         captureAfter: { type: 'boolean' },
         postActionWaitMs: { type: 'number' },
         includeUiDump: { type: 'boolean' },
         uiDumpMaxChars: { type: 'number' },
       },
-      required: ['actions'],
+      required: [],
     },
     TapByTextToolSchema: {
       type: 'object',
@@ -988,6 +1030,7 @@ jest.mock('../../src/types', () => {
       type: 'object',
       properties: {
         deviceId: { type: 'string' },
+        deviceAlias: { type: 'string' },
         steps: { type: 'array' },
         stopOnFailure: { type: 'boolean' },
       },
@@ -1030,6 +1073,33 @@ jest.mock('../../src/types', () => {
         maxChars: { type: 'number' },
       },
       required: [],
+    },
+    SetDeviceAliasToolSchema: {
+      type: 'object',
+      properties: {
+        alias: { type: 'string' },
+        deviceId: { type: 'string' },
+      },
+      required: ['alias'],
+    },
+    ResolveDeviceAliasToolSchema: {
+      type: 'object',
+      properties: {
+        alias: { type: 'string' },
+      },
+      required: ['alias'],
+    },
+    ListDeviceAliasesToolSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+    ClearDeviceAliasToolSchema: {
+      type: 'object',
+      properties: {
+        alias: { type: 'string' },
+      },
+      required: ['alias'],
     },
     ReversePortToolSchema: {
       type: 'object',
@@ -1175,6 +1245,14 @@ jest.mock('../../src/types', () => {
     TapBySelectorIndexOutput: {},
     UiDumpCachedInput: {},
     UiDumpCachedOutput: {},
+    SetDeviceAliasInput: {},
+    SetDeviceAliasOutput: {},
+    ResolveDeviceAliasInput: {},
+    ResolveDeviceAliasOutput: {},
+    ListDeviceAliasesInput: {},
+    ListDeviceAliasesOutput: {},
+    ClearDeviceAliasInput: {},
+    ClearDeviceAliasOutput: {},
     ReversePortInput: {},
     ReversePortOutput: {},
     ForwardPortInput: {},
@@ -1226,6 +1304,10 @@ describe('MCP Server Integration Tests', () => {
         const toolNames = response.tools.map((tool: any) => tool.name);
         expect(toolNames).toContain('take_android_screenshot');
         expect(toolNames).toContain('list_android_devices');
+        expect(toolNames).toContain('set_device_alias');
+        expect(toolNames).toContain('resolve_device_alias');
+        expect(toolNames).toContain('list_device_aliases');
+        expect(toolNames).toContain('clear_device_alias');
         expect(toolNames).toContain('install_android_apk');
         expect(toolNames).toContain('tap_android_screen');
         expect(toolNames).toContain('batch_android_actions');
