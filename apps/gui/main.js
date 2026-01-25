@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const { Client } = require('@modelcontextprotocol/sdk/client');
 const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
@@ -6,6 +7,48 @@ const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio
 let mainWindow;
 let client;
 let transport;
+
+function shouldDisableSandbox() {
+  if (process.platform !== 'linux') return false;
+  if (process.env.THE_ANDROID_MCP_FORCE_SANDBOX === '1') return false;
+  if (
+    process.env.THE_ANDROID_MCP_NO_SANDBOX === '1' ||
+    process.env.ELECTRON_DISABLE_SANDBOX === '1' ||
+    process.env.ELECTRON_NO_SANDBOX === '1'
+  ) {
+    return true;
+  }
+
+  const sandboxPath = path.join(
+    __dirname,
+    'node_modules',
+    'electron',
+    'dist',
+    'chrome-sandbox'
+  );
+
+  try {
+    const stat = fs.statSync(sandboxPath);
+    const mode = stat.mode & 0o7777;
+    if (stat.uid !== 0 || mode !== 0o4755) {
+      return true;
+    }
+  } catch (error) {
+    return true;
+  }
+
+  return false;
+}
+
+if (shouldDisableSandbox()) {
+  app.commandLine.appendSwitch('no-sandbox');
+  app.commandLine.appendSwitch('disable-setuid-sandbox');
+  app.commandLine.appendSwitch('disable-gpu-sandbox');
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[the-android-mcp-gui] Sandboxing disabled (set THE_ANDROID_MCP_FORCE_SANDBOX=1 to require it).'
+  );
+}
 
 function log(message) {
   if (mainWindow && mainWindow.webContents) {
