@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unit and integration tests
 - Documentation and examples
 
+## [0.1.5] - 2026-01-25
+### Added
+- Root-level GUI launcher bin to avoid publish-time warnings.
+
+### Fixed
+- Distribution packaging now bundles GUI assets and bin launchers consistently.
+
 ## [0.1.4] - 2026-01-25
 ### Added
 - Global GUI launcher (`the-android-mcp-gui`) after `npm install -g`.

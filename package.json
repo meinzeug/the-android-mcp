@@ -1,12 +1,12 @@
 {
   "name": "the-android-mcp",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "ADB-powered MCP server for Android app install, control, hot reload, screenshots, and test automation",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
     "the-android-mcp": "dist/index.js",
-    "the-android-mcp-gui": "dist/gui.js"
+    "the-android-mcp-gui": "bin/the-android-mcp-gui.js"
   },
   "scripts": {
     "build": "tsc",
@@ -39,7 +39,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/meinzeug/the-android-mcp.git"
+    "url": "git+https://github.com/meinzeug/the-android-mcp.git"
   },
   "bugs": {
     "url": "https://github.com/meinzeug/the-android-mcp/issues"
@@ -47,7 +47,8 @@
   "homepage": "https://github.com/meinzeug/the-android-mcp",
   "files": [
     "dist",
-    "apps/gui"
+    "apps/gui",
+    "bin"
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

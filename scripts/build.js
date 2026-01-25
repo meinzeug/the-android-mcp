@@ -70,12 +70,11 @@ delete packageJson.eslintConfig;
 delete packageJson.prettier;
 delete packageJson.husky;
 
-// Add bin field if not exists
-if (!packageJson.bin) {
-    packageJson.bin = {
-        'the-android-mcp': 'index.js'
-    };
-}
+// Normalize bin field for the distribution package root
+packageJson.bin = {
+    'the-android-mcp': 'index.js',
+    'the-android-mcp-gui': 'bin/the-android-mcp-gui.js'
+};
 
 // Update main field
 packageJson.main = 'index.js';
@@ -151,6 +150,17 @@ if (fs.existsSync('package')) {
 // Copy dist to package
 copyDir('dist', 'package');
 console.log('✓ Distribution package created');
+
+// Copy GUI assets and bin launcher into package
+if (fs.existsSync('apps/gui')) {
+    copyDir('apps/gui', path.join('package', 'apps', 'gui'));
+    console.log('✓ GUI assets copied');
+}
+
+if (fs.existsSync('bin')) {
+    copyDir('bin', path.join('package', 'bin'));
+    console.log('✓ Bin launchers copied');
+}
 
 console.log('\n============================================');
 console.log('Build completed successfully!');
