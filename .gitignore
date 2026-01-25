@@ -105,6 +105,10 @@ Thumbs.db
 tmp/
 temp/
 
+# Electron (apps/gui) artifacts
+apps/gui/electron
+apps/gui/the-android-mcp-gui@0.0.1
+
 # Personal settings and configurations
 .gemini/
 .github/copilot-instructions.md
