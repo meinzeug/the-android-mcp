@@ -101,7 +101,7 @@ class AndroidMcpServer {
     this.server = new Server(
       {
         name: 'the-android-mcp',
-        version: '0.1.3',
+        version: '0.1.4',
       },
       {
         capabilities: {

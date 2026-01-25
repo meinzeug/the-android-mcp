@@ -1,16 +1,20 @@
-const { spawn } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+#!/usr/bin/env node
+
+import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 
 function getElectronPaths() {
-  const electronPath = require('electron');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const electronPath = require('electron') as string;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const electronPkgPath = require.resolve('electron/package.json');
   const electronRoot = path.dirname(electronPkgPath);
   const chromeSandboxPath = path.join(electronRoot, 'dist', 'chrome-sandbox');
   return { electronPath, chromeSandboxPath };
 }
 
-function needsNoSandbox() {
+function shouldDisableSandbox(chromeSandboxPath: string) {
   if (process.platform !== 'linux') return false;
   if (process.env.THE_ANDROID_MCP_FORCE_SANDBOX === '1') return false;
   if (
@@ -20,8 +24,6 @@ function needsNoSandbox() {
   ) {
     return true;
   }
-
-  const { chromeSandboxPath } = getElectronPaths();
 
   try {
     const stat = fs.statSync(chromeSandboxPath);
@@ -36,11 +38,39 @@ function needsNoSandbox() {
   return false;
 }
 
+function ensureGuiDir(guiDir: string) {
+  if (!fs.existsSync(guiDir)) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[the-android-mcp-gui] GUI assets not found at ${guiDir}. ` +
+        'Make sure you installed the package with GUI assets.'
+    );
+    process.exit(1);
+  }
+}
+
 function start() {
-  const { electronPath } = getElectronPaths();
-  const appDir = path.join(__dirname, '..');
-  const disableSandbox = needsNoSandbox();
-  const args = [];
+  const guiDir = path.join(__dirname, '..', 'apps', 'gui');
+  ensureGuiDir(guiDir);
+
+  let electronPath: string;
+  let chromeSandboxPath: string;
+
+  try {
+    const resolved = getElectronPaths();
+    electronPath = resolved.electronPath;
+    chromeSandboxPath = resolved.chromeSandboxPath;
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(
+      '[the-android-mcp-gui] Electron not found. Reinstall with dependencies.'
+    );
+    process.exit(1);
+    return;
+  }
+
+  const disableSandbox = shouldDisableSandbox(chromeSandboxPath);
+  const args: string[] = [];
 
   if (disableSandbox) {
     args.push('--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu-sandbox');
@@ -55,7 +85,7 @@ function start() {
   }
 
   const child = spawn(electronPath, args, {
-    cwd: appDir,
+    cwd: guiDir,
     env,
     stdio: 'inherit',
   });

@@ -134,6 +134,12 @@ timeout = 10000
 npm install -g the-android-mcp
 ```
 
+Launch the GUI (after global install):
+
+```bash
+the-android-mcp-gui
+```
+
 ### Source Installation
 
 ```bash

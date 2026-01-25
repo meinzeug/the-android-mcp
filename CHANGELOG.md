@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unit and integration tests
 - Documentation and examples
 
+## [0.1.4] - 2026-01-25
+### Added
+- Global GUI launcher (`the-android-mcp-gui`) after `npm install -g`.
+- GUI assets bundled with the npm package.
+
+### Fixed
+- Linux Electron sandbox fallback now works when `chrome-sandbox` is misconfigured.
+
 ## [0.1.2] - 2026-01-24
 ### Added
 - APK install from URL (`apkUrl`) with automatic download.
