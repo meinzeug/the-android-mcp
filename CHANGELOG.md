@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Smarter login field detection (EditText/password hints) for faster `smart_login` flows.
 - Submit button selection now prefers clickable button nodes near login fields.
 
+## [2.0.2] - 2026-01-25
+### Improved
+- Submit detection now resolves clickable containers around submit text (e.g. Compose buttons).
+
 ## [2.0.0] - 2026-01-25
 ### Added
 - Smart login tools (`smart_login`, `detect_login_fields`, `smart_login_fast`).

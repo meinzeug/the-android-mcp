@@ -486,6 +486,39 @@ function pickLargest(nodes: UiNode[], predicate: (node: UiNode) => boolean): UiN
   })[0];
 }
 
+function containsBounds(
+  outer?: { x1: number; y1: number; x2: number; y2: number },
+  inner?: { x1: number; y1: number; x2: number; y2: number }
+): boolean {
+  if (!outer || !inner) return false;
+  return (
+    inner.x1 >= outer.x1 &&
+    inner.y1 >= outer.y1 &&
+    inner.x2 <= outer.x2 &&
+    inner.y2 <= outer.y2
+  );
+}
+
+function findClickableContainer(nodes: UiNode[], target: UiNode): UiNode | undefined {
+  if (target.clickable) return target;
+  if (!target.bounds) return undefined;
+  const candidates = nodes.filter(
+    node =>
+      node !== target &&
+      node.bounds &&
+      node.clickable &&
+      containsBounds(node.bounds, target.bounds)
+  );
+  if (candidates.length === 0) return undefined;
+  return candidates.sort((a, b) => {
+    const areaA =
+      a.bounds ? Math.abs(a.bounds.x2 - a.bounds.x1) * Math.abs(a.bounds.y2 - a.bounds.y1) : 0;
+    const areaB =
+      b.bounds ? Math.abs(b.bounds.x2 - b.bounds.x1) * Math.abs(b.bounds.y2 - b.bounds.y1) : 0;
+    return areaA - areaB;
+  })[0];
+}
+
 function pickTextInputs(nodes: UiNode[]): UiNode[] {
   return nodes
     .filter(node => node.bounds && isTextInput(node))
@@ -537,7 +570,21 @@ export function detectLoginFields(options: {
   }
 
   const submitMinY = passwordBounds ? passwordBounds.y2 - 4 : 0;
+  const submitTextNode = pickBest(
+    nodes,
+    node =>
+      !isTextInput(node) &&
+      node.bounds !== undefined &&
+      node.bounds.y1 >= submitMinY &&
+      isSubmitCandidate(node, submitLabels)
+  );
+
+  const submitFromContainer = submitTextNode
+    ? findClickableContainer(nodes, submitTextNode)
+    : undefined;
+
   const submitButton =
+    submitFromContainer ??
     pickLargest(
       nodes,
       node =>
