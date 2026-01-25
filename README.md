@@ -5,6 +5,73 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://typescriptlang.org)
 [![Node.js](https://img.shields.io/badge/Node.js-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 
+> Build, ship, and validate Android UI changes in minutes — with AI agents that can see and touch your device.
+
+## ⚡ What This Enables (Fast)
+
+- **Instant UI feedback**: screenshots + UI hierarchy in one flow
+- **Lightning login**: automatic form fill + submit detection
+- **Hot reload at scale**: wire ports, install APKs, and restart apps from MCP
+- **Human‑like navigation**: tap, swipe, scroll, and wait logic built-in
+
+## Visual Overview
+
+```mermaid
+flowchart LR
+  Dev[Code Changes] -->|git/save| Agent[AI Agent]
+  Agent -->|MCP tools| MCP[the-android-mcp]
+  MCP -->|ADB| Device[Android Device]
+  Device -->|UI + State| MCP
+  MCP -->|Screenshots/UI dump| Agent
+  Agent -->|Fixes/Iterations| Dev
+```
+
+```mermaid
+sequenceDiagram
+  participant A as AI Agent
+  participant M as MCP Server
+  participant D as Android Device
+  A->>M: smart_login_fast(email, password)
+  M->>D: UI dump + ADB input (IME)
+  D-->>M: Updated UI state
+  M->>D: Tap submit (container-aware)
+  M-->>A: Result (fields found, submit tapped)
+```
+
+## Quick Start (Copy/Paste)
+
+```bash
+npm install -g the-android-mcp
+the-android-mcp
+```
+
+```json
+{
+  "mcpServers": {
+    "the-android-mcp": {
+      "command": "the-android-mcp"
+    }
+  }
+}
+```
+
+## Tool Highlights
+
+| Goal | Tools |
+| --- | --- |
+| Fast login | `smart_login_fast`, `detect_login_fields`, `adb_keyboard_*` |
+| Speedy flows | `fast_flow`, `run_flow_plan`, `batch_android_actions` |
+| Robust waits | `wait_for_*`, `wait_for_*_disappear`, `wait_for_ui_stable` |
+| Navigation | `tap_*`, `swipe_*`, `scroll_*`, `scroll_until_*` |
+| App ops | `install_android_apk`, `start_android_app`, `hot_reload_android_app` |
+
+## Performance Tips (Real‑World)
+
+- Prefer `fast_flow` + `batch_android_actions` to reduce ADB round‑trips.
+- Use `wait_for_ui_stable` to avoid flaky taps during transitions.
+- Prefer `scroll_until_*` over manual scroll loops.
+- For login screens, use `smart_login_fast` with ADB keyboard enabled.
+
 ADB-powered Model Context Protocol server that lets AI coding agents install, launch, and control Android apps, capture screenshots, and wire hot-reload ports. Built for iterative UI refinement, automated test flows, and hands-on app navigation with Expo, React Native, Flutter, and native Android projects.
 
 Based on the original project: [infiniV/Android-Ui-MCP](https://github.com/infiniV/Android-Ui-MCP).
