@@ -205,8 +205,13 @@ async function handleTap(event) {
   if (!screenMetrics.width || !screenMetrics.height) return log('Take a screenshot first');
   const rect = screenImg.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
-  const x = Math.round(((event.clientX - rect.left) / rect.width) * screenMetrics.width);
-  const y = Math.round(((event.clientY - rect.top) / rect.height) * screenMetrics.height);
+  const localX = event.clientX - rect.left;
+  const localY = event.clientY - rect.top;
+  if (localX < 0 || localY < 0 || localX > rect.width || localY > rect.height) {
+    return log('Tap outside screenshot bounds');
+  }
+  const x = Math.round((localX / rect.width) * screenMetrics.width);
+  const y = Math.round((localY / rect.height) * screenMetrics.height);
   const result = await window.mcp.tap({ deviceId: selectedDevice.id, x, y });
   if (!result.ok) return log(result.error || 'Tap failed');
   log(`Tap at ${x}, ${y}`);

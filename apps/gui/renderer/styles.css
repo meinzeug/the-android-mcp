@@ -206,15 +206,19 @@ textarea {
   font-size: 14px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  pointer-events: none;
+  z-index: 2;
 }
 
 .screen-overlay.active {
   display: flex;
   cursor: crosshair;
+  pointer-events: auto;
 }
 
 .tap-active .screen-wrap img {
   cursor: crosshair;
+  pointer-events: none;
 }
 
 .screen-meta {
