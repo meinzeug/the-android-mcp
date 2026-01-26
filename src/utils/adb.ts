@@ -805,14 +805,17 @@ export function smartLoginFast(options: {
     if (options.hideKeyboard !== false) {
       actions.push({ type: 'keyevent', keyCode: '4' });
     }
-    if (submitButton?.bounds) {
-      const { x, y } = centerOfBounds(submitButton.bounds);
-      actions.push({ type: 'tap', x, y });
-    }
 
     if (actions.length > 0) {
       const result = batchInputActions(actions, targetDeviceId);
       output.push(result.output);
+    }
+
+    if (submitButton?.bounds) {
+      if (options.hideKeyboard !== false) {
+        executeADBCommand(`-s ${targetDeviceId} shell sleep 0.2`);
+      }
+      tapUiNode(targetDeviceId, submitButton);
     }
   }
 
