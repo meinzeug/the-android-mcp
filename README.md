@@ -528,7 +528,7 @@ docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb the-android-mcp
 | `swipe_relative`          | Swipe using percentage coordinates        | `startXPercent`, `startYPercent`, `endXPercent`, `endYPercent`, `durationMs`|
 | `scroll_vertical`         | Scroll vertically via percentage swipe    | `direction`, `distancePercent` (optional), `deviceId` (optional)           |
 | `scroll_horizontal`       | Scroll horizontally via percentage swipe  | `direction`, `distancePercent` (optional), `deviceId` (optional)           |
-| `smart_scroll`            | Scroll + auto-wait + optional screenshot  | `direction`, `profile`, `startXPercent`, `waitForUiStable`                 |
+| `smart_scroll`            | Scroll + auto-wait + optional screenshot  | `direction`, `profile`, `startXPercent`, `autoCorrectDirection`            |
 | `tap_center`              | Tap the center of the screen              | `deviceId` (optional)                                                      |
 | `long_press`              | Long-press on coordinate                  | `x`, `y`, `durationMs` (optional), `deviceId` (optional)                   |
 | `double_tap`              | Double-tap on coordinate                  | `x`, `y`, `intervalMs` (optional), `deviceId` (optional)                   |

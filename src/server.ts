@@ -2849,19 +2849,48 @@ class AndroidMcpServer {
     const timeoutMs =
       typeof input.timeoutMs === 'number' ? input.timeoutMs : defaults.timeoutMs;
 
-    const scroll = adbScrollVertical(input.direction, input.deviceId, {
+    const hashBefore = adbGetScreenHash(input.deviceId);
+    let attempts = 1;
+    let correctedDirection: 'up' | 'down' | undefined;
+    let scroll = adbScrollVertical(input.direction, input.deviceId, {
       distancePercent: input.distancePercent,
       durationMs,
       startXPercent: input.startXPercent,
     });
 
-    const uiStable = waitForUiStable
+    let uiStable = waitForUiStable
       ? adbWaitForUiStable(scroll.deviceId, {
           stableIterations,
           intervalMs,
           timeoutMs,
         })
       : undefined;
+
+    let hashAfter = adbGetScreenHash(scroll.deviceId);
+    let changed = hashBefore.hash !== hashAfter.hash;
+
+    if (!changed && input.autoCorrectDirection !== false) {
+      correctedDirection = input.direction === 'down' ? 'up' : 'down';
+      const boostedDistance =
+        typeof input.distancePercent === 'number'
+          ? Math.max(input.distancePercent, 55)
+          : 55;
+      scroll = adbScrollVertical(correctedDirection, scroll.deviceId, {
+        distancePercent: boostedDistance,
+        durationMs,
+        startXPercent: input.startXPercent ?? 50,
+      });
+      attempts += 1;
+      uiStable = waitForUiStable
+        ? adbWaitForUiStable(scroll.deviceId, {
+            stableIterations,
+            intervalMs,
+            timeoutMs,
+          })
+        : uiStable;
+      hashAfter = adbGetScreenHash(scroll.deviceId);
+      changed = hashBefore.hash !== hashAfter.hash;
+    }
 
     const screenshot = input.captureScreenshot
       ? await this.getScreenshotWithThrottle(
@@ -2876,6 +2905,11 @@ class AndroidMcpServer {
       output: scroll.output,
       uiStable,
       screenshot,
+      hashBefore: hashBefore.hash,
+      hashAfter: hashAfter.hash,
+      changed,
+      correctedDirection,
+      attempts,
     });
   }
 

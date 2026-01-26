@@ -354,6 +354,7 @@ jest.mock('../../src/types', () => {
       intervalMs: z.number().optional(),
       timeoutMs: z.number().optional(),
       captureScreenshot: z.boolean().optional(),
+      autoCorrectDirection: z.boolean().optional(),
       screenshotThrottleMs: z.number().optional(),
     }),
     ScrollHorizontalInputSchema: z.object({
@@ -908,6 +909,11 @@ jest.mock('../../src/types', () => {
       output: z.string(),
       uiStable: z.any().optional(),
       screenshot: z.any().optional(),
+      hashBefore: z.string().optional(),
+      hashAfter: z.string().optional(),
+      changed: z.boolean().optional(),
+      correctedDirection: z.string().optional(),
+      attempts: z.number().optional(),
     }),
     ScrollHorizontalOutputSchema: z.object({
       deviceId: z.string(),
@@ -1616,6 +1622,7 @@ jest.mock('../../src/types', () => {
         intervalMs: { type: 'number' },
         timeoutMs: { type: 'number' },
         captureScreenshot: { type: 'boolean' },
+        autoCorrectDirection: { type: 'boolean' },
         screenshotThrottleMs: { type: 'number' },
       },
       required: ['direction'],

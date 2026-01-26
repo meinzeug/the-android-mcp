@@ -1242,6 +1242,10 @@ export const SmartScrollInputSchema = z.object({
     .optional()
     .describe('Max wait time for UI stability (defaults by profile).'),
   captureScreenshot: z.boolean().default(false).describe('Capture screenshot after swipe.'),
+  autoCorrectDirection: z
+    .boolean()
+    .default(true)
+    .describe('Auto-correct direction if no UI change is detected.'),
   screenshotThrottleMs: z
     .number()
     .int()
@@ -1256,6 +1260,11 @@ export const SmartScrollOutputSchema = z.object({
   output: z.string().describe('Raw ADB output'),
   uiStable: z.any().optional(),
   screenshot: TakeScreenshotOutputSchema.optional(),
+  hashBefore: z.string().optional().describe('UI hash before scroll'),
+  hashAfter: z.string().optional().describe('UI hash after scroll'),
+  changed: z.boolean().optional().describe('Whether UI hash changed after scroll'),
+  correctedDirection: z.string().optional().describe('Direction used after auto-correction'),
+  attempts: z.number().optional().describe('Number of scroll attempts'),
 });
 
 export const ScrollHorizontalInputSchema = z.object({
@@ -3213,6 +3222,7 @@ export const SmartScrollToolSchema = {
     intervalMs: { type: 'number' as const, description: 'Polling interval for UI stability (defaults by profile).' },
     timeoutMs: { type: 'number' as const, description: 'Max wait time for UI stability (defaults by profile).' },
     captureScreenshot: { type: 'boolean' as const, description: 'Capture screenshot after swipe.' },
+    autoCorrectDirection: { type: 'boolean' as const, description: 'Auto-correct direction if no UI change is detected.' },
     screenshotThrottleMs: { type: 'number' as const, description: 'Reuse cached screenshots within this window (milliseconds).' },
   },
   required: ['direction'] as string[],
