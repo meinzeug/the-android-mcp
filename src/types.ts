@@ -820,6 +820,75 @@ export const CaptureGraphicsSnapshotInputSchema = z.object({
     .describe('Include SurfaceFlinger display/composer metadata snapshot.'),
 });
 
+export const CaptureSecuritySnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z.string().optional().describe('Optional package name for app-ops snapshot.'),
+  includeDevicePolicy: z.boolean().default(true).describe('Include device policy snapshot.'),
+  includeUserState: z.boolean().default(true).describe('Include user state snapshot.'),
+  includeAppOps: z.boolean().default(true).describe('Include app-ops snapshot for packageName.'),
+});
+
+export const CapturePackagePermissionsSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z.string().min(1).describe('Android package name to inspect permissions for.'),
+  includeDeclaredPermissions: z
+    .boolean()
+    .default(true)
+    .describe('Include requested/install permission sections.'),
+  includeRuntimePermissions: z
+    .boolean()
+    .default(true)
+    .describe('Include runtime permission grant state sections.'),
+  includeAppOps: z.boolean().default(true).describe('Include app-ops snapshot for packageName.'),
+  includePackageDump: z.boolean().default(true).describe('Include trimmed dumpsys package snapshot.'),
+});
+
+export const CaptureSystemHealthSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  includeMeminfo: z.boolean().default(true).describe('Include /proc/meminfo snapshot.'),
+  includeVmstat: z.boolean().default(true).describe('Include /proc/vmstat snapshot.'),
+  includeDiskUsage: z.boolean().default(true).describe('Include df -h snapshot.'),
+  includeKernelLog: z.boolean().default(true).describe('Include kernel log buffer snapshot.'),
+  kernelLogLines: z
+    .number()
+    .int()
+    .positive()
+    .default(400)
+    .describe('Kernel log lines to include when includeKernelLog is true.'),
+});
+
+export const CaptureAudioMediaSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  includeAudio: z.boolean().default(true).describe('Include dumpsys audio snapshot.'),
+  includeMediaSession: z.boolean().default(true).describe('Include media_session snapshot.'),
+  includeAudioFlinger: z.boolean().default(true).describe('Include media.audio_flinger snapshot.'),
+  includeMediaRouter: z.boolean().default(true).describe('Include media_router snapshot.'),
+  includeMediaCodec: z.boolean().default(true).describe('Include media.codec snapshot.'),
+});
+
+export const CaptureInputSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  includeInputManager: z.boolean().default(true).describe('Include dumpsys input snapshot.'),
+  includeInputMethod: z.boolean().default(true).describe('Include dumpsys input_method snapshot.'),
+  includeWindowPolicy: z.boolean().default(true).describe('Include dumpsys window policy snapshot.'),
+  includeImeList: z.boolean().default(true).describe('Include IME list and current IME snapshots.'),
+});
+
 // Tool output schemas
 export const TakeScreenshotOutputSchema = z.object({
   data: z.string().describe('Base64 encoded image data'),
@@ -2930,6 +2999,65 @@ export const CaptureGraphicsSnapshotOutputSchema = z.object({
   window: z.string().optional().describe('Optional window manager snapshot'),
   composer: z.string().optional().describe('Optional SurfaceFlinger composer/display metadata'),
   gfxInfo: z.string().optional().describe('Optional package gfxinfo framestats snapshot'),
+});
+
+export const CaptureSecuritySnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  packageName: z.string().optional().describe('Optional package name used for app-ops'),
+  selinux: z.string().describe('SELinux mode snapshot'),
+  adbEnabled: z.string().describe('ADB enabled setting snapshot'),
+  developerOptions: z.string().describe('Developer options setting snapshot'),
+  packageVerifier: z.string().describe('Package verifier setting snapshot'),
+  buildTags: z.string().describe('Build tags snapshot'),
+  securityPatch: z.string().describe('Security patch level snapshot'),
+  devicePolicy: z.string().optional().describe('Optional device policy snapshot'),
+  userState: z.string().optional().describe('Optional user state snapshot'),
+  appOps: z.string().optional().describe('Optional app-ops snapshot'),
+});
+
+export const CapturePackagePermissionsSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  packageName: z.string().describe('Inspected Android package name'),
+  packagePath: z.string().describe('pm path output'),
+  requestedPermissions: z.string().optional().describe('Requested/install permissions snapshot'),
+  runtimePermissions: z.string().optional().describe('Runtime permissions grant state snapshot'),
+  appOps: z.string().optional().describe('Optional app-ops snapshot'),
+  packageDump: z.string().optional().describe('Optional trimmed dumpsys package snapshot'),
+});
+
+export const CaptureSystemHealthSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  uptime: z.string().describe('Device uptime snapshot'),
+  loadAverage: z.string().describe('Load average snapshot'),
+  cpuStat: z.string().describe('/proc/stat snapshot'),
+  processCount: z.string().describe('Process count snapshot'),
+  meminfo: z.string().optional().describe('Optional /proc/meminfo snapshot'),
+  vmstat: z.string().optional().describe('Optional /proc/vmstat snapshot'),
+  diskUsage: z.string().optional().describe('Optional df -h snapshot'),
+  kernelLog: z.string().optional().describe('Optional kernel log snapshot'),
+});
+
+export const CaptureAudioMediaSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  audio: z.string().optional().describe('Optional dumpsys audio snapshot'),
+  mediaSession: z.string().optional().describe('Optional media_session snapshot'),
+  audioFlinger: z.string().optional().describe('Optional media.audio_flinger snapshot'),
+  mediaRouter: z.string().optional().describe('Optional media_router snapshot'),
+  mediaCodec: z.string().optional().describe('Optional media.codec snapshot'),
+});
+
+export const CaptureInputSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  inputManager: z.string().optional().describe('Optional dumpsys input snapshot'),
+  inputMethod: z.string().optional().describe('Optional dumpsys input_method snapshot'),
+  imeList: z.string().optional().describe('Optional IME list snapshot'),
+  currentIme: z.string().optional().describe('Optional current default IME snapshot'),
+  windowPolicy: z.string().optional().describe('Optional window policy snapshot'),
 });
 
 export const CreateIssueInputSchema = z.object({
@@ -5225,6 +5353,174 @@ export const CaptureGraphicsSnapshotToolSchema = {
   required: [] as string[],
 };
 
+export const CaptureSecuritySnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: {
+      type: 'string' as const,
+      description: 'Optional package name for app-ops snapshot.',
+    },
+    includeDevicePolicy: {
+      type: 'boolean' as const,
+      description: 'Include device policy snapshot.',
+      default: true,
+    },
+    includeUserState: {
+      type: 'boolean' as const,
+      description: 'Include user state snapshot.',
+      default: true,
+    },
+    includeAppOps: {
+      type: 'boolean' as const,
+      description: 'Include app-ops snapshot for packageName.',
+      default: true,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CapturePackagePermissionsSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: {
+      type: 'string' as const,
+      description: 'Android package name to inspect permissions for.',
+    },
+    includeDeclaredPermissions: {
+      type: 'boolean' as const,
+      description: 'Include requested/install permission sections.',
+      default: true,
+    },
+    includeRuntimePermissions: {
+      type: 'boolean' as const,
+      description: 'Include runtime permission grant state sections.',
+      default: true,
+    },
+    includeAppOps: {
+      type: 'boolean' as const,
+      description: 'Include app-ops snapshot for packageName.',
+      default: true,
+    },
+    includePackageDump: {
+      type: 'boolean' as const,
+      description: 'Include trimmed dumpsys package snapshot.',
+      default: true,
+    },
+  },
+  required: ['packageName'] as string[],
+};
+
+export const CaptureSystemHealthSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    includeMeminfo: {
+      type: 'boolean' as const,
+      description: 'Include /proc/meminfo snapshot.',
+      default: true,
+    },
+    includeVmstat: {
+      type: 'boolean' as const,
+      description: 'Include /proc/vmstat snapshot.',
+      default: true,
+    },
+    includeDiskUsage: {
+      type: 'boolean' as const,
+      description: 'Include df -h snapshot.',
+      default: true,
+    },
+    includeKernelLog: {
+      type: 'boolean' as const,
+      description: 'Include kernel log buffer snapshot.',
+      default: true,
+    },
+    kernelLogLines: {
+      type: 'number' as const,
+      description: 'Kernel log lines to include when includeKernelLog is true.',
+      default: 400,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CaptureAudioMediaSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    includeAudio: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys audio snapshot.',
+      default: true,
+    },
+    includeMediaSession: {
+      type: 'boolean' as const,
+      description: 'Include media_session snapshot.',
+      default: true,
+    },
+    includeAudioFlinger: {
+      type: 'boolean' as const,
+      description: 'Include media.audio_flinger snapshot.',
+      default: true,
+    },
+    includeMediaRouter: {
+      type: 'boolean' as const,
+      description: 'Include media_router snapshot.',
+      default: true,
+    },
+    includeMediaCodec: {
+      type: 'boolean' as const,
+      description: 'Include media.codec snapshot.',
+      default: true,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CaptureInputSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    includeInputManager: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys input snapshot.',
+      default: true,
+    },
+    includeInputMethod: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys input_method snapshot.',
+      default: true,
+    },
+    includeWindowPolicy: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys window policy snapshot.',
+      default: true,
+    },
+    includeImeList: {
+      type: 'boolean' as const,
+      description: 'Include IME list and current IME snapshots.',
+      default: true,
+    },
+  },
+  required: [] as string[],
+};
+
 // Type exports
 export type TakeScreenshotInput = z.infer<typeof TakeScreenshotInputSchema>;
 export type ListDevicesInput = z.infer<typeof ListDevicesInputSchema>;
@@ -5431,5 +5727,15 @@ export type CaptureSensorsSnapshotInput = z.infer<typeof CaptureSensorsSnapshotI
 export type CaptureSensorsSnapshotOutput = z.infer<typeof CaptureSensorsSnapshotOutputSchema>;
 export type CaptureGraphicsSnapshotInput = z.infer<typeof CaptureGraphicsSnapshotInputSchema>;
 export type CaptureGraphicsSnapshotOutput = z.infer<typeof CaptureGraphicsSnapshotOutputSchema>;
+export type CaptureSecuritySnapshotInput = z.infer<typeof CaptureSecuritySnapshotInputSchema>;
+export type CaptureSecuritySnapshotOutput = z.infer<typeof CaptureSecuritySnapshotOutputSchema>;
+export type CapturePackagePermissionsSnapshotInput = z.infer<typeof CapturePackagePermissionsSnapshotInputSchema>;
+export type CapturePackagePermissionsSnapshotOutput = z.infer<typeof CapturePackagePermissionsSnapshotOutputSchema>;
+export type CaptureSystemHealthSnapshotInput = z.infer<typeof CaptureSystemHealthSnapshotInputSchema>;
+export type CaptureSystemHealthSnapshotOutput = z.infer<typeof CaptureSystemHealthSnapshotOutputSchema>;
+export type CaptureAudioMediaSnapshotInput = z.infer<typeof CaptureAudioMediaSnapshotInputSchema>;
+export type CaptureAudioMediaSnapshotOutput = z.infer<typeof CaptureAudioMediaSnapshotOutputSchema>;
+export type CaptureInputSnapshotInput = z.infer<typeof CaptureInputSnapshotInputSchema>;
+export type CaptureInputSnapshotOutput = z.infer<typeof CaptureInputSnapshotOutputSchema>;
 export type CreateIssueInput = z.infer<typeof CreateIssueInputSchema>;
 export type CreateIssueOutput = z.infer<typeof CreateIssueOutputSchema>;

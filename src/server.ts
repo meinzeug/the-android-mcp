@@ -312,6 +312,21 @@ import {
   CaptureGraphicsSnapshotInputSchema,
   CaptureGraphicsSnapshotOutputSchema,
   CaptureGraphicsSnapshotToolSchema,
+  CaptureSecuritySnapshotInputSchema,
+  CaptureSecuritySnapshotOutputSchema,
+  CaptureSecuritySnapshotToolSchema,
+  CapturePackagePermissionsSnapshotInputSchema,
+  CapturePackagePermissionsSnapshotOutputSchema,
+  CapturePackagePermissionsSnapshotToolSchema,
+  CaptureSystemHealthSnapshotInputSchema,
+  CaptureSystemHealthSnapshotOutputSchema,
+  CaptureSystemHealthSnapshotToolSchema,
+  CaptureAudioMediaSnapshotInputSchema,
+  CaptureAudioMediaSnapshotOutputSchema,
+  CaptureAudioMediaSnapshotToolSchema,
+  CaptureInputSnapshotInputSchema,
+  CaptureInputSnapshotOutputSchema,
+  CaptureInputSnapshotToolSchema,
   CreateIssueInputSchema,
   CreateIssueOutputSchema,
   CreateIssueToolSchema,
@@ -344,6 +359,11 @@ import {
   captureAndroidServicesSnapshot as adbCaptureAndroidServicesSnapshot,
   captureAndroidSensorsSnapshot as adbCaptureAndroidSensorsSnapshot,
   captureAndroidGraphicsSnapshot as adbCaptureAndroidGraphicsSnapshot,
+  captureAndroidSecuritySnapshot as adbCaptureAndroidSecuritySnapshot,
+  captureAndroidPackagePermissionsSnapshot as adbCaptureAndroidPackagePermissionsSnapshot,
+  captureAndroidSystemHealthSnapshot as adbCaptureAndroidSystemHealthSnapshot,
+  captureAndroidAudioMediaSnapshot as adbCaptureAndroidAudioMediaSnapshot,
+  captureAndroidInputSnapshot as adbCaptureAndroidInputSnapshot,
   listPackageActivities as adbListPackageActivities,
   batchInputActions as adbBatchInputActions,
   reversePort as adbReversePort,
@@ -949,6 +969,31 @@ class AndroidMcpServer {
           name: 'capture_android_graphics_snapshot',
           description: 'Capture SurfaceFlinger/window/gfx rendering snapshots',
           inputSchema: CaptureGraphicsSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_security_snapshot',
+          description: 'Capture SELinux, dev-options, policy, and security posture snapshots',
+          inputSchema: CaptureSecuritySnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_package_permissions_snapshot',
+          description: 'Capture package permissions, runtime grants, and app-ops snapshots',
+          inputSchema: CapturePackagePermissionsSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_system_health_snapshot',
+          description: 'Capture uptime/load/cpu/memory/vmstat/disk/kernel health snapshots',
+          inputSchema: CaptureSystemHealthSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_audio_media_snapshot',
+          description: 'Capture audio/media session/router/flinger/codec diagnostics snapshots',
+          inputSchema: CaptureAudioMediaSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_input_snapshot',
+          description: 'Capture input/input_method/window-policy/IME state snapshots',
+          inputSchema: CaptureInputSnapshotToolSchema,
         },
         {
           name: 'create_github_issue',
@@ -2359,6 +2404,71 @@ class AndroidMcpServer {
           case 'capture_android_graphics_snapshot': {
             const input = CaptureGraphicsSnapshotInputSchema.parse(args);
             const result = await this.captureAndroidGraphicsSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_security_snapshot': {
+            const input = CaptureSecuritySnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidSecuritySnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_package_permissions_snapshot': {
+            const input = CapturePackagePermissionsSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidPackagePermissionsSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_system_health_snapshot': {
+            const input = CaptureSystemHealthSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidSystemHealthSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_audio_media_snapshot': {
+            const input = CaptureAudioMediaSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidAudioMediaSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_input_snapshot': {
+            const input = CaptureInputSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidInputSnapshot(input);
             return {
               content: [
                 {
@@ -3836,6 +3946,74 @@ class AndroidMcpServer {
       includeComposer: input.includeComposer,
     });
     return CaptureGraphicsSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidSecuritySnapshot(
+    input: z.infer<typeof CaptureSecuritySnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureSecuritySnapshotOutputSchema>> {
+    const result = adbCaptureAndroidSecuritySnapshot({
+      deviceId: input.deviceId,
+      packageName: input.packageName,
+      includeDevicePolicy: input.includeDevicePolicy,
+      includeUserState: input.includeUserState,
+      includeAppOps: input.includeAppOps,
+    });
+    return CaptureSecuritySnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidPackagePermissionsSnapshot(
+    input: z.infer<typeof CapturePackagePermissionsSnapshotInputSchema>
+  ): Promise<z.infer<typeof CapturePackagePermissionsSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidPackagePermissionsSnapshot({
+      deviceId: input.deviceId,
+      packageName: input.packageName,
+      includeDeclaredPermissions: input.includeDeclaredPermissions,
+      includeRuntimePermissions: input.includeRuntimePermissions,
+      includeAppOps: input.includeAppOps,
+      includePackageDump: input.includePackageDump,
+    });
+    return CapturePackagePermissionsSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidSystemHealthSnapshot(
+    input: z.infer<typeof CaptureSystemHealthSnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureSystemHealthSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidSystemHealthSnapshot({
+      deviceId: input.deviceId,
+      includeMeminfo: input.includeMeminfo,
+      includeVmstat: input.includeVmstat,
+      includeDiskUsage: input.includeDiskUsage,
+      includeKernelLog: input.includeKernelLog,
+      kernelLogLines: input.kernelLogLines,
+    });
+    return CaptureSystemHealthSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidAudioMediaSnapshot(
+    input: z.infer<typeof CaptureAudioMediaSnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureAudioMediaSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidAudioMediaSnapshot({
+      deviceId: input.deviceId,
+      includeAudio: input.includeAudio,
+      includeMediaSession: input.includeMediaSession,
+      includeAudioFlinger: input.includeAudioFlinger,
+      includeMediaRouter: input.includeMediaRouter,
+      includeMediaCodec: input.includeMediaCodec,
+    });
+    return CaptureAudioMediaSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidInputSnapshot(
+    input: z.infer<typeof CaptureInputSnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureInputSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidInputSnapshot({
+      deviceId: input.deviceId,
+      includeInputManager: input.includeInputManager,
+      includeInputMethod: input.includeInputMethod,
+      includeWindowPolicy: input.includeWindowPolicy,
+      includeImeList: input.includeImeList,
+    });
+    return CaptureInputSnapshotOutputSchema.parse(result);
   }
 
   private async createGitHubIssue(

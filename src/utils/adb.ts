@@ -5124,3 +5124,352 @@ export function captureAndroidGraphicsSnapshot(options: {
     gfxInfo,
   };
 }
+
+export function captureAndroidSecuritySnapshot(options: {
+  deviceId?: string;
+  packageName?: string;
+  includeDevicePolicy?: boolean;
+  includeUserState?: boolean;
+  includeAppOps?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  packageName?: string;
+  selinux: string;
+  adbEnabled: string;
+  developerOptions: string;
+  packageVerifier: string;
+  buildTags: string;
+  securityPatch: string;
+  devicePolicy?: string;
+  userState?: string;
+  appOps?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const packageName = options.packageName?.trim() || undefined;
+  const selinux = safeDeviceCommand(targetDeviceId, 'shell getenforce');
+  const adbEnabled = safeDeviceCommand(targetDeviceId, 'shell settings get global adb_enabled');
+  const developerOptions = safeDeviceCommand(
+    targetDeviceId,
+    'shell settings get global development_settings_enabled'
+  );
+  const packageVerifier = safeDeviceCommand(
+    targetDeviceId,
+    'shell settings get global package_verifier_enable'
+  );
+  const buildTags = safeDeviceCommand(targetDeviceId, 'shell getprop ro.build.tags');
+  const securityPatch = safeDeviceCommand(
+    targetDeviceId,
+    'shell getprop ro.build.version.security_patch'
+  );
+  const devicePolicy =
+    options.includeDevicePolicy === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys device_policy', 120000),
+          900
+        );
+  const userState =
+    options.includeUserState === false
+      ? undefined
+      : trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell dumpsys user', 120000), 900);
+  const appOps =
+    options.includeAppOps === false || !packageName
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(
+            targetDeviceId,
+            `shell cmd appops get ${escapeShellArg(packageName)}`,
+            90000
+          ),
+          700
+        );
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    packageName,
+    selinux,
+    adbEnabled,
+    developerOptions,
+    packageVerifier,
+    buildTags,
+    securityPatch,
+    devicePolicy,
+    userState,
+    appOps,
+  };
+}
+
+export function captureAndroidPackagePermissionsSnapshot(options: {
+  deviceId?: string;
+  packageName: string;
+  includeDeclaredPermissions?: boolean;
+  includeRuntimePermissions?: boolean;
+  includeAppOps?: boolean;
+  includePackageDump?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  packageName: string;
+  packagePath: string;
+  requestedPermissions?: string;
+  runtimePermissions?: string;
+  appOps?: string;
+  packageDump?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const packageName = options.packageName.trim();
+  const packagePath = safeDeviceCommand(
+    targetDeviceId,
+    `shell pm path ${escapeShellArg(packageName)}`
+  );
+  const packageDumpRaw = safeDeviceCommand(
+    targetDeviceId,
+    `shell dumpsys package ${escapeShellArg(packageName)}`,
+    120000
+  );
+
+  const requestedPermissions =
+    options.includeDeclaredPermissions === false
+      ? undefined
+      : packageDumpRaw
+          .split('\n')
+          .filter(
+            line =>
+              /requested permissions:/i.test(line) ||
+              /install permissions:/i.test(line) ||
+              /^\s+android\.permission\./.test(line)
+          )
+          .slice(0, 600)
+          .join('\n');
+
+  const runtimePermissions =
+    options.includeRuntimePermissions === false
+      ? undefined
+      : packageDumpRaw
+          .split('\n')
+          .filter(
+            line =>
+              /runtime permissions:/i.test(line) ||
+              /granted=(true|false)/i.test(line) ||
+              /flags=\[/.test(line)
+          )
+          .slice(0, 700)
+          .join('\n');
+
+  const appOps =
+    options.includeAppOps === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(
+            targetDeviceId,
+            `shell cmd appops get ${escapeShellArg(packageName)}`,
+            90000
+          ),
+          700
+        );
+
+  const packageDump =
+    options.includePackageDump === false
+      ? undefined
+      : trimOutputLines(packageDumpRaw, 1200);
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    packageName,
+    packagePath,
+    requestedPermissions,
+    runtimePermissions,
+    appOps,
+    packageDump,
+  };
+}
+
+export function captureAndroidSystemHealthSnapshot(options: {
+  deviceId?: string;
+  includeMeminfo?: boolean;
+  includeVmstat?: boolean;
+  includeDiskUsage?: boolean;
+  includeKernelLog?: boolean;
+  kernelLogLines?: number;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  uptime: string;
+  loadAverage: string;
+  cpuStat: string;
+  processCount: string;
+  meminfo?: string;
+  vmstat?: string;
+  diskUsage?: string;
+  kernelLog?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const kernelLogLines = Math.max(50, Math.min(3000, Math.trunc(options.kernelLogLines ?? 400)));
+  const uptime = safeDeviceCommand(targetDeviceId, 'shell cat /proc/uptime');
+  const loadAverage = safeDeviceCommand(targetDeviceId, 'shell cat /proc/loadavg');
+  const cpuStat = trimOutputLines(
+    safeDeviceCommand(targetDeviceId, 'shell cat /proc/stat', 20000),
+    200
+  );
+  const processCount = safeDeviceCommand(targetDeviceId, 'shell ps -A | wc -l');
+  const meminfo =
+    options.includeMeminfo === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell cat /proc/meminfo', 30000),
+          400
+        );
+  const vmstat =
+    options.includeVmstat === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell cat /proc/vmstat', 30000),
+          500
+        );
+  const diskUsage =
+    options.includeDiskUsage === false
+      ? undefined
+      : trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell df -h', 30000), 300);
+  const kernelLog =
+    options.includeKernelLog === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(
+            targetDeviceId,
+            `shell logcat -d -b kernel -t ${kernelLogLines}`,
+            120000
+          ),
+          kernelLogLines
+        );
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    uptime,
+    loadAverage,
+    cpuStat,
+    processCount,
+    meminfo,
+    vmstat,
+    diskUsage,
+    kernelLog,
+  };
+}
+
+export function captureAndroidAudioMediaSnapshot(options: {
+  deviceId?: string;
+  includeAudio?: boolean;
+  includeMediaSession?: boolean;
+  includeAudioFlinger?: boolean;
+  includeMediaRouter?: boolean;
+  includeMediaCodec?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  audio?: string;
+  mediaSession?: string;
+  audioFlinger?: string;
+  mediaRouter?: string;
+  mediaCodec?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const audio =
+    options.includeAudio === false
+      ? undefined
+      : trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell dumpsys audio', 120000), 1200);
+  const mediaSession =
+    options.includeMediaSession === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys media_session', 120000),
+          1000
+        );
+  const audioFlinger =
+    options.includeAudioFlinger === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys media.audio_flinger', 120000),
+          1000
+        );
+  const mediaRouter =
+    options.includeMediaRouter === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys media_router', 120000),
+          800
+        );
+  const mediaCodec =
+    options.includeMediaCodec === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys media.codec', 120000),
+          800
+        );
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    audio,
+    mediaSession,
+    audioFlinger,
+    mediaRouter,
+    mediaCodec,
+  };
+}
+
+export function captureAndroidInputSnapshot(options: {
+  deviceId?: string;
+  includeInputManager?: boolean;
+  includeInputMethod?: boolean;
+  includeWindowPolicy?: boolean;
+  includeImeList?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  inputManager?: string;
+  inputMethod?: string;
+  imeList?: string;
+  currentIme?: string;
+  windowPolicy?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const inputManager =
+    options.includeInputManager === false
+      ? undefined
+      : trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell dumpsys input', 120000), 1200);
+  const inputMethod =
+    options.includeInputMethod === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys input_method', 120000),
+          1200
+        );
+  const imeList =
+    options.includeImeList === false
+      ? undefined
+      : safeDeviceCommand(targetDeviceId, 'shell ime list -s');
+  const currentIme =
+    options.includeImeList === false
+      ? undefined
+      : safeDeviceCommand(targetDeviceId, 'shell settings get secure default_input_method');
+  const windowPolicy =
+    options.includeWindowPolicy === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys window policy', 120000),
+          1000
+        );
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    inputManager,
+    inputMethod,
+    imeList,
+    currentIme,
+    windowPolicy,
+  };
+}
