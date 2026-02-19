@@ -2797,6 +2797,44 @@ function runRunbookCampaign(body: JsonObject): JsonObject {
   };
 }
 
+function planRunbookCampaign(body: JsonObject): JsonObject {
+  const runbookName = typeof body.name === 'string' ? body.name.trim() : '';
+  if (!runbookName) {
+    throw new Error('runbook name is required');
+  }
+  const requestedDeviceIds = Array.isArray(body.deviceIds)
+    ? body.deviceIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : [];
+  const connectedDeviceIds = getConnectedDevices().map(device => device.id);
+  const targetDeviceIds = requestedDeviceIds.length > 0 ? requestedDeviceIds : connectedDeviceIds;
+  if (targetDeviceIds.length === 0) {
+    throw new Error('no connected devices for campaign');
+  }
+
+  const laneHints = targetDeviceIds.map(deviceId => ({
+    deviceId,
+    laneId: `device:${deviceId}`,
+    queueDepth: lanes[`device:${deviceId}`]?.queue.length ?? 0,
+  }));
+
+  return {
+    ok: true,
+    name: runbookName,
+    targetCount: targetDeviceIds.length,
+    targets: laneHints,
+    payloadDefaults: {
+      packageName: typeof body.packageName === 'string' ? body.packageName : 'com.android.chrome',
+      waitForReadyMs: clampInt(body.waitForReadyMs, 900, 200, 10000),
+    },
+    recommendations: [
+      'Start with continueOnError=true for multi-device execution.',
+      'Use queue snapshots before campaign for fast rollback.',
+      'Run control-room after campaign to verify stability score.',
+    ],
+    updateHint: UPDATE_HINT,
+  };
+}
+
 function seedRecommendedAlertRules(body: JsonObject): JsonObject {
   const totals = laneTotals();
   const avgQueuePerLane = totals.laneCount > 0 ? Math.ceil(totals.queueDepth / totals.laneCount) : totals.queueDepth;
@@ -2926,6 +2964,38 @@ function buildControlRoomPayload(host: string, port: number): JsonObject {
   };
 }
 
+function previewAutoHeal(body: JsonObject): JsonObject {
+  const laneId = typeof body.laneId === 'string' && body.laneId.trim().length > 0 ? body.laneId.trim() : undefined;
+  const laneTargets = laneId ? [laneId] : Object.keys(lanes);
+  const resumableLanes = laneTargets.filter(id => Boolean(lanes[id]?.paused));
+  const retryFailedLimit = clampInt(body.retryFailedLimit, opsPolicy.autoRetryFailedLimit, 0, 500);
+  const retryCandidates = jobs
+    .filter(job => job.status === 'failed')
+    .filter(job => !laneId || job.laneId === laneId)
+    .slice(0, retryFailedLimit);
+  const openIncidentCount = alertIncidents.filter(item => !item.acknowledgedAt).length;
+  const runRecoverRunbook = body.runRecoverRunbook === true;
+
+  return {
+    ok: true,
+    laneId,
+    laneTargetCount: laneTargets.length,
+    openIncidentCount,
+    resumableLaneCount: resumableLanes.length,
+    resumableLanes,
+    retryFailedLimit,
+    retryCandidateCount: retryCandidates.length,
+    retryCandidates: retryCandidates.map(job => ({
+      id: job.id,
+      type: job.type,
+      laneId: job.laneId,
+      error: job.error,
+    })),
+    wouldRunRecoverRunbook: runRecoverRunbook,
+    updateHint: UPDATE_HINT,
+  };
+}
+
 function runAutoHeal(body: JsonObject): JsonObject {
   const laneId = typeof body.laneId === 'string' && body.laneId.trim().length > 0 ? body.laneId.trim() : undefined;
   const ackOpenIncidents = body.ackOpenIncidents !== false;
@@ -3005,6 +3075,68 @@ function runAutoHeal(body: JsonObject): JsonObject {
     retriedCount: retriedJobs.length,
     retriedJobs: retriedJobs.slice(0, 30),
     runbookResults: runbooks,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function runOpsStabilize(body: JsonObject, host: string, port: number): JsonObject {
+  const seeded = seedRecommendedAlertRules(body);
+  const before = buildControlRoomPayload(host, port);
+  const alertsCheck = evaluateAlertRulesNow();
+  const healed = runAutoHeal({
+    ...body,
+    ackOpenIncidents: body.ackOpenIncidents !== false,
+    resumePausedLanes: body.resumePausedLanes !== false,
+    runRecoverRunbook: body.runRecoverRunbook !== false,
+  });
+  const after = buildControlRoomPayload(host, port);
+  pushEvent('ops-stabilize', 'One-click stabilize workflow executed', {
+    beforeSeverity: before.severity,
+    afterSeverity: after.severity,
+  });
+  return {
+    ok: true,
+    seeded,
+    alertsCheck,
+    healed,
+    before,
+    after,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function runWatchdog(body: JsonObject, host: string, port: number): JsonObject {
+  const controlBefore = buildControlRoomPayload(host, port);
+  const diagnostics = buildDiagnosticsReport(host, port);
+  const alertsCheck = evaluateAlertRulesNow();
+  const autoHealOnAlert = body.autoHealOnAlert === true;
+  let autoHealResult: JsonObject | undefined;
+
+  if (autoHealOnAlert && (controlBefore.severity === 'red' || controlBefore.severity === 'amber')) {
+    autoHealResult = runAutoHeal({
+      laneId: typeof body.laneId === 'string' ? body.laneId : undefined,
+      retryFailedLimit: clampInt(body.retryFailedLimit, 12, 0, 500),
+      runRecoverRunbook: true,
+      maxRunbooks: clampInt(body.maxRunbooks, 2, 1, 50),
+      ackOpenIncidents: true,
+      resumePausedLanes: true,
+    });
+  }
+
+  const controlAfter = buildControlRoomPayload(host, port);
+  pushEvent('ops-watchdog', 'Watchdog check executed', {
+    beforeSeverity: controlBefore.severity,
+    afterSeverity: controlAfter.severity,
+    autoHealTriggered: Boolean(autoHealResult),
+  });
+  return {
+    ok: true,
+    controlBefore,
+    alertsCheck,
+    diagnostics,
+    autoHealTriggered: Boolean(autoHealResult),
+    autoHealResult,
+    controlAfter,
     updateHint: UPDATE_HINT,
   };
 }
@@ -3392,6 +3524,74 @@ function applyQueueSnapshot(nameRaw: string, body: JsonObject): JsonObject {
       queuedCount: snapshot.queuedCount,
     },
     importResult,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function diffQueueSnapshot(nameRaw: string): JsonObject {
+  const name = nameRaw.trim();
+  if (!name) {
+    throw new Error('snapshot name is required');
+  }
+  const snapshot = queueSnapshots[name];
+  if (!snapshot) {
+    throw new Error(`snapshot '${name}' not found`);
+  }
+
+  const currentExport = exportQueueState();
+  const currentStats = queueSnapshotStats(currentExport);
+  const storedStats = queueSnapshotStats(snapshot.payload);
+
+  const storedMap = new Map<string, number>();
+  for (const lane of storedStats.lanes) {
+    const id = typeof lane.laneId === 'string' ? lane.laneId : '';
+    if (!id) {
+      continue;
+    }
+    const queued = Array.isArray(lane.queued) ? lane.queued.length : 0;
+    storedMap.set(id, queued);
+  }
+
+  const currentMap = new Map<string, number>();
+  for (const lane of currentStats.lanes) {
+    const id = typeof lane.laneId === 'string' ? lane.laneId : '';
+    if (!id) {
+      continue;
+    }
+    const queued = Array.isArray(lane.queued) ? lane.queued.length : 0;
+    currentMap.set(id, queued);
+  }
+
+  const laneDiffs: Array<{
+    laneId: string;
+    snapshotQueued: number;
+    currentQueued: number;
+    delta: number;
+  }> = [];
+  const laneIds = new Set<string>([...storedMap.keys(), ...currentMap.keys()]);
+  for (const laneId of laneIds) {
+    const snapshotQueued = storedMap.get(laneId) ?? 0;
+    const currentQueued = currentMap.get(laneId) ?? 0;
+    laneDiffs.push({
+      laneId,
+      snapshotQueued,
+      currentQueued,
+      delta: currentQueued - snapshotQueued,
+    });
+  }
+
+  return {
+    ok: true,
+    name,
+    snapshotCapturedAt: snapshot.capturedAt,
+    summary: {
+      snapshotLaneCount: storedStats.laneCount,
+      currentLaneCount: currentStats.laneCount,
+      snapshotQueuedCount: storedStats.queuedCount,
+      currentQueuedCount: currentStats.queuedCount,
+      queuedDelta: currentStats.queuedCount - storedStats.queuedCount,
+    },
+    laneDiffs: laneDiffs.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 40),
     updateHint: UPDATE_HINT,
   };
 }
@@ -4357,6 +4557,30 @@ async function handleApi(
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/ops/auto-heal/preview') {
+    await withMetric('ops-auto-heal-preview', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, previewAutoHeal(body));
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/stabilize') {
+    await withMetric('ops-stabilize', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, runOpsStabilize(body, context.host, context.port));
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/watchdog/run') {
+    await withMetric('ops-watchdog', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, runWatchdog(body, context.host, context.port));
+    });
+    return;
+  }
+
   if (method === 'GET' && pathname === '/api/diagnostics/report') {
     await withMetric('diagnostics-report', () => {
       sendJson(response, 200, buildDiagnosticsReport(context.host, context.port));
@@ -4649,6 +4873,20 @@ async function handleApi(
       const name = typeof body.name === 'string' ? body.name : '';
       try {
         sendJson(response, 200, applyQueueSnapshot(name, body));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/queue/snapshots/diff') {
+    await withMetric('queue-snapshots-diff', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name : '';
+      try {
+        sendJson(response, 200, diffQueueSnapshot(name));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         sendJson(response, 400, { error: message });
@@ -5418,6 +5656,20 @@ async function handleApi(
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/runbook/campaign/plan') {
+    await withMetric('runbook-campaign-plan', async () => {
+      const body = await readJsonBody(request);
+      try {
+        const result = planRunbookCampaign(body);
+        sendJson(response, 200, result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
   if (method === 'GET' && pathname === '/api/runbook/catalog') {
     await withMetric('runbook-catalog', () => {
       sendJson(response, 200, {
@@ -6013,19 +6265,35 @@ https://developer.android.com</textarea>
             <button class="w" id="auto-heal-btn">Run auto-heal</button>
           </div>
           <div class="split">
+            <input id="ops-lane-id" placeholder="lane id (optional)" />
+            <input id="watchdog-auto-heal" placeholder="watchdog auto-heal: true/false" value="true" />
+          </div>
+          <div class="split">
             <input id="auto-heal-retry-limit" type="number" min="0" value="15" />
             <input id="auto-heal-runbooks" type="number" min="1" value="2" />
           </div>
+          <div class="split">
+            <button class="s" id="auto-heal-preview-btn">Preview auto-heal</button>
+            <button class="p" id="ops-stabilize-btn">Run stabilize</button>
+          </div>
+          <button class="s" id="watchdog-run-btn">Run watchdog cycle</button>
+          <div id="control-room-panel" class="metrics"></div>
           <hr style="border:0;border-top:1px solid #2f4a61;" />
           <input id="queue-snapshot-name" placeholder="queue snapshot name" value="pre-change" />
           <div class="split">
             <button class="s" id="queue-snapshot-save-btn">Save queue snapshot</button>
             <button class="s" id="queue-snapshot-list-btn">List queue snapshots</button>
           </div>
-          <button class="p" id="queue-snapshot-apply-btn">Apply queue snapshot</button>
+          <div class="split">
+            <button class="p" id="queue-snapshot-apply-btn">Apply queue snapshot</button>
+            <button class="s" id="queue-snapshot-diff-btn">Diff queue snapshot</button>
+          </div>
           <textarea id="campaign-device-ids">[]</textarea>
           <div class="split">
             <button class="p" id="runbook-campaign-btn">Run runbook campaign</button>
+            <button class="s" id="runbook-campaign-plan-btn">Plan campaign</button>
+          </div>
+          <div class="split">
             <button class="s" id="alert-seed-btn">Seed alert pack</button>
           </div>
         </article>
@@ -6123,8 +6391,11 @@ https://developer.android.com</textarea>
       const $cloneTargetDevice = document.getElementById('clone-target-device');
       const $incidentsKeepLatest = document.getElementById('incidents-keep-latest');
       const $incidentsOlderThan = document.getElementById('incidents-older-than');
+      const $opsLaneId = document.getElementById('ops-lane-id');
+      const $watchdogAutoHeal = document.getElementById('watchdog-auto-heal');
       const $autoHealRetryLimit = document.getElementById('auto-heal-retry-limit');
       const $autoHealRunbooks = document.getElementById('auto-heal-runbooks');
+      const $controlRoomPanel = document.getElementById('control-room-panel');
       const $queueSnapshotName = document.getElementById('queue-snapshot-name');
       const $campaignDeviceIds = document.getElementById('campaign-device-ids');
 
@@ -6321,6 +6592,33 @@ https://developer.android.com</textarea>
         }
       }
 
+      function renderControlRoom(payload) {
+        if (!$controlRoomPanel) {
+          return;
+        }
+        $controlRoomPanel.innerHTML = '';
+        const severity = payload && payload.severity ? String(payload.severity) : 'unknown';
+        const score = payload && typeof payload.score === 'number' ? payload.score : 0;
+        const queuePressure = payload && typeof payload.queuePressure === 'number' ? payload.queuePressure : 0;
+        const openIncidentCount = payload && typeof payload.openIncidentCount === 'number' ? payload.openIncidentCount : 0;
+        const failedJobCount = payload && typeof payload.failedJobCount === 'number' ? payload.failedJobCount : 0;
+        const top = document.createElement('div');
+        top.className = 'item';
+        top.innerHTML =
+          '<div class="meta">control room</div>' +
+          '<div>severity=' + severity + ' score=' + score + '</div>' +
+          '<div>queuePressure=' + queuePressure + ' openIncidents=' + openIncidentCount + ' failedJobs=' + failedJobCount + '</div>';
+        $controlRoomPanel.appendChild(top);
+
+        const recs = Array.isArray(payload && payload.recommendations) ? payload.recommendations : [];
+        for (const rec of recs.slice(0, 6)) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML = '<div>' + String(rec) + '</div>';
+          $controlRoomPanel.appendChild(row);
+        }
+      }
+
       function renderSchedules(payload) {
         const entries = Array.isArray(payload.schedules) ? payload.schedules : [];
         $schedules.innerHTML = '';
@@ -6506,6 +6804,25 @@ https://developer.android.com</textarea>
         };
       }
 
+      function selectedLaneId() {
+        const explicit = ($opsLaneId.value || '').trim();
+        if (explicit) {
+          return explicit;
+        }
+        return selectedDeviceId() ? 'device:' + selectedDeviceId() : undefined;
+      }
+
+      function asBoolean(value, fallback) {
+        const text = String(value || '').trim().toLowerCase();
+        if (text === 'true' || text === '1' || text === 'yes' || text === 'y') {
+          return true;
+        }
+        if (text === 'false' || text === '0' || text === 'no' || text === 'n') {
+          return false;
+        }
+        return fallback;
+      }
+
       async function refreshJobsAndLanes() {
         const jobsPayload = await api('/api/jobs');
         renderJobs(jobsPayload);
@@ -6545,6 +6862,9 @@ https://developer.android.com</textarea>
           $devicePill.textContent = 'device: ' + state.deviceId;
           if (!$cloneSourceLane.value || !$cloneSourceLane.value.trim()) {
             $cloneSourceLane.value = 'device:' + state.deviceId;
+          }
+          if (!$opsLaneId.value || !$opsLaneId.value.trim()) {
+            $opsLaneId.value = 'device:' + state.deviceId;
           }
           if (!$campaignDeviceIds.value || !$campaignDeviceIds.value.trim()) {
             $campaignDeviceIds.value = JSON.stringify([state.deviceId], null, 2);
@@ -7394,13 +7714,14 @@ https://developer.android.com</textarea>
 
       async function loadControlRoomUi() {
         const result = await api('/api/ops/control-room');
+        renderControlRoom(result);
         renderOutput(result);
         setMessage('Control room loaded', false);
       }
 
       async function runAutoHealUi() {
         const result = await api('/api/ops/auto-heal', 'POST', {
-          laneId: selectedDeviceId() ? 'device:' + selectedDeviceId() : undefined,
+          laneId: selectedLaneId(),
           ackOpenIncidents: true,
           resumePausedLanes: true,
           retryFailedLimit: Number($autoHealRetryLimit.value || '15'),
@@ -7411,6 +7732,17 @@ https://developer.android.com</textarea>
         setMessage('Auto-heal executed', false);
         await refreshJobsAndLanes();
         await loadAlertsUi();
+        await loadControlRoomUi();
+      }
+
+      async function previewAutoHealUi() {
+        const result = await api('/api/ops/auto-heal/preview', 'POST', {
+          laneId: selectedLaneId(),
+          retryFailedLimit: Number($autoHealRetryLimit.value || '15'),
+          runRecoverRunbook: true,
+        });
+        renderOutput(result);
+        setMessage('Auto-heal preview ready', false);
       }
 
       async function saveQueueSnapshotUi() {
@@ -7447,6 +7779,16 @@ https://developer.android.com</textarea>
         await refreshJobsAndLanes();
       }
 
+      async function diffQueueSnapshotUi() {
+        const name = ($queueSnapshotName.value || '').trim();
+        if (!name) {
+          throw new Error('queue snapshot name required');
+        }
+        const result = await api('/api/queue/snapshots/diff', 'POST', { name });
+        renderOutput(result);
+        setMessage('Queue snapshot diff loaded', false);
+      }
+
       async function runRunbookCampaignUi() {
         let deviceIds = [];
         const raw = ($campaignDeviceIds.value || '').trim();
@@ -7481,6 +7823,36 @@ https://developer.android.com</textarea>
         await refreshJobsAndLanes();
       }
 
+      async function planRunbookCampaignUi() {
+        let deviceIds = [];
+        const raw = ($campaignDeviceIds.value || '').trim();
+        if (raw) {
+          if (raw.startsWith('[')) {
+            try {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) {
+                deviceIds = parsed.filter(function (value) { return typeof value === 'string' && value.trim().length > 0; });
+              }
+            } catch (error) {
+              throw new Error('campaign devices must be JSON array');
+            }
+          } else {
+            deviceIds = raw
+              .split('\n')
+              .map(function (line) { return line.trim(); })
+              .filter(function (line) { return line.length > 0; });
+          }
+        }
+        const result = await api('/api/runbook/campaign/plan', 'POST', {
+          name: $runbookName.value || 'recover-lane',
+          deviceIds,
+          packageName: 'com.android.chrome',
+          waitForReadyMs: 900,
+        });
+        renderOutput(result);
+        setMessage('Runbook campaign plan ready', false);
+      }
+
       async function seedAlertRulesUi() {
         const result = await api('/api/alerts/rules/seed', 'POST', {
           cooldownMs: Number($alertCooldown.value || '120000'),
@@ -7488,6 +7860,42 @@ https://developer.android.com</textarea>
         });
         renderOutput(result);
         setMessage('Alert pack seeded', false);
+        await loadAlertsUi();
+      }
+
+      async function runOpsStabilizeUi() {
+        const result = await api('/api/ops/stabilize', 'POST', {
+          laneId: selectedLaneId(),
+          retryFailedLimit: Number($autoHealRetryLimit.value || '15'),
+          maxRunbooks: Number($autoHealRunbooks.value || '2'),
+          runRecoverRunbook: true,
+          ackOpenIncidents: true,
+          resumePausedLanes: true,
+          cooldownMs: Number($alertCooldown.value || '120000'),
+          queueDepthThreshold: Number($alertThreshold.value || '10'),
+        });
+        renderOutput(result);
+        setMessage('Stabilize workflow completed', false);
+        await refreshJobsAndLanes();
+        await loadAlertsUi();
+        if (result.after) {
+          renderControlRoom(result.after);
+        }
+      }
+
+      async function runWatchdogUi() {
+        const result = await api('/api/ops/watchdog/run', 'POST', {
+          laneId: selectedLaneId(),
+          autoHealOnAlert: asBoolean($watchdogAutoHeal.value, true),
+          retryFailedLimit: Number($autoHealRetryLimit.value || '15'),
+          maxRunbooks: Number($autoHealRunbooks.value || '2'),
+        });
+        renderOutput(result);
+        setMessage('Watchdog cycle completed', false);
+        if (result.controlAfter) {
+          renderControlRoom(result.controlAfter);
+        }
+        await refreshJobsAndLanes();
         await loadAlertsUi();
       }
 
@@ -7701,6 +8109,15 @@ https://developer.android.com</textarea>
       document.getElementById('auto-heal-btn').addEventListener('click', async function () {
         try { await runAutoHealUi(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('auto-heal-preview-btn').addEventListener('click', async function () {
+        try { await previewAutoHealUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-stabilize-btn').addEventListener('click', async function () {
+        try { await runOpsStabilizeUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('watchdog-run-btn').addEventListener('click', async function () {
+        try { await runWatchdogUi(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('queue-snapshot-save-btn').addEventListener('click', async function () {
         try { await saveQueueSnapshotUi(); } catch (error) { setMessage(String(error), true); }
       });
@@ -7710,8 +8127,14 @@ https://developer.android.com</textarea>
       document.getElementById('queue-snapshot-apply-btn').addEventListener('click', async function () {
         try { await applyQueueSnapshotUi(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('queue-snapshot-diff-btn').addEventListener('click', async function () {
+        try { await diffQueueSnapshotUi(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('runbook-campaign-btn').addEventListener('click', async function () {
         try { await runRunbookCampaignUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('runbook-campaign-plan-btn').addEventListener('click', async function () {
+        try { await planRunbookCampaignUi(); } catch (error) { setMessage(String(error), true); }
       });
       document.getElementById('alert-seed-btn').addEventListener('click', async function () {
         try { await seedAlertRulesUi(); } catch (error) { setMessage(String(error), true); }
@@ -7760,6 +8183,7 @@ https://developer.android.com</textarea>
           await loadHeatmapUi();
           await loadPolicyUi();
           await loadOpsBoardUi();
+          await loadControlRoomUi();
           await loadQueueBoardUi();
           await listSchedulesUi();
           await loadAlertsUi();
@@ -7779,6 +8203,8 @@ https://developer.android.com</textarea>
               renderRecorderSessions(recorderPayload);
               const opsBoardPayload = await api('/api/ops/board');
               renderOpsBoard(opsBoardPayload);
+              const controlRoomPayload = await api('/api/ops/control-room');
+              renderControlRoom(controlRoomPayload);
               const schedulesPayload = await api('/api/schedules');
               renderSchedules(schedulesPayload);
               const queueBoardPayload = await api('/api/board/queue');
