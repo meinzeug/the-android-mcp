@@ -24,6 +24,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.8.0] - 2026-02-19
+### Added
+- New operations policy backend:
+- `GET /api/policy`
+- `POST /api/policy`
+- New transactional queue backend:
+- `POST /api/jobs/transaction`
+- `POST /api/jobs/reorder`
+- New runbook automation backend:
+- `POST /api/runbook/run` with built-in runbooks (`recover-lane`, `purge-lane`, `smoke-now`, `autopilot-lite`).
+- New operations board backend:
+- `GET /api/ops/board`
+- Web UI controls for policy load/save, runbook execution, transaction dry-run/execute, and ops board rendering.
+
+### Improved
+- Lane execution now supports policy-driven auto-pause after failure threshold.
+- Queue pressure events now emit when lane depth exceeds policy threshold.
+- Web UI gained deeper backend-bound orchestration controls while keeping live timeline and recorder/preset workflows.
+
 ## [3.7.0] - 2026-02-19
 ### Added
 - New recorder APIs for queue capture + replay:

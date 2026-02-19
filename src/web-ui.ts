@@ -142,6 +142,13 @@ interface RecorderSession {
   entries: RecorderEntry[];
 }
 
+interface OpsPolicy {
+  maxQueuePerLane: number;
+  autoPauseOnFailure: boolean;
+  failurePauseThreshold: number;
+  autoRetryFailedLimit: number;
+}
+
 const serverStartedAt = Date.now();
 let eventSeq = 1;
 let jobSeq = 1;
@@ -158,6 +165,12 @@ let workflows: Record<string, WorkflowDefinition> = loadWorkflows();
 let queuePresets: Record<string, QueuePreset> = loadQueuePresets();
 let recorderSessions: Record<string, RecorderSession> = loadRecorderSessions();
 let activeRecorder: RecorderSession | null = null;
+let opsPolicy: OpsPolicy = {
+  maxQueuePerLane: 60,
+  autoPauseOnFailure: true,
+  failurePauseThreshold: 6,
+  autoRetryFailedLimit: 15,
+};
 const jobs: JobRecord[] = [];
 const lanes: Record<string, LaneState> = {};
 
@@ -221,6 +234,26 @@ function laneTotals(): {
     failed: laneValues.reduce((sum, lane) => sum + lane.failed, 0),
     cancelled: laneValues.reduce((sum, lane) => sum + lane.cancelled, 0),
   };
+}
+
+function getPolicyPayload(): JsonObject {
+  return {
+    maxQueuePerLane: opsPolicy.maxQueuePerLane,
+    autoPauseOnFailure: opsPolicy.autoPauseOnFailure,
+    failurePauseThreshold: opsPolicy.failurePauseThreshold,
+    autoRetryFailedLimit: opsPolicy.autoRetryFailedLimit,
+  };
+}
+
+function updatePolicy(input: JsonObject): OpsPolicy {
+  opsPolicy = {
+    maxQueuePerLane: clampInt(input.maxQueuePerLane, opsPolicy.maxQueuePerLane, 5, 500),
+    autoPauseOnFailure: input.autoPauseOnFailure === undefined ? opsPolicy.autoPauseOnFailure : input.autoPauseOnFailure === true,
+    failurePauseThreshold: clampInt(input.failurePauseThreshold, opsPolicy.failurePauseThreshold, 1, 200),
+    autoRetryFailedLimit: clampInt(input.autoRetryFailedLimit, opsPolicy.autoRetryFailedLimit, 1, 300),
+  };
+  pushEvent('policy-updated', 'Ops policy updated', getPolicyPayload());
+  return opsPolicy;
 }
 
 function captureTimelinePoint(reason: string): TimelinePoint {
@@ -1375,6 +1408,14 @@ function createJob(type: JobType, input: JsonObject): JobRecord {
     jobs.splice(MAX_JOBS);
   }
 
+  if (lane.queue.length >= opsPolicy.maxQueuePerLane) {
+    pushEvent('policy-queue-pressure', 'Lane queue depth exceeded policy threshold', {
+      laneId: lane.id,
+      queueDepth: lane.queue.length,
+      maxQueuePerLane: opsPolicy.maxQueuePerLane,
+    });
+  }
+
   lane.queue.push(job.id);
   lane.updatedAt = nowIso();
   captureRecorderEntry(type, input);
@@ -1643,6 +1684,199 @@ function pruneJobs(options: { statuses?: string[]; keepLatest?: number }): {
   };
 }
 
+function runJobsTransaction(body: JsonObject): {
+  dryRun: boolean;
+  atomic: boolean;
+  acceptedCount: number;
+  invalidCount: number;
+  invalid: JsonObject[];
+  jobs: JobRecord[];
+} {
+  const items = Array.isArray(body.jobs) ? body.jobs : [];
+  const dryRun = body.dryRun === true;
+  const atomic = body.atomic !== false;
+  const deviceId = extractDeviceId(body);
+
+  const accepted: Array<{ type: JobType; input: JsonObject }> = [];
+  const invalid: JsonObject[] = [];
+
+  for (let index = 0; index < items.length; index += 1) {
+    const itemRaw = items[index];
+    if (!itemRaw || typeof itemRaw !== 'object') {
+      invalid.push({ index, error: 'job item must be object' });
+      continue;
+    }
+    const item = itemRaw as Record<string, unknown>;
+    const typeValue = typeof item.type === 'string' ? item.type : '';
+    if (!isJobType(typeValue)) {
+      invalid.push({ index, error: 'invalid job type' });
+      continue;
+    }
+    const input = item.input && typeof item.input === 'object' && !Array.isArray(item.input)
+      ? (item.input as JsonObject)
+      : {};
+    if (deviceId && !input.deviceId) {
+      input.deviceId = deviceId;
+    }
+    accepted.push({ type: typeValue, input });
+  }
+
+  if (atomic && invalid.length > 0) {
+    return {
+      dryRun,
+      atomic,
+      acceptedCount: 0,
+      invalidCount: invalid.length,
+      invalid,
+      jobs: [],
+    };
+  }
+
+  if (dryRun) {
+    return {
+      dryRun,
+      atomic,
+      acceptedCount: accepted.length,
+      invalidCount: invalid.length,
+      invalid,
+      jobs: [],
+    };
+  }
+
+  const jobsCreated: JobRecord[] = [];
+  for (const entry of accepted) {
+    jobsCreated.push(createJob(entry.type, entry.input));
+  }
+
+  pushEvent('jobs-transaction', 'Jobs transaction queued', {
+    atomic,
+    acceptedCount: jobsCreated.length,
+    invalidCount: invalid.length,
+  });
+
+  return {
+    dryRun,
+    atomic,
+    acceptedCount: jobsCreated.length,
+    invalidCount: invalid.length,
+    invalid,
+    jobs: jobsCreated,
+  };
+}
+
+function reorderLaneQueue(laneIdRaw: string, orderedJobIds: number[]): LaneState {
+  const laneId = laneIdRaw.trim();
+  if (!laneId) {
+    throw new Error('laneId is required');
+  }
+  const lane = lanes[laneId];
+  if (!lane) {
+    throw new Error(`lane '${laneId}' not found`);
+  }
+
+  const existingQueued = lane.queue.filter(id => {
+    const job = getJobById(id);
+    return Boolean(job && job.status === 'queued');
+  });
+  const uniqueRequested = Array.from(new Set(orderedJobIds.filter(id => Number.isFinite(id)).map(id => Math.trunc(id))));
+  const front = uniqueRequested.filter(id => existingQueued.includes(id));
+  const tail = existingQueued.filter(id => !front.includes(id));
+  lane.queue = [...front, ...tail];
+  lane.updatedAt = nowIso();
+
+  pushEvent('lane-queue-reordered', 'Lane queue reordered', {
+    laneId: lane.id,
+    frontCount: front.length,
+    queueDepth: lane.queue.length,
+  });
+
+  return lane;
+}
+
+function runOpsRunbook(body: JsonObject): JsonObject {
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  if (!name) {
+    throw new Error('runbook name is required');
+  }
+  const deviceId = extractDeviceId(body);
+  const laneId = typeof body.laneId === 'string'
+    ? body.laneId
+    : (deviceId ? `device:${deviceId}` : 'device:default');
+  const startedAt = Date.now();
+
+  if (name === 'recover-lane') {
+    const lane = lanes[laneId];
+    if (lane) {
+      setLanePaused(lane.id, false);
+    }
+    const retried = retryFailedJobs({
+      laneId,
+      limit: opsPolicy.autoRetryFailedLimit,
+    });
+    return {
+      ok: true,
+      runbook: name,
+      laneId,
+      resumed: Boolean(lane),
+      retriedCount: retried.length,
+      durationMs: Date.now() - startedAt,
+      updateHint: UPDATE_HINT,
+    };
+  }
+
+  if (name === 'purge-lane') {
+    const cancelled = cancelQueuedJobs({ laneId });
+    const pruned = pruneJobs({
+      statuses: ['completed', 'failed', 'cancelled'],
+      keepLatest: 100,
+    });
+    return {
+      ok: true,
+      runbook: name,
+      laneId,
+      cancelled,
+      pruned,
+      durationMs: Date.now() - startedAt,
+      updateHint: UPDATE_HINT,
+    };
+  }
+
+  if (name === 'smoke-now') {
+    const smoke = runDeviceSmokeScenario({
+      deviceId,
+      url: typeof body.url === 'string' ? body.url : 'https://www.wikipedia.org',
+      packageName: typeof body.packageName === 'string' ? body.packageName : 'com.android.chrome',
+      waitForReadyMs: typeof body.waitForReadyMs === 'number' ? body.waitForReadyMs : 900,
+    });
+    return {
+      ok: true,
+      runbook: name,
+      smoke,
+      durationMs: Date.now() - startedAt,
+      updateHint: UPDATE_HINT,
+    };
+  }
+
+  if (name === 'autopilot-lite') {
+    const autopilot = runAutopilot({
+      deviceIds: deviceId ? [deviceId] : body.deviceIds,
+      loops: 1,
+      waitForReadyMs: typeof body.waitForReadyMs === 'number' ? body.waitForReadyMs : 700,
+      urls: Array.isArray(body.urls) ? body.urls : ['https://www.wikipedia.org', 'https://news.ycombinator.com'],
+      packageName: typeof body.packageName === 'string' ? body.packageName : 'com.android.chrome',
+    });
+    return {
+      ok: true,
+      runbook: name,
+      autopilot,
+      durationMs: Date.now() - startedAt,
+      updateHint: UPDATE_HINT,
+    };
+  }
+
+  throw new Error(`Unknown runbook '${name}'`);
+}
+
 function runDeviceSmokeScenario(body: JsonObject): JsonObject {
   const deviceId = extractDeviceId(body);
   const packageName = typeof body.packageName === 'string' ? body.packageName : 'com.android.chrome';
@@ -1877,6 +2111,16 @@ async function processLane(lane: LaneState): Promise<void> {
       lane.failed += 1;
       lane.updatedAt = nowIso();
 
+       if (opsPolicy.autoPauseOnFailure && lane.failed >= opsPolicy.failurePauseThreshold) {
+        lane.paused = true;
+        lane.updatedAt = nowIso();
+        pushEvent('lane-auto-paused', 'Lane auto-paused after failure threshold', {
+          laneId: lane.id,
+          failed: lane.failed,
+          threshold: opsPolicy.failurePauseThreshold,
+        });
+      }
+
       pushEvent('job-failed', 'Job failed', {
         id: job.id,
         type: job.type,
@@ -2086,6 +2330,37 @@ function buildDashboardPayload(host: string, port: number): JsonObject {
   };
 }
 
+function buildOpsBoard(host: string, port: number): JsonObject {
+  const recentFailedJobs = jobs
+    .filter(job => job.status === 'failed')
+    .slice(0, 20)
+    .map(job => ({
+      id: job.id,
+      type: job.type,
+      laneId: job.laneId,
+      finishedAt: job.finishedAt,
+      error: job.error,
+    }));
+
+  return {
+    generatedAt: nowIso(),
+    state: buildStatePayload(host, port),
+    policy: getPolicyPayload(),
+    heatmap: buildLaneHeatmap(),
+    timeline: dashboardTimeline.slice(-40),
+    recentFailedJobs,
+    recorder: {
+      active: activeRecorder ? {
+        name: activeRecorder.name,
+        startedAt: activeRecorder.startedAt,
+        entries: activeRecorder.entries.length,
+      } : null,
+      sessions: recorderSessionsList().slice(0, 20),
+    },
+    updateHint: UPDATE_HINT,
+  };
+}
+
 function buildMetricsPayload(): JsonObject {
   const entries = Object.values(metrics)
     .sort((a, b) => b.count - a.count)
@@ -2157,9 +2432,38 @@ async function handleApi(
     return;
   }
 
+  if (method === 'GET' && pathname === '/api/policy') {
+    await withMetric('policy-get', () => {
+      sendJson(response, 200, {
+        ok: true,
+        policy: getPolicyPayload(),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/policy') {
+    await withMetric('policy-update', async () => {
+      const body = await readJsonBody(request);
+      const policy = updatePolicy(body);
+      sendJson(response, 200, {
+        ok: true,
+        policy,
+      });
+    });
+    return;
+  }
+
   if (method === 'GET' && pathname === '/api/dashboard') {
     await withMetric('dashboard', () => {
       sendJson(response, 200, buildDashboardPayload(context.host, context.port));
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/board') {
+    await withMetric('ops-board', () => {
+      sendJson(response, 200, buildOpsBoard(context.host, context.port));
     });
     return;
   }
@@ -2481,6 +2785,26 @@ async function handleApi(
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/jobs/transaction') {
+    await withMetric('jobs-transaction', async () => {
+      const body = await readJsonBody(request);
+      const result = runJobsTransaction(body);
+      if (result.atomic && result.invalidCount > 0 && !result.dryRun) {
+        sendJson(response, 400, {
+          ok: false,
+          error: 'atomic transaction has invalid jobs',
+          ...result,
+        });
+        return;
+      }
+      sendJson(response, 200, {
+        ok: true,
+        ...result,
+      });
+    });
+    return;
+  }
+
   if (method === 'GET' && /^\/api\/jobs\/\d+$/.test(pathname)) {
     await withMetric('jobs-get', () => {
       const id = Number(pathname.slice('/api/jobs/'.length));
@@ -2554,6 +2878,27 @@ async function handleApi(
         ok: true,
         ...result,
       });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/jobs/reorder') {
+    await withMetric('jobs-reorder', async () => {
+      const body = await readJsonBody(request);
+      const laneId = typeof body.laneId === 'string' ? body.laneId : '';
+      const jobIds = Array.isArray(body.jobIds)
+        ? body.jobIds.map(value => Number(value)).filter(value => Number.isFinite(value))
+        : [];
+      try {
+        const lane = reorderLaneQueue(laneId, jobIds);
+        sendJson(response, 200, {
+          ok: true,
+          lane,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
     });
     return;
   }
@@ -2972,6 +3317,20 @@ async function handleApi(
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/runbook/run') {
+    await withMetric('runbook-run', async () => {
+      const body = await readJsonBody(request);
+      try {
+        const result = runOpsRunbook(body);
+        sendJson(response, 200, result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
   if (method === 'POST' && pathname === '/api/scenario/burst') {
     await withMetric('scenario-burst', async () => {
       const body = await readJsonBody(request);
@@ -3328,6 +3687,39 @@ https://developer.android.com</textarea>
           <button class="s" id="heatmap-btn">Load lane heatmap</button>
           <button class="s" id="wallboard-btn">Generate wallboard</button>
           <div id="heatmap" class="metrics"></div>
+          <hr style="border:0;border-top:1px solid #2f4a61;" />
+          <div class="split">
+            <input id="policy-max-queue" type="number" min="5" max="500" value="60" />
+            <input id="policy-fail-threshold" type="number" min="1" max="200" value="6" />
+          </div>
+          <div class="split">
+            <input id="policy-retry-limit" type="number" min="1" max="300" value="15" />
+            <select id="policy-auto-pause">
+              <option value="true">auto pause on failure</option>
+              <option value="false">no auto pause</option>
+            </select>
+          </div>
+          <div class="split">
+            <button class="s" id="policy-load-btn">Load policy</button>
+            <button class="p" id="policy-save-btn">Save policy</button>
+          </div>
+          <select id="runbook-name">
+            <option value="recover-lane">recover-lane</option>
+            <option value="purge-lane">purge-lane</option>
+            <option value="smoke-now">smoke-now</option>
+            <option value="autopilot-lite">autopilot-lite</option>
+          </select>
+          <button class="p" id="runbook-btn">Run runbook</button>
+          <textarea id="transaction-jobs">[
+  {"type":"open_url","input":{"url":"https://www.wikipedia.org","waitForReadyMs":700}},
+  {"type":"device_profile","input":{"packageName":"com.android.chrome"}}
+]</textarea>
+          <div class="split">
+            <button class="s" id="tx-dry-btn">Dry-run transaction</button>
+            <button class="p" id="tx-run-btn">Run transaction</button>
+          </div>
+          <button class="s" id="ops-board-btn">Load ops board</button>
+          <div id="ops-board" class="metrics"></div>
         </article>
 
         <article class="card stack">
@@ -3395,6 +3787,13 @@ https://developer.android.com</textarea>
       const $presetName = document.getElementById('preset-name');
       const $presetJobs = document.getElementById('preset-jobs');
       const $heatmap = document.getElementById('heatmap');
+      const $policyMaxQueue = document.getElementById('policy-max-queue');
+      const $policyFailThreshold = document.getElementById('policy-fail-threshold');
+      const $policyRetryLimit = document.getElementById('policy-retry-limit');
+      const $policyAutoPause = document.getElementById('policy-auto-pause');
+      const $runbookName = document.getElementById('runbook-name');
+      const $transactionJobs = document.getElementById('transaction-jobs');
+      const $opsBoard = document.getElementById('ops-board');
 
       function setMessage(text, isError) {
         $message.textContent = text;
@@ -3551,6 +3950,41 @@ https://developer.android.com</textarea>
         }
         if (!lanes.length) {
           $heatmap.textContent = 'No lanes available for heatmap.';
+        }
+      }
+
+      function renderOpsBoard(payload) {
+        if (!$opsBoard) {
+          return;
+        }
+        const statePayload = payload.state || {};
+        const policy = payload.policy || {};
+        const failed = Array.isArray(payload.recentFailedJobs) ? payload.recentFailedJobs : [];
+        $opsBoard.innerHTML = '';
+
+        const top = document.createElement('div');
+        top.className = 'item';
+        top.innerHTML =
+          '<div class="meta">state + policy</div>' +
+          '<div>queue=' + (statePayload.queueDepth || 0) + ' lanes=' + (statePayload.laneCount || 0) + ' paused=' + (statePayload.pausedLaneCount || 0) + '</div>' +
+          '<div>maxQueue=' + (policy.maxQueuePerLane || '-') + ' failPause=' + (policy.failurePauseThreshold || '-') + ' autoPause=' + String(policy.autoPauseOnFailure) + '</div>';
+        $opsBoard.appendChild(top);
+
+        for (const item of failed.slice(0, 12)) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">failed #' + item.id + ' ' + item.type + '</div>' +
+            '<div>lane=' + item.laneId + '</div>' +
+            '<div style="color:#ff8f8f;">' + (item.error || '') + '</div>';
+          $opsBoard.appendChild(row);
+        }
+
+        if (!failed.length) {
+          const okRow = document.createElement('div');
+          okRow.className = 'item';
+          okRow.innerHTML = '<div class="meta">No recent failed jobs</div>';
+          $opsBoard.appendChild(okRow);
         }
       }
 
@@ -4197,6 +4631,69 @@ https://developer.android.com</textarea>
         setMessage('Device wallboard generated', false);
       }
 
+      async function loadPolicyUi() {
+        const result = await api('/api/policy');
+        const policy = result.policy || {};
+        $policyMaxQueue.value = String(policy.maxQueuePerLane || 60);
+        $policyFailThreshold.value = String(policy.failurePauseThreshold || 6);
+        $policyRetryLimit.value = String(policy.autoRetryFailedLimit || 15);
+        $policyAutoPause.value = String(policy.autoPauseOnFailure === false ? false : true);
+        renderOutput(result);
+        setMessage('Policy loaded', false);
+      }
+
+      async function savePolicyUi() {
+        const result = await api('/api/policy', 'POST', {
+          maxQueuePerLane: Number($policyMaxQueue.value || '60'),
+          failurePauseThreshold: Number($policyFailThreshold.value || '6'),
+          autoRetryFailedLimit: Number($policyRetryLimit.value || '15'),
+          autoPauseOnFailure: $policyAutoPause.value === 'true',
+        });
+        renderOutput(result);
+        setMessage('Policy updated', false);
+      }
+
+      async function runRunbookUi() {
+        const result = await api('/api/runbook/run', 'POST', {
+          name: $runbookName.value || 'recover-lane',
+          deviceId: selectedDeviceId(),
+          packageName: 'com.android.chrome',
+          waitForReadyMs: 900,
+          url: $smokeUrl.value || 'https://www.wikipedia.org',
+          urls: stressConfig().urls,
+        });
+        renderOutput(result);
+        setMessage('Runbook executed', false);
+        await refreshJobsAndLanes();
+      }
+
+      async function runTransactionUi(dryRun) {
+        let jobs;
+        try {
+          jobs = JSON.parse($transactionJobs.value || '[]');
+        } catch (error) {
+          throw new Error('transaction jobs must be valid JSON');
+        }
+        const result = await api('/api/jobs/transaction', 'POST', {
+          jobs,
+          dryRun: !!dryRun,
+          atomic: true,
+          deviceId: selectedDeviceId(),
+        });
+        renderOutput(result);
+        setMessage(dryRun ? 'Transaction dry-run complete' : 'Transaction queued', false);
+        if (!dryRun) {
+          await refreshJobsAndLanes();
+        }
+      }
+
+      async function loadOpsBoardUi() {
+        const result = await api('/api/ops/board');
+        renderOpsBoard(result);
+        renderOutput(result);
+        setMessage('Ops board loaded', false);
+      }
+
       document.getElementById('open-url-btn').addEventListener('click', async function () {
         try { await openUrl($urlInput.value); } catch (error) { setMessage(String(error), true); }
       });
@@ -4308,6 +4805,24 @@ https://developer.android.com</textarea>
       document.getElementById('wallboard-btn').addEventListener('click', async function () {
         try { await loadWallboardUi(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('policy-load-btn').addEventListener('click', async function () {
+        try { await loadPolicyUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('policy-save-btn').addEventListener('click', async function () {
+        try { await savePolicyUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('runbook-btn').addEventListener('click', async function () {
+        try { await runRunbookUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('tx-dry-btn').addEventListener('click', async function () {
+        try { await runTransactionUi(true); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('tx-run-btn').addEventListener('click', async function () {
+        try { await runTransactionUi(false); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-board-btn').addEventListener('click', async function () {
+        try { await loadOpsBoardUi(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('clear-output-btn').addEventListener('click', function () {
         renderOutput({});
       });
@@ -4350,6 +4865,8 @@ https://developer.android.com</textarea>
           connectEvents();
           await loadTimeline();
           await loadHeatmapUi();
+          await loadPolicyUi();
+          await loadOpsBoardUi();
           renderOutput({ ok: true, message: 'UI ready', updateHint: '${UPDATE_HINT}' });
           setMessage('Ready.', false);
 
@@ -4362,6 +4879,8 @@ https://developer.android.com</textarea>
               renderTimeline(timelinePayload);
               const recorderPayload = await api('/api/recorder/sessions');
               renderRecorderSessions(recorderPayload);
+              const opsBoardPayload = await api('/api/ops/board');
+              renderOpsBoard(opsBoardPayload);
             } catch (error) {
               setMessage('Background refresh failed', true);
             }
