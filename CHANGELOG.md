@@ -24,6 +24,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.9.0] - 2026-02-19
+### Added
+- New websocket realtime backend stream:
+- `GET /api/ws` upgrade endpoint for live event delivery to Web UI.
+- New queue board and lane-control APIs:
+- `GET /api/board/queue`
+- `POST /api/jobs/:id/move`
+- New schedule automation APIs:
+- `GET /api/schedules`
+- `POST /api/schedules`
+- `POST /api/schedules/:id/start`
+- `POST /api/schedules/:id/stop`
+- `DELETE /api/schedules/:id`
+- New advanced operations APIs:
+- `POST /api/jobs/transaction`
+- `POST /api/jobs/reorder`
+- `GET /api/ops/board`
+- New Web UI controls for queue board, move/reorder, schedule automation, and ops board.
+
+### Improved
+- Web UI realtime transport now prefers websocket and falls back to SSE automatically.
+- Lane execution now supports policy-based queue pressure signals and failure auto-pause behavior.
+- State/dashboard payloads now expose schedule and websocket client visibility.
+
 ## [3.8.0] - 2026-02-19
 ### Added
 - New operations policy backend:
