@@ -24,6 +24,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.15.0] - 2026-02-19
+### Added
+- New operations scenario backend workflows:
+- `GET /api/ops/scenarios`
+- `POST /api/ops/scenarios`
+- `DELETE /api/ops/scenarios/:name`
+- `POST /api/ops/scenarios/run`
+- New control-room history workflows:
+- `GET /api/ops/control-room/history`
+- `POST /api/ops/control-room/history/reset`
+- New advanced operations workflows:
+- `POST /api/ops/chaos-drill`
+- `GET /api/ops/release-readiness`
+- New Web UI controls for:
+- scenario save/list/run
+- chaos drill execution
+- release readiness report
+- control history load/reset
+- dedicated panels for ops scenarios and control history.
+
+### Improved
+- Control-room payloads now feed persistent in-memory history for richer operator timeline analysis.
+- Audit/state/session payloads now include scenario and control-history context for handoff and diagnostics.
+
 ## [3.14.0] - 2026-02-19
 ### Added
 - New reliability orchestration workflows:

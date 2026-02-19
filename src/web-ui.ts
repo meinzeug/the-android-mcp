@@ -37,6 +37,7 @@ const SCHEDULES_FILE = path.join(APP_STATE_DIR, 'web-ui-schedules.json');
 const ALERT_RULES_FILE = path.join(APP_STATE_DIR, 'web-ui-alert-rules.json');
 const DEVICE_BASELINES_FILE = path.join(APP_STATE_DIR, 'web-ui-device-baselines.json');
 const QUEUE_SNAPSHOTS_FILE = path.join(APP_STATE_DIR, 'web-ui-queue-snapshots.json');
+const OPS_SCENARIOS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-scenarios.json');
 
 const SNAPSHOT_KINDS = [
   'radio',
@@ -218,6 +219,28 @@ interface QueueSnapshotRecord {
   payload: JsonObject;
 }
 
+interface OpsScenario {
+  name: string;
+  updatedAt: string;
+  description?: string;
+  laneId?: string;
+  runbook: string;
+  retryFailedLimit: number;
+  maxRunbooks: number;
+  autoHealOnAlert: boolean;
+  smokeUrl?: string;
+}
+
+interface ControlRoomHistoryPoint {
+  id: number;
+  at: string;
+  severity: string;
+  score: number;
+  queuePressure: number;
+  openIncidentCount: number;
+  failedJobCount: number;
+}
+
 const serverStartedAt = Date.now();
 let eventSeq = 1;
 let jobSeq = 1;
@@ -255,7 +278,10 @@ const alertIncidents: AlertIncident[] = [];
 let schedulesInitialized = false;
 let deviceBaselines: Record<string, DeviceBaseline> = loadDeviceBaselines();
 let queueSnapshots: Record<string, QueueSnapshotRecord> = loadQueueSnapshots();
+let opsScenarios: Record<string, OpsScenario> = loadOpsScenarios();
 const runbookExecutions: RunbookExecution[] = [];
+const controlRoomHistory: ControlRoomHistoryPoint[] = [];
+let controlRoomHistorySeq = 1;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -1178,6 +1204,74 @@ function saveQueueSnapshots(): void {
 
 function listQueueSnapshots(): QueueSnapshotRecord[] {
   return Object.values(queueSnapshots).sort((a, b) => b.capturedAt.localeCompare(a.capturedAt));
+}
+
+function defaultOpsScenarios(): Record<string, OpsScenario> {
+  return {
+    'stability-default': {
+      name: 'stability-default',
+      updatedAt: nowIso(),
+      description: 'Default stabilize workflow for daily operations.',
+      runbook: 'recover-lane',
+      retryFailedLimit: 15,
+      maxRunbooks: 2,
+      autoHealOnAlert: true,
+      smokeUrl: 'https://www.wikipedia.org',
+    },
+  };
+}
+
+function loadOpsScenarios(): Record<string, OpsScenario> {
+  try {
+    ensureAppStateDir();
+    if (!fs.existsSync(OPS_SCENARIOS_FILE)) {
+      const defaults = defaultOpsScenarios();
+      fs.writeFileSync(OPS_SCENARIOS_FILE, JSON.stringify(defaults, null, 2), 'utf8');
+      return defaults;
+    }
+    const raw = fs.readFileSync(OPS_SCENARIOS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return defaultOpsScenarios();
+    }
+    const result: Record<string, OpsScenario> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        continue;
+      }
+      const item = value as Record<string, unknown>;
+      const name = typeof item.name === 'string' && item.name.trim().length > 0 ? item.name.trim() : key;
+      if (!name) {
+        continue;
+      }
+      const runbook = typeof item.runbook === 'string' && item.runbook.trim().length > 0
+        ? item.runbook.trim()
+        : 'recover-lane';
+      result[name] = {
+        name,
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : nowIso(),
+        description: typeof item.description === 'string' ? item.description : undefined,
+        laneId: typeof item.laneId === 'string' && item.laneId.trim().length > 0 ? item.laneId.trim() : undefined,
+        runbook,
+        retryFailedLimit: clampInt(item.retryFailedLimit, 15, 0, 500),
+        maxRunbooks: clampInt(item.maxRunbooks, 2, 1, 50),
+        autoHealOnAlert: item.autoHealOnAlert !== false,
+        smokeUrl: typeof item.smokeUrl === 'string' ? item.smokeUrl : undefined,
+      };
+    }
+    return Object.keys(result).length > 0 ? result : defaultOpsScenarios();
+  } catch {
+    return defaultOpsScenarios();
+  }
+}
+
+function saveOpsScenarios(): void {
+  ensureAppStateDir();
+  fs.writeFileSync(OPS_SCENARIOS_FILE, JSON.stringify(opsScenarios, null, 2), 'utf8');
+}
+
+function listOpsScenarios(): OpsScenario[] {
+  return Object.values(opsScenarios).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function loadSchedules(): void {
@@ -2904,6 +2998,33 @@ function seedRecommendedAlertRules(body: JsonObject): JsonObject {
   };
 }
 
+function appendControlRoomHistory(payload: JsonObject): void {
+  const severity = typeof payload.severity === 'string' ? payload.severity : 'unknown';
+  const score = typeof payload.score === 'number' ? payload.score : 0;
+  const queuePressure = typeof payload.queuePressure === 'number' ? payload.queuePressure : 0;
+  const openIncidentCount = typeof payload.openIncidentCount === 'number' ? payload.openIncidentCount : 0;
+  const failedJobCount = typeof payload.failedJobCount === 'number' ? payload.failedJobCount : 0;
+
+  const next: ControlRoomHistoryPoint = {
+    id: controlRoomHistorySeq++,
+    at: nowIso(),
+    severity,
+    score,
+    queuePressure,
+    openIncidentCount,
+    failedJobCount,
+  };
+  controlRoomHistory.push(next);
+  if (controlRoomHistory.length > 600) {
+    controlRoomHistory.splice(0, controlRoomHistory.length - 600);
+  }
+}
+
+function listControlRoomHistory(limit: number): ControlRoomHistoryPoint[] {
+  const max = clampInt(limit, 120, 1, 1000);
+  return controlRoomHistory.slice(-max);
+}
+
 function buildControlRoomPayload(host: string, port: number): JsonObject {
   const state = buildStatePayload(host, port);
   const totals = laneTotals();
@@ -2938,7 +3059,7 @@ function buildControlRoomPayload(host: string, port: number): JsonObject {
     recommendations.push('System stable. Continue with scheduled smoke runbooks.');
   }
 
-  return {
+  const payload: JsonObject = {
     ok: true,
     generatedAt: nowIso(),
     severity,
@@ -2962,6 +3083,8 @@ function buildControlRoomPayload(host: string, port: number): JsonObject {
     recommendations,
     updateHint: UPDATE_HINT,
   };
+  appendControlRoomHistory(payload);
+  return payload;
 }
 
 function previewAutoHeal(body: JsonObject): JsonObject {
@@ -3079,6 +3202,202 @@ function runAutoHeal(body: JsonObject): JsonObject {
   };
 }
 
+function saveOpsScenario(nameRaw: string, body: JsonObject): OpsScenario {
+  const name = nameRaw.trim();
+  if (!name) {
+    throw new Error('scenario name is required');
+  }
+  const runbook = typeof body.runbook === 'string' && body.runbook.trim().length > 0
+    ? body.runbook.trim()
+    : 'recover-lane';
+  const scenario: OpsScenario = {
+    name,
+    updatedAt: nowIso(),
+    description: typeof body.description === 'string' ? body.description : undefined,
+    laneId: typeof body.laneId === 'string' && body.laneId.trim().length > 0 ? body.laneId.trim() : undefined,
+    runbook,
+    retryFailedLimit: clampInt(body.retryFailedLimit, 15, 0, 500),
+    maxRunbooks: clampInt(body.maxRunbooks, 2, 1, 50),
+    autoHealOnAlert: body.autoHealOnAlert !== false,
+    smokeUrl: typeof body.smokeUrl === 'string' && /^https?:\/\//i.test(body.smokeUrl)
+      ? body.smokeUrl
+      : undefined,
+  };
+  opsScenarios[name] = scenario;
+  saveOpsScenarios();
+  pushEvent('ops-scenario-saved', 'Ops scenario saved', { name, runbook: scenario.runbook });
+  return scenario;
+}
+
+function deleteOpsScenario(nameRaw: string): boolean {
+  const name = nameRaw.trim();
+  if (!name || !opsScenarios[name]) {
+    return false;
+  }
+  delete opsScenarios[name];
+  saveOpsScenarios();
+  pushEvent('ops-scenario-deleted', 'Ops scenario deleted', { name });
+  return true;
+}
+
+function runOpsScenario(body: JsonObject, host: string, port: number): JsonObject {
+  const scenarioName = typeof body.name === 'string' ? body.name.trim() : '';
+  if (!scenarioName) {
+    throw new Error('scenario name is required');
+  }
+  const scenario = opsScenarios[scenarioName];
+  if (!scenario) {
+    throw new Error(`scenario '${scenarioName}' not found`);
+  }
+  const laneId = typeof body.laneId === 'string' && body.laneId.trim().length > 0
+    ? body.laneId.trim()
+    : scenario.laneId;
+  const stabilize = runOpsStabilize({
+    ...body,
+    laneId,
+    retryFailedLimit: scenario.retryFailedLimit,
+    maxRunbooks: scenario.maxRunbooks,
+    runRecoverRunbook: true,
+    autoHealOnAlert: scenario.autoHealOnAlert,
+  }, host, port);
+
+  let campaign: JsonObject | undefined;
+  if (scenario.runbook === 'smoke-now' || scenario.runbook === 'autopilot-lite') {
+    campaign = runRunbookCampaign({
+      ...body,
+      name: scenario.runbook,
+      continueOnError: true,
+      url: scenario.smokeUrl || body.url || 'https://www.wikipedia.org',
+      waitForReadyMs: clampInt(body.waitForReadyMs, 900, 200, 10000),
+      packageName: typeof body.packageName === 'string' ? body.packageName : 'com.android.chrome',
+    });
+  }
+
+  const watchdog = runWatchdog({
+    ...body,
+    laneId,
+    autoHealOnAlert: scenario.autoHealOnAlert,
+    retryFailedLimit: scenario.retryFailedLimit,
+    maxRunbooks: scenario.maxRunbooks,
+  }, host, port);
+
+  pushEvent('ops-scenario-run', 'Ops scenario executed', {
+    name: scenarioName,
+    laneId,
+  });
+
+  return {
+    ok: true,
+    scenario: scenarioName,
+    stabilize,
+    campaign,
+    watchdog,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function runChaosDrill(body: JsonObject, host: string, port: number): JsonObject {
+  const deviceId = extractDeviceId(body);
+  const url = typeof body.url === 'string' && /^https?:\/\//i.test(body.url)
+    ? body.url
+    : 'https://developer.android.com';
+  const openResult = openUrlInChrome(url, deviceId, {
+    waitForReadyMs: clampInt(body.waitForReadyMs, 1100, 200, 10000),
+    fallbackToDefault: true,
+  });
+  const campaign = runRunbookCampaign({
+    ...body,
+    name: 'smoke-now',
+    deviceIds: openResult.deviceId ? [openResult.deviceId] : undefined,
+    continueOnError: true,
+    url,
+    packageName: 'com.android.chrome',
+  });
+  const watchdog = runWatchdog({
+    ...body,
+    laneId: openResult.deviceId ? `device:${openResult.deviceId}` : undefined,
+    autoHealOnAlert: true,
+    retryFailedLimit: clampInt(body.retryFailedLimit, 10, 0, 500),
+    maxRunbooks: clampInt(body.maxRunbooks, 2, 1, 50),
+  }, host, port);
+  const control = buildControlRoomPayload(host, port);
+  pushEvent('ops-chaos-drill', 'Chaos drill executed', {
+    deviceId: openResult.deviceId,
+    severity: control.severity,
+  });
+  return {
+    ok: true,
+    openResult,
+    campaign,
+    watchdog,
+    control,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function buildReleaseReadiness(host: string, port: number): JsonObject {
+  const control = buildControlRoomPayload(host, port);
+  const diagnostics = buildDiagnosticsReport(host, port);
+  const recentWatchdog = runWatchdog({
+    autoHealOnAlert: false,
+    retryFailedLimit: 0,
+    maxRunbooks: 1,
+  }, host, port);
+  const watchdogPayload = recentWatchdog as Record<string, unknown>;
+  const watchdogControlAfter = watchdogPayload.controlAfter && typeof watchdogPayload.controlAfter === 'object' && !Array.isArray(watchdogPayload.controlAfter)
+    ? (watchdogPayload.controlAfter as Record<string, unknown>)
+    : undefined;
+  const watchdogAfterSeverity = typeof watchdogControlAfter?.severity === 'string'
+    ? watchdogControlAfter.severity
+    : undefined;
+  const watchdogAfterScore = typeof watchdogControlAfter?.score === 'number'
+    ? watchdogControlAfter.score
+    : undefined;
+
+  const checklist = [
+    {
+      check: 'Control severity green',
+      pass: control.severity === 'green',
+      value: control.severity,
+    },
+    {
+      check: 'Control score >= 80',
+      pass: typeof control.score === 'number' && control.score >= 80,
+      value: control.score,
+    },
+    {
+      check: 'No failed jobs in diagnostics',
+      pass: Array.isArray(diagnostics.failedJobs) ? diagnostics.failedJobs.length === 0 : false,
+      value: Array.isArray(diagnostics.failedJobs) ? diagnostics.failedJobs.length : -1,
+    },
+    {
+      check: 'Watchdog no auto-heal needed',
+      pass: recentWatchdog.autoHealTriggered !== true,
+      value: recentWatchdog.autoHealTriggered === true ? 'triggered' : 'idle',
+    },
+  ];
+  const pass = checklist.every(item => item.pass);
+
+  return {
+    ok: true,
+    pass,
+    checkedAt: nowIso(),
+    control,
+    diagnostics: {
+      generatedAt: diagnostics.generatedAt,
+      failedJobs: Array.isArray(diagnostics.failedJobs) ? diagnostics.failedJobs.length : 0,
+      alerts: diagnostics.alerts,
+    },
+    watchdog: {
+      autoHealTriggered: watchdogPayload.autoHealTriggered === true,
+      afterSeverity: watchdogAfterSeverity,
+      afterScore: watchdogAfterScore,
+    },
+    checklist,
+    updateHint: UPDATE_HINT,
+  };
+}
+
 function runOpsStabilize(body: JsonObject, host: string, port: number): JsonObject {
   const seeded = seedRecommendedAlertRules(body);
   const before = buildControlRoomPayload(host, port);
@@ -3151,6 +3470,8 @@ function buildAuditExport(host: string, port: number): JsonObject {
     runbookExecutions: runbookExecutions.slice(-300),
     alertIncidents: listAlertIncidents(300),
     queueSnapshots: listQueueSnapshots().slice(0, 120),
+    opsScenarios: listOpsScenarios(),
+    controlRoomHistory: listControlRoomHistory(200),
     schedules: schedulesList(),
     timeline: dashboardTimeline.slice(-300),
     updateHint: UPDATE_HINT,
@@ -4219,6 +4540,8 @@ function buildStatePayload(host: string, port: number): JsonObject {
     scheduleCount: Object.keys(schedules).length,
     baselineCount: Object.keys(deviceBaselines).length,
     queueSnapshotCount: Object.keys(queueSnapshots).length,
+    opsScenarioCount: Object.keys(opsScenarios).length,
+    controlRoomHistoryCount: controlRoomHistory.length,
     runbookExecutionCount: runbookExecutions.length,
     laneCount: totals.laneCount,
     pausedLaneCount: totals.pausedLaneCount,
@@ -4294,6 +4617,8 @@ function buildOpsBoard(host: string, port: number): JsonObject {
       laneCount: item.laneCount,
       queuedCount: item.queuedCount,
     })),
+    opsScenarios: listOpsScenarios(),
+    controlRoomHistory: listControlRoomHistory(80),
     updateHint: UPDATE_HINT,
   };
 }
@@ -4340,6 +4665,8 @@ function buildSessionExport(): JsonObject {
     runbookExecutions,
     deviceBaselines,
     queueSnapshots,
+    opsScenarios,
+    controlRoomHistory,
     lanes: lanesSummary(),
     jobs,
     metrics: buildMetricsPayload(),
@@ -4549,6 +4876,30 @@ async function handleApi(
     return;
   }
 
+  if (method === 'GET' && pathname === '/api/ops/control-room/history') {
+    await withMetric('ops-control-room-history', () => {
+      const limitRaw = Number(url.searchParams.get('limit') ?? '180');
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(1000, Math.trunc(limitRaw))) : 180;
+      sendJson(response, 200, {
+        ok: true,
+        count: Math.min(limit, controlRoomHistory.length),
+        points: listControlRoomHistory(limit),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/control-room/history/reset') {
+    await withMetric('ops-control-room-history-reset', () => {
+      controlRoomHistory.splice(0, controlRoomHistory.length);
+      sendJson(response, 200, {
+        ok: true,
+        count: 0,
+      });
+    });
+    return;
+  }
+
   if (method === 'POST' && pathname === '/api/ops/auto-heal') {
     await withMetric('ops-auto-heal', async () => {
       const body = await readJsonBody(request);
@@ -4577,6 +4928,21 @@ async function handleApi(
     await withMetric('ops-watchdog', async () => {
       const body = await readJsonBody(request);
       sendJson(response, 200, runWatchdog(body, context.host, context.port));
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/chaos-drill') {
+    await withMetric('ops-chaos-drill', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, runChaosDrill(body, context.host, context.port));
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/release-readiness') {
+    await withMetric('ops-release-readiness', () => {
+      sendJson(response, 200, buildReleaseReadiness(context.host, context.port));
     });
     return;
   }
@@ -4887,6 +5253,61 @@ async function handleApi(
       const name = typeof body.name === 'string' ? body.name : '';
       try {
         sendJson(response, 200, diffQueueSnapshot(name));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/scenarios') {
+    await withMetric('ops-scenarios-list', () => {
+      sendJson(response, 200, {
+        ok: true,
+        scenarios: listOpsScenarios(),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/scenarios') {
+    await withMetric('ops-scenarios-save', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name : '';
+      try {
+        const scenario = saveOpsScenario(name, body);
+        sendJson(response, 200, {
+          ok: true,
+          scenario,
+          updateHint: UPDATE_HINT,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'DELETE' && pathname.startsWith('/api/ops/scenarios/')) {
+    await withMetric('ops-scenarios-delete', () => {
+      const name = decodeURIComponent(pathname.slice('/api/ops/scenarios/'.length));
+      const ok = deleteOpsScenario(name);
+      if (!ok) {
+        sendJson(response, 404, { error: `scenario '${name}' not found` });
+        return;
+      }
+      sendJson(response, 200, { ok: true, name });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/scenarios/run') {
+    await withMetric('ops-scenarios-run', async () => {
+      const body = await readJsonBody(request);
+      try {
+        sendJson(response, 200, runOpsScenario(body, context.host, context.port));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         sendJson(response, 400, { error: message });
@@ -6295,7 +6716,26 @@ https://developer.android.com</textarea>
           </div>
           <div class="split">
             <button class="s" id="alert-seed-btn">Seed alert pack</button>
+            <button class="p" id="ops-scenario-run-btn">Run ops scenario</button>
           </div>
+          <div class="split">
+            <input id="ops-scenario-name" placeholder="ops scenario name" value="stability-default" />
+            <input id="ops-scenario-url" placeholder="scenario smoke url (optional)" value="https://www.wikipedia.org" />
+          </div>
+          <div class="split">
+            <button class="s" id="ops-scenario-save-btn">Save ops scenario</button>
+            <button class="s" id="ops-scenario-list-btn">List ops scenarios</button>
+          </div>
+          <div class="split">
+            <button class="w" id="ops-chaos-drill-btn">Run chaos drill</button>
+            <button class="p" id="ops-release-readiness-btn">Release readiness</button>
+          </div>
+          <div class="split">
+            <button class="s" id="control-history-load-btn">Load control history</button>
+            <button class="w" id="control-history-reset-btn">Reset control history</button>
+          </div>
+          <div id="ops-scenarios-panel" class="metrics"></div>
+          <div id="control-history-panel" class="metrics"></div>
         </article>
 
         <article class="card stack">
@@ -6396,6 +6836,10 @@ https://developer.android.com</textarea>
       const $autoHealRetryLimit = document.getElementById('auto-heal-retry-limit');
       const $autoHealRunbooks = document.getElementById('auto-heal-runbooks');
       const $controlRoomPanel = document.getElementById('control-room-panel');
+      const $opsScenarioName = document.getElementById('ops-scenario-name');
+      const $opsScenarioUrl = document.getElementById('ops-scenario-url');
+      const $opsScenariosPanel = document.getElementById('ops-scenarios-panel');
+      const $controlHistoryPanel = document.getElementById('control-history-panel');
       const $queueSnapshotName = document.getElementById('queue-snapshot-name');
       const $campaignDeviceIds = document.getElementById('campaign-device-ids');
 
@@ -6616,6 +7060,45 @@ https://developer.android.com</textarea>
           row.className = 'item';
           row.innerHTML = '<div>' + String(rec) + '</div>';
           $controlRoomPanel.appendChild(row);
+        }
+      }
+
+      function renderOpsScenarios(payload) {
+        if (!$opsScenariosPanel) {
+          return;
+        }
+        const scenarios = Array.isArray(payload && payload.scenarios) ? payload.scenarios : [];
+        $opsScenariosPanel.innerHTML = '';
+        for (const scenario of scenarios.slice(0, 20)) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">' + scenario.name + '</div>' +
+            '<div>runbook=' + scenario.runbook + ' retry=' + scenario.retryFailedLimit + ' maxRunbooks=' + scenario.maxRunbooks + '</div>' +
+            '<div>autoHealOnAlert=' + String(scenario.autoHealOnAlert) + ' lane=' + (scenario.laneId || '-') + '</div>';
+          $opsScenariosPanel.appendChild(row);
+        }
+        if (!scenarios.length) {
+          $opsScenariosPanel.textContent = 'No ops scenarios.';
+        }
+      }
+
+      function renderControlHistory(payload) {
+        if (!$controlHistoryPanel) {
+          return;
+        }
+        const points = Array.isArray(payload && payload.points) ? payload.points : [];
+        $controlHistoryPanel.innerHTML = '';
+        for (const point of points.slice(-30).reverse()) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">[' + point.at + '] severity=' + point.severity + ' score=' + point.score + '</div>' +
+            '<div>queuePressure=' + point.queuePressure + ' openIncidents=' + point.openIncidentCount + ' failedJobs=' + point.failedJobCount + '</div>';
+          $controlHistoryPanel.appendChild(row);
+        }
+        if (!points.length) {
+          $controlHistoryPanel.textContent = 'No control history.';
         }
       }
 
@@ -7863,6 +8346,100 @@ https://developer.android.com</textarea>
         await loadAlertsUi();
       }
 
+      async function listOpsScenariosUi() {
+        const result = await api('/api/ops/scenarios');
+        renderOpsScenarios(result);
+        renderOutput(result);
+        const scenarios = Array.isArray(result.scenarios) ? result.scenarios : [];
+        if (scenarios.length > 0) {
+          $opsScenarioName.value = scenarios[0].name;
+          if (scenarios[0].smokeUrl) {
+            $opsScenarioUrl.value = scenarios[0].smokeUrl;
+          }
+        }
+        setMessage('Ops scenarios loaded', false);
+      }
+
+      async function saveOpsScenarioUi() {
+        const name = ($opsScenarioName.value || '').trim();
+        if (!name) {
+          throw new Error('ops scenario name required');
+        }
+        const result = await api('/api/ops/scenarios', 'POST', {
+          name,
+          description: 'Web UI scenario',
+          laneId: selectedLaneId(),
+          runbook: $runbookName.value || 'recover-lane',
+          retryFailedLimit: Number($autoHealRetryLimit.value || '15'),
+          maxRunbooks: Number($autoHealRunbooks.value || '2'),
+          autoHealOnAlert: asBoolean($watchdogAutoHeal.value, true),
+          smokeUrl: ($opsScenarioUrl.value || '').trim() || undefined,
+        });
+        renderOutput(result);
+        setMessage('Ops scenario saved', false);
+        await listOpsScenariosUi();
+      }
+
+      async function runOpsScenarioUi() {
+        const name = ($opsScenarioName.value || '').trim();
+        if (!name) {
+          throw new Error('ops scenario name required');
+        }
+        const result = await api('/api/ops/scenarios/run', 'POST', {
+          name,
+          laneId: selectedLaneId(),
+          waitForReadyMs: 1000,
+          url: ($opsScenarioUrl.value || '').trim() || undefined,
+          retryFailedLimit: Number($autoHealRetryLimit.value || '15'),
+          maxRunbooks: Number($autoHealRunbooks.value || '2'),
+        });
+        renderOutput(result);
+        setMessage('Ops scenario executed', false);
+        await refreshJobsAndLanes();
+        await loadAlertsUi();
+        await loadControlRoomUi();
+      }
+
+      async function runChaosDrillUi() {
+        const result = await api('/api/ops/chaos-drill', 'POST', {
+          deviceId: selectedDeviceId(),
+          url: ($opsScenarioUrl.value || '').trim() || undefined,
+          waitForReadyMs: 1200,
+          retryFailedLimit: Number($autoHealRetryLimit.value || '15'),
+          maxRunbooks: Number($autoHealRunbooks.value || '2'),
+        });
+        renderOutput(result);
+        setMessage('Chaos drill executed', false);
+        if (result.control) {
+          renderControlRoom(result.control);
+        }
+        await refreshJobsAndLanes();
+      }
+
+      async function loadReleaseReadinessUi() {
+        const result = await api('/api/ops/release-readiness');
+        renderOutput(result);
+        const pass = result.pass === true;
+        setMessage(pass ? 'Release readiness PASS' : 'Release readiness requires attention', !pass);
+        if (result.control) {
+          renderControlRoom(result.control);
+        }
+      }
+
+      async function loadControlHistoryUi() {
+        const result = await api('/api/ops/control-room/history?limit=240');
+        renderControlHistory(result);
+        renderOutput(result);
+        setMessage('Control history loaded', false);
+      }
+
+      async function resetControlHistoryUi() {
+        const result = await api('/api/ops/control-room/history/reset', 'POST', {});
+        renderOutput(result);
+        await loadControlHistoryUi();
+        setMessage('Control history reset', false);
+      }
+
       async function runOpsStabilizeUi() {
         const result = await api('/api/ops/stabilize', 'POST', {
           laneId: selectedLaneId(),
@@ -8139,6 +8716,27 @@ https://developer.android.com</textarea>
       document.getElementById('alert-seed-btn').addEventListener('click', async function () {
         try { await seedAlertRulesUi(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('ops-scenario-save-btn').addEventListener('click', async function () {
+        try { await saveOpsScenarioUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-scenario-list-btn').addEventListener('click', async function () {
+        try { await listOpsScenariosUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-scenario-run-btn').addEventListener('click', async function () {
+        try { await runOpsScenarioUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-chaos-drill-btn').addEventListener('click', async function () {
+        try { await runChaosDrillUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-release-readiness-btn').addEventListener('click', async function () {
+        try { await loadReleaseReadinessUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('control-history-load-btn').addEventListener('click', async function () {
+        try { await loadControlHistoryUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('control-history-reset-btn').addEventListener('click', async function () {
+        try { await resetControlHistoryUi(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('clear-output-btn').addEventListener('click', function () {
         renderOutput({});
       });
@@ -8189,6 +8787,8 @@ https://developer.android.com</textarea>
           await loadAlertsUi();
           await listBaselinesUi();
           await listQueueSnapshotsUi();
+          await listOpsScenariosUi();
+          await loadControlHistoryUi();
           renderOutput({ ok: true, message: 'UI ready', updateHint: '${UPDATE_HINT}' });
           setMessage('Ready.', false);
 
@@ -8205,6 +8805,8 @@ https://developer.android.com</textarea>
               renderOpsBoard(opsBoardPayload);
               const controlRoomPayload = await api('/api/ops/control-room');
               renderControlRoom(controlRoomPayload);
+              const controlHistoryPayload = await api('/api/ops/control-room/history?limit=120');
+              renderControlHistory(controlHistoryPayload);
               const schedulesPayload = await api('/api/schedules');
               renderSchedules(schedulesPayload);
               const queueBoardPayload = await api('/api/board/queue');
