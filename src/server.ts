@@ -50,6 +50,18 @@ import {
   OpenUrlInputSchema,
   OpenUrlOutputSchema,
   OpenUrlToolSchema,
+  OpenChromeUrlInputSchema,
+  OpenChromeUrlOutputSchema,
+  OpenChromeUrlToolSchema,
+  OpenChromeUrlAndLoginInputSchema,
+  OpenChromeUrlAndLoginOutputSchema,
+  OpenChromeUrlAndLoginToolSchema,
+  OpenAndroidSettingsInputSchema,
+  OpenAndroidSettingsOutputSchema,
+  OpenAndroidSettingsToolSchema,
+  ConfigureUsbDebuggingInputSchema,
+  ConfigureUsbDebuggingOutputSchema,
+  ConfigureUsbDebuggingToolSchema,
   PasteClipboardInputSchema,
   PasteClipboardOutputSchema,
   PasteClipboardToolSchema,
@@ -255,6 +267,21 @@ import {
   HotReloadSetupInputSchema,
   HotReloadSetupOutputSchema,
   HotReloadSetupToolSchema,
+  RunAndroidShellInputSchema,
+  RunAndroidShellOutputSchema,
+  RunAndroidShellToolSchema,
+  RunAndroidMonkeyInputSchema,
+  RunAndroidMonkeyOutputSchema,
+  RunAndroidMonkeyToolSchema,
+  RecordAndroidScreenInputSchema,
+  RecordAndroidScreenOutputSchema,
+  RecordAndroidScreenToolSchema,
+  CaptureBugreportInputSchema,
+  CaptureBugreportOutputSchema,
+  CaptureBugreportToolSchema,
+  CollectDiagnosticsInputSchema,
+  CollectDiagnosticsOutputSchema,
+  CollectDiagnosticsToolSchema,
   CreateIssueInputSchema,
   CreateIssueOutputSchema,
   CreateIssueToolSchema,
@@ -272,6 +299,11 @@ import {
   hotReloadSetup as adbHotReloadSetup,
   installApk as adbInstallApk,
   inputText as adbInputText,
+  runAndroidShellCommand as adbRunAndroidShellCommand,
+  runAndroidMonkey as adbRunAndroidMonkey,
+  recordAndroidScreen as adbRecordAndroidScreen,
+  captureAndroidBugreport as adbCaptureAndroidBugreport,
+  collectAndroidDiagnostics as adbCollectAndroidDiagnostics,
   listPackageActivities as adbListPackageActivities,
   batchInputActions as adbBatchInputActions,
   reversePort as adbReversePort,
@@ -328,6 +360,10 @@ import {
   getAndroidProperty as adbGetAndroidProperty,
   getAndroidProperties as adbGetAndroidProperties,
   openUrl as adbOpenUrl,
+  openUrlInChrome as adbOpenUrlInChrome,
+  openChromeUrlAndLogin as adbOpenChromeUrlAndLogin,
+  openAndroidSettings as adbOpenAndroidSettings,
+  configureUsbDebugging as adbConfigureUsbDebugging,
   longPress as adbLongPress,
   doubleTap as adbDoubleTap,
   pasteClipboard as adbPasteClipboard,
@@ -351,7 +387,7 @@ class AndroidMcpServer {
     this.server = new Server(
       {
         name: 'the-android-mcp',
-        version: '2.0.3',
+        version: '2.1.5',
       },
       {
         capabilities: {
@@ -518,6 +554,26 @@ class AndroidMcpServer {
           name: 'open_url',
           description: 'Open a URL via Android intent',
           inputSchema: OpenUrlToolSchema,
+        },
+        {
+          name: 'open_chrome_url',
+          description: 'Open a URL directly via Chrome activity',
+          inputSchema: OpenChromeUrlToolSchema,
+        },
+        {
+          name: 'open_chrome_url_and_login',
+          description: 'Open a URL in Chrome, then perform fast login',
+          inputSchema: OpenChromeUrlAndLoginToolSchema,
+        },
+        {
+          name: 'open_android_settings',
+          description: 'Open Android Settings screens (quick access for debugging workflows)',
+          inputSchema: OpenAndroidSettingsToolSchema,
+        },
+        {
+          name: 'configure_usb_debugging',
+          description: 'Query and configure USB debugging state via settings API with UI fallback',
+          inputSchema: ConfigureUsbDebuggingToolSchema,
         },
         {
           name: 'paste_clipboard',
@@ -778,6 +834,31 @@ class AndroidMcpServer {
           name: 'hot_reload_android_app',
           description: 'Reverse ports, install (optional), and start an app for hot reload',
           inputSchema: HotReloadSetupToolSchema,
+        },
+        {
+          name: 'run_android_shell',
+          description: 'Run a raw shell command on an Android device via adb shell',
+          inputSchema: RunAndroidShellToolSchema,
+        },
+        {
+          name: 'run_android_monkey',
+          description: 'Run Android Monkey stress events (optionally package-scoped)',
+          inputSchema: RunAndroidMonkeyToolSchema,
+        },
+        {
+          name: 'record_android_screen',
+          description: 'Record the Android screen to MP4 and pull it locally',
+          inputSchema: RecordAndroidScreenToolSchema,
+        },
+        {
+          name: 'capture_android_bugreport',
+          description: 'Capture full bugreport artifacts to local files',
+          inputSchema: CaptureBugreportToolSchema,
+        },
+        {
+          name: 'collect_android_diagnostics',
+          description: 'Collect activity/window/UI/properties/logcat diagnostics in one call',
+          inputSchema: CollectDiagnosticsToolSchema,
         },
         {
           name: 'create_github_issue',
@@ -1179,6 +1260,58 @@ class AndroidMcpServer {
           case 'open_url': {
             const input = OpenUrlInputSchema.parse(args);
             const result = await this.openUrl(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'open_chrome_url': {
+            const input = OpenChromeUrlInputSchema.parse(args);
+            const result = await this.openChromeUrl(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'open_chrome_url_and_login': {
+            const input = OpenChromeUrlAndLoginInputSchema.parse(args);
+            const result = await this.openChromeUrlAndLogin(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'open_android_settings': {
+            const input = OpenAndroidSettingsInputSchema.parse(args);
+            const result = await this.openAndroidSettings(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'configure_usb_debugging': {
+            const input = ConfigureUsbDebuggingInputSchema.parse(args);
+            const result = await this.configureUsbDebugging(input);
             return {
               content: [
                 {
@@ -1946,6 +2079,72 @@ class AndroidMcpServer {
               ],
             };
           }
+
+          case 'run_android_shell': {
+            const input = RunAndroidShellInputSchema.parse(args);
+            const result = await this.runAndroidShell(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'run_android_monkey': {
+            const input = RunAndroidMonkeyInputSchema.parse(args);
+            const result = await this.runAndroidMonkey(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'record_android_screen': {
+            const input = RecordAndroidScreenInputSchema.parse(args);
+            const result = await this.recordAndroidScreen(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_bugreport': {
+            const input = CaptureBugreportInputSchema.parse(args);
+            const result = await this.captureAndroidBugreport(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
+          case 'collect_android_diagnostics': {
+            const input = CollectDiagnosticsInputSchema.parse(args);
+            const result = await this.collectAndroidDiagnostics(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          }
+
           case 'create_github_issue': {
             const input = CreateIssueInputSchema.parse(args);
             const result = await this.createGitHubIssue(input);
@@ -2266,7 +2465,10 @@ class AndroidMcpServer {
   private async startApp(
     input: z.infer<typeof StartAppInputSchema>
   ): Promise<z.infer<typeof StartAppOutputSchema>> {
-    const result = adbStartApp(input.packageName, input.activity, input.deviceId);
+    const result = adbStartApp(input.packageName, input.activity, input.deviceId, {
+      waitForLaunch: input.waitForLaunch,
+      timeoutMs: input.waitTimeoutMs,
+    });
     return StartAppOutputSchema.parse(result);
   }
 
@@ -2332,6 +2534,68 @@ class AndroidMcpServer {
   ): Promise<z.infer<typeof OpenUrlOutputSchema>> {
     const result = adbOpenUrl(input.url, input.deviceId);
     return OpenUrlOutputSchema.parse(result);
+  }
+
+  private async openChromeUrl(
+    input: z.infer<typeof OpenChromeUrlInputSchema>
+  ): Promise<z.infer<typeof OpenChromeUrlOutputSchema>> {
+    const result = adbOpenUrlInChrome(input.url, input.deviceId, {
+      browserPackage: input.browserPackage,
+      browserActivity: input.browserActivity,
+      fallbackToDefault: input.fallbackToDefault,
+      waitForReadyMs: input.waitForReadyMs,
+    });
+    return OpenChromeUrlOutputSchema.parse(result);
+  }
+
+  private async openChromeUrlAndLogin(
+    input: z.infer<typeof OpenChromeUrlAndLoginInputSchema>
+  ): Promise<z.infer<typeof OpenChromeUrlAndLoginOutputSchema>> {
+    const result = adbOpenChromeUrlAndLogin({
+      url: input.url,
+      deviceId: input.deviceId,
+      email: input.email,
+      password: input.password,
+      browserPackage: input.browserPackage,
+      browserActivity: input.browserActivity,
+      fallbackToDefault: input.fallbackToDefault,
+      waitForReadyMs: input.waitForReadyMs,
+      submitLabels: input.submitLabels,
+      imeId: input.imeId,
+      hideKeyboard: input.hideKeyboard,
+      useAdbKeyboard: input.useAdbKeyboard,
+      submitFallback: input.submitFallback,
+    });
+    return OpenChromeUrlAndLoginOutputSchema.parse({
+      ...result,
+      steps: [result.openResult.output, ...result.loginResult.output],
+      url: input.url,
+    });
+  }
+
+  private async openAndroidSettings(
+    input: z.infer<typeof OpenAndroidSettingsInputSchema>
+  ): Promise<z.infer<typeof OpenAndroidSettingsOutputSchema>> {
+    const result = adbOpenAndroidSettings(
+      input.screen,
+      input.deviceId,
+      input.activity,
+      input.waitForReadyMs
+    );
+    return OpenAndroidSettingsOutputSchema.parse(result);
+  }
+
+  private async configureUsbDebugging(
+    input: z.infer<typeof ConfigureUsbDebuggingInputSchema>
+  ): Promise<z.infer<typeof ConfigureUsbDebuggingOutputSchema>> {
+    const result = adbConfigureUsbDebugging({
+      action: input.action,
+      deviceId: input.deviceId,
+      useSettingsApi: input.useSettingsApi,
+      fallbackToUi: input.fallbackToUi,
+      waitForReadyMs: input.waitForReadyMs,
+    });
+    return ConfigureUsbDebuggingOutputSchema.parse(result);
   }
 
   private async pasteClipboard(
@@ -2640,6 +2904,7 @@ class AndroidMcpServer {
     const result = adbTapByText(input.text, input.deviceId, {
       matchMode: input.matchMode,
       index: input.index,
+      useFallback: input.useFallback,
     });
     return TapByTextOutputSchema.parse(result);
   }
@@ -2649,6 +2914,7 @@ class AndroidMcpServer {
   ): Promise<z.infer<typeof TapByIdOutputSchema>> {
     const result = adbTapById(input.resourceId, input.deviceId, {
       index: input.index,
+      useFallback: input.useFallback,
     });
     return TapByIdOutputSchema.parse(result);
   }
@@ -2659,6 +2925,7 @@ class AndroidMcpServer {
     const result = adbTapByDesc(input.contentDesc, input.deviceId, {
       matchMode: input.matchMode,
       index: input.index,
+      useFallback: input.useFallback,
     });
     return TapByDescOutputSchema.parse(result);
   }
@@ -3063,7 +3330,7 @@ class AndroidMcpServer {
     input: z.infer<typeof TapBySelectorIndexInputSchema>
   ): Promise<z.infer<typeof TapBySelectorIndexOutputSchema>> {
     const selector = UiSelectorSchema.parse(input.selector);
-    const result = adbTapBySelectorIndex(selector, input.index ?? 0, input.deviceId);
+    const result = adbTapBySelectorIndex(selector, input.index ?? 0, input.deviceId, input.useFallback);
     return TapBySelectorIndexOutputSchema.parse(result);
   }
 
@@ -3138,6 +3405,82 @@ class AndroidMcpServer {
       playProtectMaxWaitMs: input.playProtectMaxWaitMs,
     });
     return HotReloadSetupOutputSchema.parse(result);
+  }
+
+  private async runAndroidShell(
+    input: z.infer<typeof RunAndroidShellInputSchema>
+  ): Promise<z.infer<typeof RunAndroidShellOutputSchema>> {
+    const result = adbRunAndroidShellCommand({
+      deviceId: input.deviceId,
+      command: input.command,
+      timeoutMs: input.timeoutMs,
+    });
+    return RunAndroidShellOutputSchema.parse(result);
+  }
+
+  private async runAndroidMonkey(
+    input: z.infer<typeof RunAndroidMonkeyInputSchema>
+  ): Promise<z.infer<typeof RunAndroidMonkeyOutputSchema>> {
+    const result = adbRunAndroidMonkey({
+      deviceId: input.deviceId,
+      packageName: input.packageName,
+      eventCount: input.eventCount,
+      throttleMs: input.throttleMs,
+      seed: input.seed,
+      ignoreCrashes: input.ignoreCrashes,
+      ignoreTimeouts: input.ignoreTimeouts,
+      ignoreSecurityExceptions: input.ignoreSecurityExceptions,
+      monitorNativeCrashes: input.monitorNativeCrashes,
+      timeoutMs: input.timeoutMs,
+    });
+    return RunAndroidMonkeyOutputSchema.parse(result);
+  }
+
+  private async recordAndroidScreen(
+    input: z.infer<typeof RecordAndroidScreenInputSchema>
+  ): Promise<z.infer<typeof RecordAndroidScreenOutputSchema>> {
+    const result = adbRecordAndroidScreen({
+      deviceId: input.deviceId,
+      durationSec: input.durationSec,
+      bitRateMbps: input.bitRateMbps,
+      size: input.size,
+      rotate: input.rotate,
+      bugreport: input.bugreport,
+      remotePath: input.remotePath,
+      localPath: input.localPath,
+      deleteRemote: input.deleteRemote,
+    });
+    return RecordAndroidScreenOutputSchema.parse(result);
+  }
+
+  private async captureAndroidBugreport(
+    input: z.infer<typeof CaptureBugreportInputSchema>
+  ): Promise<z.infer<typeof CaptureBugreportOutputSchema>> {
+    const result = adbCaptureAndroidBugreport({
+      deviceId: input.deviceId,
+      outputDir: input.outputDir,
+      filePrefix: input.filePrefix,
+      timeoutMs: input.timeoutMs,
+    });
+    return CaptureBugreportOutputSchema.parse(result);
+  }
+
+  private async collectAndroidDiagnostics(
+    input: z.infer<typeof CollectDiagnosticsInputSchema>
+  ): Promise<z.infer<typeof CollectDiagnosticsOutputSchema>> {
+    const result = adbCollectAndroidDiagnostics({
+      deviceId: input.deviceId,
+      packageName: input.packageName,
+      propertyPrefix: input.propertyPrefix,
+      logcatLines: input.logcatLines,
+      logcatSince: input.logcatSince,
+      logcatPriority: input.logcatPriority,
+      includeUiDump: input.includeUiDump,
+      uiMaxChars: input.uiMaxChars,
+      uiUseCache: input.uiUseCache,
+      uiMaxAgeMs: input.uiMaxAgeMs,
+    });
+    return CollectDiagnosticsOutputSchema.parse(result);
   }
 
   private async createGitHubIssue(

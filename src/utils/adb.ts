@@ -25,6 +25,40 @@ const APK_SEARCH_DIRS = [
   'android/app/build/outputs/flutter-apk',
   'build/outputs/flutter-apk',
 ];
+const SETTINGS_PACKAGE = 'com.android.settings';
+const SETTINGS_SCREEN_ACTIONS = {
+  settings: 'android.settings.SETTINGS',
+  'developer-options': 'android.settings.APPLICATION_DEVELOPMENT_SETTINGS',
+} as const;
+
+const SETTINGS_SCREEN_COMPONENTS = {
+  settings: [
+    'com.android.settings/.Settings',
+    'com.android.settings/.MainSettings',
+    'com.android.settings/.Settings$SettingsDashboardActivity',
+  ],
+  'developer-options': [
+    'com.android.settings/.DevelopmentSettings',
+    'com.android.settings/.Settings$DevelopmentSettingsActivity',
+    'com.android.settings/.development.DevelopmentSettingsActivity',
+  ],
+};
+
+const USB_DEBUGGING_TOGGLE_LABELS = [
+  'USB debugging',
+  'USB-Debugging',
+  'USB DEBUGGING',
+  'USB Debugging',
+  'USB-Debuggen',
+  'USB Fehleranalyse',
+  'Entwicklungsmodus',
+  'Entwickleroptionen',
+  'Entwickleroption',
+];
+const USB_DEBUGGING_DEFAULT_WAIT_MS = 500;
+const USB_DEBUGGING_SCROLL_MAX = 8;
+const USB_DEBUGGING_SCROLL_PERCENT = 55;
+type SettingsScreen = keyof typeof SETTINGS_SCREEN_ACTIONS;
 
 const UI_DUMP_CACHE: Record<
   string,
@@ -538,6 +572,50 @@ function findClickableContainer(nodes: UiNode[], target: UiNode): UiNode | undef
       b.bounds ? Math.abs(b.bounds.x2 - b.bounds.x1) * Math.abs(b.bounds.y2 - b.bounds.y1) : 0;
     return areaA - areaB;
   })[0];
+}
+
+type TapTargetSelection = {
+  node: UiNode;
+  usedFallback: boolean;
+  fallbackReason?: 'direct' | 'clickable_container' | 'nearest_clickable' | 'no_bounds';
+};
+
+function resolveTapTarget(nodes: UiNode[], target: UiNode): TapTargetSelection {
+  if (target.clickable) {
+    return { node: target, usedFallback: false, fallbackReason: 'direct' };
+  }
+
+  const container = findClickableContainer(nodes, target);
+  if (container) {
+    return { node: container, usedFallback: true, fallbackReason: 'clickable_container' };
+  }
+
+  if (!target.bounds) {
+    return { node: target, usedFallback: true, fallbackReason: 'no_bounds' };
+  }
+
+  const targetCenter = centerOfBounds(target.bounds);
+  const clickableCandidates = nodes.filter(node => node.clickable && node.bounds);
+  if (clickableCandidates.length === 0) {
+    return { node: target, usedFallback: true, fallbackReason: 'no_bounds' };
+  }
+
+  let nearest = clickableCandidates[0];
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (const candidate of clickableCandidates) {
+    if (!candidate.bounds) {
+      continue;
+    }
+    const candidateCenter = centerOfBounds(candidate.bounds);
+    const distance = Math.hypot(candidateCenter.x - targetCenter.x, candidateCenter.y - targetCenter.y);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearest = candidate;
+    }
+  }
+
+  return { node: nearest, usedFallback: true, fallbackReason: 'nearest_clickable' };
 }
 
 function pickTextInputs(nodes: UiNode[]): UiNode[] {
@@ -1123,6 +1201,594 @@ export function getAndroidProperties(
   return { deviceId: targetDeviceId, properties, output: output.trim() };
 }
 
+function normalizeSettingsComponent(activity: string, packageName = SETTINGS_PACKAGE): string {
+  const trimmed = activity.trim();
+  if (trimmed.includes('/')) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith('.')) {
+    return `${packageName}/${trimmed}`;
+  }
+
+  if (trimmed.includes('.')) {
+    return `${packageName}/${trimmed}`;
+  }
+
+  return `${packageName}/${packageName}.${trimmed}`;
+}
+
+function normalizeChromeActivity(activity: string, packageName = 'com.android.chrome'): string {
+  const trimmed = activity.trim();
+  if (trimmed.includes('/')) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith('.')) {
+    return `${packageName}${trimmed}`;
+  }
+
+  if (trimmed.includes('.')) {
+    return `${packageName}/${trimmed}`;
+  }
+
+  return `${packageName}/${packageName}.${trimmed}`;
+}
+
+function getSettingValueRaw(targetDeviceId: string, namespace: 'global' | 'secure', key: string): string {
+  try {
+    const { output } = executeADBCommandOnDevice(
+      `shell settings get ${namespace} ${escapeShellArg(key)}`,
+      targetDeviceId,
+      { timeout: 8000 }
+    );
+    const raw = output.trim();
+    if (!raw) {
+      return 'unknown';
+    }
+
+    return raw;
+  } catch (error: any) {
+    return `error: ${error?.message ?? String(error)}`;
+  }
+}
+
+function parseSettingBoolean(raw: string): boolean | undefined {
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized || normalized.startsWith('error:') || normalized === 'unknown' || normalized === 'null') {
+    return undefined;
+  }
+
+  if (['1', 'true', 'on', 'yes', 'enabled', 'enable'].includes(normalized)) {
+    return true;
+  }
+
+  if (['0', 'false', 'off', 'no', 'disabled', 'disable'].includes(normalized)) {
+    return false;
+  }
+
+  return undefined;
+}
+
+export function getUsbDebuggingState(
+  deviceId?: string
+): {
+  deviceId: string;
+  adbEnabled: boolean | undefined;
+  developmentSettingsEnabled: boolean | undefined;
+  adbEnabledRaw: string;
+  developmentSettingsEnabledRaw: string;
+} {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const adbEnabledRaw = getSettingValueRaw(targetDeviceId, 'global', 'adb_enabled');
+  const developmentSettingsEnabledRaw = getSettingValueRaw(
+    targetDeviceId,
+    'secure',
+    'development_settings_enabled'
+  );
+  return {
+    deviceId: targetDeviceId,
+    adbEnabled: parseSettingBoolean(adbEnabledRaw),
+    developmentSettingsEnabled: parseSettingBoolean(developmentSettingsEnabledRaw),
+    adbEnabledRaw,
+    developmentSettingsEnabledRaw,
+  };
+}
+
+export function openAndroidSettings(
+  screen: SettingsScreen = 'settings',
+  deviceId?: string,
+  activity?: string,
+  waitForReadyMs?: number
+): { deviceId: string; screen: string; activity: string; output: string } {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const outputParts: string[] = [];
+  const waitMs = typeof waitForReadyMs === 'number' && waitForReadyMs > 0 ? waitForReadyMs : USB_DEBUGGING_DEFAULT_WAIT_MS;
+  const components = SETTINGS_SCREEN_COMPONENTS[screen];
+  const action = SETTINGS_SCREEN_ACTIONS[screen];
+  let launchedActivity = activity ? normalizeSettingsComponent(activity, SETTINGS_PACKAGE) : undefined;
+  let launchOutput = '';
+
+  if (activity) {
+    const normalizedActivity = normalizeSettingsComponent(activity, SETTINGS_PACKAGE);
+    const result = executeADBCommandOnDevice(
+      `shell am start -n ${escapeShellArg(normalizedActivity)}`,
+      targetDeviceId
+    );
+    launchOutput = result.output.trim();
+    launchedActivity = normalizedActivity;
+    outputParts.push(`launched activity: ${normalizedActivity}`);
+  } else {
+    try {
+      const result = executeADBCommandOnDevice(`shell am start -a ${action}`, targetDeviceId);
+      launchOutput = result.output.trim();
+      outputParts.push(`launched action: ${action}`);
+    } catch (error: any) {
+      outputParts.push(`action launch failed: ${action}: ${error?.message ?? String(error)}`);
+      const attemptErrors: string[] = [];
+
+      for (const candidate of components) {
+        try {
+          const result = executeADBCommandOnDevice(
+            `shell am start -n ${escapeShellArg(candidate)}`,
+            targetDeviceId
+          );
+          launchedActivity = candidate;
+          launchOutput = result.output.trim();
+          outputParts.push(`opened component fallback: ${candidate}`);
+          break;
+        } catch (candidateError: any) {
+          attemptErrors.push(`${candidate}: ${candidateError?.message ?? String(candidateError)}`);
+        }
+      }
+
+      if (!launchedActivity) {
+        throw new ADBCommandError(
+          'SETTINGS_OPEN_FAILED',
+          `Failed to open settings screen '${screen}'`,
+          {
+            screen,
+            action,
+            componentAttempts: attemptErrors,
+          }
+        );
+      }
+
+      if (attemptErrors.length > 0) {
+        outputParts.push(`component attempts: ${attemptErrors.join('; ')}`);
+      }
+    }
+  }
+
+  if (waitMs > 0) {
+    executeADBCommandOnDevice(`shell sleep ${formatSleepSeconds(waitMs)}`, targetDeviceId);
+    outputParts.push(`waited ${waitMs}ms for ready state`);
+  }
+
+  const current = getCurrentActivity(targetDeviceId);
+  const resolvedActivity =
+    current.activity ??
+    current.component ??
+    current.packageName ??
+    launchedActivity ??
+    action ??
+    screen;
+
+  const output = [launchOutput, ...outputParts].filter(Boolean).join('\n');
+  return {
+    deviceId: targetDeviceId,
+    screen,
+    activity: resolvedActivity,
+    output,
+  };
+}
+
+function isUsbStateAligned(state: ReturnType<typeof getUsbDebuggingState>, requested: boolean): boolean {
+  if (state.adbEnabled === undefined || state.adbEnabled !== requested) {
+    return false;
+  }
+
+  if (state.developmentSettingsEnabled === undefined) {
+    return true;
+  }
+
+  return state.developmentSettingsEnabled === requested;
+}
+
+function findUsbDebuggingNode(
+  nodes: UiNode[],
+  requestedEnabled: boolean
+): UiNode | undefined {
+  const normalizedLabels = USB_DEBUGGING_TOGGLE_LABELS.map(label => label.toLowerCase());
+  const labelCandidates = nodes.filter(node => {
+    const haystack = `${node.text} ${node.contentDesc} ${node.resourceId}`.toLowerCase();
+    return normalizedLabels.some(label => haystack.includes(label));
+  });
+
+  if (labelCandidates.length > 0) {
+    const preferred = labelCandidates.find(
+      node => typeof node.checked === 'boolean' && node.checked !== requestedEnabled
+    );
+    return preferred ?? labelCandidates[0];
+  }
+
+  const controlCandidates = nodes.filter(node => {
+    const className = node.className.toLowerCase();
+    const hasSwitchControl =
+      className.includes('switch') ||
+      className.includes('checkbox') ||
+      node.resourceId.includes('switch_widget') ||
+      node.resourceId.includes('checkbox');
+    return hasSwitchControl && (node.text || node.contentDesc || node.resourceId);
+  });
+
+  if (controlCandidates.length === 0) {
+    return undefined;
+  }
+
+  const preferred = controlCandidates.find(
+    node => typeof node.checked === 'boolean' && node.checked !== requestedEnabled
+  );
+  return preferred ?? controlCandidates[0];
+}
+
+function findUsbDebuggingNodeWithScroll(
+  targetDeviceId: string,
+  requestedEnabled: boolean
+): { node?: UiNode; scrolls: number } {
+  let scrolls = 0;
+
+  for (let attempt = 0; attempt <= USB_DEBUGGING_SCROLL_MAX; attempt += 1) {
+    const { xml } = dumpUiHierarchy(targetDeviceId, { maxChars: 500000 });
+    const nodes = extractUiNodes(xml);
+    const target = findUsbDebuggingNode(nodes, requestedEnabled);
+    if (target) {
+      return { node: target, scrolls: attempt };
+    }
+
+    if (attempt < USB_DEBUGGING_SCROLL_MAX) {
+      const previousHash = dumpUiHierarchy(targetDeviceId, { maxChars: 500000 }).xml;
+      scrollVertical('down', targetDeviceId, { distancePercent: USB_DEBUGGING_SCROLL_PERCENT });
+      executeADBCommandOnDevice(`shell sleep ${formatSleepSeconds(200)}`, targetDeviceId);
+      scrolls = attempt + 1;
+      const currentXml = dumpUiHierarchy(targetDeviceId, { maxChars: 500000 }).xml;
+      if (currentXml === previousHash) {
+        // avoid endless retries when list cannot scroll anymore
+        break;
+      }
+    }
+  }
+
+  return { node: undefined, scrolls };
+}
+
+function toggleUsbDebuggingViaUi(targetDeviceId: string, requestedEnabled: boolean): string {
+  const found = findUsbDebuggingNodeWithScroll(targetDeviceId, requestedEnabled);
+  if (!found.node) {
+    throw new ADBCommandError(
+      'USB_DEBUGGING_TOGGLE_NOT_FOUND',
+      'USB debugging toggle not found in developer options',
+      {
+        targetDeviceId,
+        requestedEnabled,
+        scrolls: found.scrolls,
+      }
+    );
+  }
+
+  const target = found.node;
+  const selection = resolveTapTarget(extractUiNodes(dumpUiHierarchy(targetDeviceId).xml), target);
+  if (!selection.node.bounds) {
+    throw new ADBCommandError('USB_DEBUGGING_TOGGLE_NO_BOUNDS', 'USB debugging toggle has no bounds', {
+      targetDeviceId,
+      node: target,
+      scrolls: found.scrolls,
+    });
+  }
+
+  const { x, y, output } = tapUiNode(targetDeviceId, selection.node);
+  return `tapped usb debugging toggle at (${x}, ${y}); node="${target.text || target.contentDesc || target.resourceId}"; output="${output}"; scrolls=${found.scrolls}`;
+}
+
+export function openUrlInChrome(
+  url: string,
+  deviceId?: string,
+  options: {
+    browserPackage?: string;
+    browserActivity?: string;
+    fallbackToDefault?: boolean;
+    waitForReadyMs?: number;
+  } = {}
+): {
+  deviceId: string;
+  url: string;
+  browserPackage: string;
+  browserActivity: string;
+  browserInstalled: boolean;
+  strategy: string;
+  output: string;
+} {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const browserPackage = options.browserPackage ?? 'com.android.chrome';
+  const browserActivity = options.browserActivity ?? 'com.google.android.apps.chrome.Main';
+  const waitMs = typeof options.waitForReadyMs === 'number' && options.waitForReadyMs > 0 ? options.waitForReadyMs : 0;
+  const fallbackToDefault = options.fallbackToDefault !== false;
+  const packageInfo = isAppInstalled(browserPackage, targetDeviceId);
+  const component = normalizeChromeActivity(browserActivity, browserPackage);
+  const steps: string[] = [];
+
+  let output = '';
+  let strategy = 'chrome-explicit';
+
+  if (packageInfo.installed) {
+    try {
+      const result = executeADBCommandOnDevice(
+        `shell am start -n ${escapeShellArg(component)} -a android.intent.action.VIEW -d ${escapeShellArg(url)}`,
+        targetDeviceId,
+        { timeout: 10000 }
+      );
+      output = result.output.trim();
+      steps.push(`launched ${component}`);
+    } catch (error: any) {
+      steps.push(`chrome explicit launch failed: ${error?.message ?? String(error)}`);
+      if (!fallbackToDefault) {
+        throw error;
+      }
+      const fallback = openUrl(url, targetDeviceId);
+      return {
+        deviceId: targetDeviceId,
+        url,
+        browserPackage,
+        browserActivity: 'default-intent',
+        browserInstalled: true,
+        strategy: 'chrome-explicit-fallback',
+        output: [...steps, fallback.output].filter(Boolean).join('\n'),
+      };
+    }
+  } else if (fallbackToDefault) {
+    const fallback = openUrl(url, targetDeviceId);
+    return {
+      deviceId: targetDeviceId,
+      url,
+      browserPackage,
+      browserActivity: 'default-intent',
+      browserInstalled: false,
+      strategy: 'default-intent',
+      output: [fallback.output, 'chrome package not installed, used default intent'].join('\n'),
+    };
+  } else {
+    throw new ADBCommandError(
+      'BROWSER_APP_NOT_FOUND',
+      `Browser package '${browserPackage}' not installed`,
+      { packageName: browserPackage, deviceId: targetDeviceId }
+    );
+  }
+
+  if (waitMs > 0) {
+    executeADBCommandOnDevice(`shell sleep ${formatSleepSeconds(waitMs)}`, targetDeviceId);
+    steps.push(`waited ${waitMs}ms`);
+  }
+
+  const outputText = [...steps, output].filter(Boolean).join('\n');
+  return {
+    deviceId: targetDeviceId,
+    url,
+    browserPackage,
+    browserActivity: component,
+    browserInstalled: true,
+    strategy,
+    output: outputText,
+  };
+}
+
+export function openChromeUrlAndLogin(input: {
+  url: string;
+  email: string;
+  password: string;
+  deviceId?: string;
+  browserPackage?: string;
+  browserActivity?: string;
+  fallbackToDefault?: boolean;
+  waitForReadyMs?: number;
+  submitLabels?: string[];
+  imeId?: string;
+  hideKeyboard?: boolean;
+  useAdbKeyboard?: boolean;
+  submitFallback?: boolean;
+}): {
+  deviceId: string;
+  url: string;
+  openResult: ReturnType<typeof openUrlInChrome>;
+  loginResult: {
+    deviceId: string;
+    emailFieldFound: boolean;
+    passwordFieldFound: boolean;
+    submitFound: boolean;
+    usedIme: boolean;
+    output: string[];
+  };
+  steps: string[];
+} {
+  const openResult = openUrlInChrome(input.url, input.deviceId, {
+    browserPackage: input.browserPackage,
+    browserActivity: input.browserActivity,
+    fallbackToDefault: input.fallbackToDefault,
+    waitForReadyMs: input.waitForReadyMs,
+  });
+
+  const commonLoginInput = {
+    deviceId: openResult.deviceId,
+    email: input.email,
+    password: input.password,
+    submitLabels: input.submitLabels,
+    hideKeyboard: input.hideKeyboard,
+    submitFallback: input.submitFallback,
+  } as const;
+
+  const loginResult = input.useAdbKeyboard
+    ? smartLoginFast({
+        ...commonLoginInput,
+        useAdbKeyboard: true,
+      })
+    : smartLogin({
+        ...commonLoginInput,
+        imeId: input.imeId,
+      });
+
+  return {
+    deviceId: openResult.deviceId,
+    url: input.url,
+    openResult,
+    loginResult: {
+      deviceId: loginResult.deviceId,
+      emailFieldFound: loginResult.emailFieldFound,
+      passwordFieldFound: loginResult.passwordFieldFound,
+      submitFound: loginResult.submitFound,
+      usedIme: loginResult.usedIme,
+      output: loginResult.output,
+    },
+    steps: [openResult.output, ...loginResult.output],
+  };
+}
+
+export function configureUsbDebugging(input: {
+  action: 'query' | 'enable' | 'disable';
+  deviceId?: string;
+  useSettingsApi?: boolean;
+  fallbackToUi?: boolean;
+  waitForReadyMs?: number;
+}): {
+  deviceId: string;
+  action: string;
+  requestedEnabled?: boolean;
+  adbEnabledBefore: boolean | undefined;
+  developmentSettingsEnabledBefore: boolean | undefined;
+  adbEnabledAfter?: boolean | undefined;
+  developmentSettingsEnabledAfter?: boolean | undefined;
+  adbEnabledRawBefore: string;
+  developmentSettingsEnabledRawBefore: string;
+  adbEnabledRawAfter?: string | undefined;
+  developmentSettingsEnabledRawAfter?: string | undefined;
+  success: boolean;
+  strategy: string;
+  openedActivity?: string;
+  steps: string[];
+  output: string;
+} {
+  const targetDeviceId = resolveDeviceId(input.deviceId);
+  const action = input.action ?? 'query';
+  const requestedEnabled = action === 'enable' ? true : action === 'disable' ? false : undefined;
+  const useSettingsApi = input.useSettingsApi !== false;
+  const fallbackToUi = input.fallbackToUi !== false;
+  const waitMs = typeof input.waitForReadyMs === 'number' && input.waitForReadyMs > 0
+    ? input.waitForReadyMs
+    : USB_DEBUGGING_DEFAULT_WAIT_MS;
+
+  const before = getUsbDebuggingState(targetDeviceId);
+  const steps: string[] = [
+    `state before: adb_enabled=${before.adbEnabledRaw}, development_settings_enabled=${before.developmentSettingsEnabledRaw}`,
+  ];
+
+  const result: {
+    adbEnabledAfter?: boolean | undefined;
+    developmentSettingsEnabledAfter?: boolean | undefined;
+    adbEnabledRawAfter?: string | undefined;
+    developmentSettingsEnabledRawAfter?: string | undefined;
+    openedActivity?: string;
+    strategy: string;
+    success: boolean;
+  } = {
+    strategy: action === 'query' ? 'query' : 'settings-api',
+    success: false,
+  };
+
+  let after = before;
+
+  if (action === 'query' || requestedEnabled === undefined) {
+    result.success = true;
+    result.strategy = 'query';
+  } else {
+    if (useSettingsApi) {
+      try {
+        const requestedValue = requestedEnabled ? '1' : '0';
+        const globalOutput = executeADBCommandOnDevice(
+          `shell settings put global adb_enabled ${requestedValue}`,
+          targetDeviceId,
+          { timeout: 8000 }
+        );
+        const secureOutput = executeADBCommandOnDevice(
+          `shell settings put secure development_settings_enabled ${requestedValue}`,
+          targetDeviceId,
+          { timeout: 8000 }
+        );
+        steps.push(`settings api: adb_enabled=${requestedValue}`);
+        steps.push(`settings api: development_settings_enabled=${requestedValue}`);
+        steps.push(`settings output: global=${globalOutput.output.trim()} secure=${secureOutput.output.trim()}`);
+        if (waitMs > 0) {
+          executeADBCommandOnDevice(`shell sleep ${formatSleepSeconds(waitMs)}`, targetDeviceId);
+        }
+        after = getUsbDebuggingState(targetDeviceId);
+        result.strategy = 'settings-api';
+      } catch (error: any) {
+        steps.push(`settings api failed: ${error.message ?? String(error)}`);
+        result.strategy = 'settings-api-failed';
+      }
+    } else {
+      steps.push('settings api disabled by option useSettingsApi=false');
+      result.strategy = 'ui-open-only';
+    }
+
+    result.success = isUsbStateAligned(after, requestedEnabled);
+
+    if (!result.success && fallbackToUi) {
+      try {
+        const opened = openAndroidSettings('developer-options', targetDeviceId, undefined, waitMs);
+        result.openedActivity = opened.activity;
+        steps.push(`open settings: ${opened.activity}`);
+        steps.push(toggleUsbDebuggingViaUi(targetDeviceId, requestedEnabled));
+        if (waitMs > 0) {
+          executeADBCommandOnDevice(`shell sleep ${formatSleepSeconds(waitMs)}`, targetDeviceId);
+        }
+        after = getUsbDebuggingState(targetDeviceId);
+        result.success = isUsbStateAligned(after, requestedEnabled);
+        result.strategy = result.strategy === 'settings-api' ? 'settings-api+ui-fallback' : 'ui-open-only';
+      } catch (error: any) {
+        steps.push(`ui fallback failed: ${error?.message ?? String(error)}`);
+        if (result.strategy === 'settings-api' || result.strategy === 'settings-api-failed') {
+          result.strategy = 'settings-api-failed';
+        } else {
+          result.strategy = 'ui-open-only';
+        }
+      }
+    }
+  }
+
+  result.adbEnabledAfter = after.adbEnabled;
+  result.developmentSettingsEnabledAfter = after.developmentSettingsEnabled;
+  result.adbEnabledRawAfter = after.adbEnabledRaw;
+  result.developmentSettingsEnabledRawAfter = after.developmentSettingsEnabledRaw;
+  const output = steps.join('\n');
+
+  return {
+    deviceId: targetDeviceId,
+    action,
+    requestedEnabled,
+    adbEnabledBefore: before.adbEnabled,
+    developmentSettingsEnabledBefore: before.developmentSettingsEnabled,
+    adbEnabledRawBefore: before.adbEnabledRaw,
+    developmentSettingsEnabledRawBefore: before.developmentSettingsEnabledRaw,
+    adbEnabledAfter: after.adbEnabled,
+    developmentSettingsEnabledAfter: after.developmentSettingsEnabled,
+    adbEnabledRawAfter: after.adbEnabledRaw,
+    developmentSettingsEnabledRawAfter: after.developmentSettingsEnabledRaw,
+    openedActivity: result.openedActivity,
+    success: result.success,
+    strategy: result.strategy,
+    steps,
+    output,
+  };
+}
+
 export function openUrl(
   url: string,
   deviceId?: string
@@ -1396,22 +2062,129 @@ export function uninstallApp(
 export function startApp(
   packageName: string,
   activity?: string,
-  deviceId?: string
-): { deviceId: string; packageName: string; activity?: string; output: string } {
-  const target = activity
-    ? activity.includes('/')
-      ? activity
-      : `${packageName}/${activity}`
-    : packageName;
-  const args = activity
-    ? `shell am start -n ${escapeShellArg(target)}`
-    : `shell monkey -p ${escapeShellArg(packageName)} -c android.intent.category.LAUNCHER 1`;
-  const { deviceId: targetDeviceId, output } = executeADBCommandOnDevice(args, deviceId);
+  deviceId?: string,
+  options: { waitForLaunch?: boolean; timeoutMs?: number } = {}
+): {
+  deviceId: string;
+  packageName: string;
+  activity?: string;
+  launchedActivity?: string;
+  fallbackUsed?: 'explicit' | 'resolved-main' | 'monkey';
+  waitForLaunch?: boolean;
+  foregroundPackage?: string;
+  output: string;
+} {
+  const targetDeviceId = resolveDeviceId(deviceId);
+  const waitForLaunch = options.waitForLaunch === true;
+  const waitTimeoutMs = options.timeoutMs ?? 8000;
+  const candidates: Array<{ type: 'explicit' | 'main' | 'monkey'; value: string }> = [];
+
+  if (activity) {
+    const isIntentAction =
+      activity.startsWith('android.intent.') ||
+      /ACTION[_A-Z]/.test(activity) ||
+      /^[-\w.]+ACTION[-\w.]*/.test(activity);
+    if (isIntentAction) {
+      candidates.push({ type: 'explicit', value: `ACTION:${activity}` });
+    } else if (activity.includes('/') || activity.startsWith('.')) {
+      candidates.push({
+        type: 'explicit',
+        value: normalizeActivityName(activity, packageName).includes('/')
+          ? normalizeActivityName(activity, packageName)
+          : `${packageName}/${normalizeActivityName(activity, packageName)}`,
+      });
+    } else {
+      candidates.push({
+        type: 'explicit',
+        value: `${packageName}/${activity}`,
+      });
+    }
+  }
+
+  const resolvedMainActivity = resolveMainActivity(packageName, targetDeviceId);
+  if (resolvedMainActivity) {
+    candidates.push({ type: 'main', value: resolvedMainActivity });
+  }
+  candidates.push({ type: 'monkey', value: packageName });
+
+  let output = '';
+  let launchedActivity = activity;
+  let fallbackUsed: 'explicit' | 'resolved-main' | 'monkey' | undefined;
+  let lastError: unknown;
+
+  for (const candidate of candidates) {
+    try {
+      if (candidate.type === 'monkey') {
+        output = executeADBCommandOnDevice(
+          `shell monkey -p ${escapeShellArg(candidate.value)} -c android.intent.category.LAUNCHER 1`,
+          targetDeviceId
+        ).output.trim();
+        launchedActivity = undefined;
+        fallbackUsed = 'monkey';
+      } else if (candidate.type === 'main') {
+        const component = candidate.value.includes('/')
+          ? candidate.value
+          : `${packageName}/${candidate.value}`;
+        output = executeADBCommandOnDevice(
+          `shell am start -n ${escapeShellArg(component)}`,
+          targetDeviceId
+        ).output.trim();
+        launchedActivity = candidate.value;
+        fallbackUsed = 'resolved-main';
+      } else if (candidate.value.startsWith('ACTION:')) {
+        output = executeADBCommandOnDevice(
+          `shell am start -a ${escapeShellArg(candidate.value.substring(7))} -p ${escapeShellArg(
+            packageName
+          )}`,
+          targetDeviceId
+        ).output.trim();
+        launchedActivity = undefined;
+        fallbackUsed = 'explicit';
+      } else {
+        output = executeADBCommandOnDevice(
+          `shell am start -n ${escapeShellArg(candidate.value)}`,
+          targetDeviceId
+        ).output.trim();
+        launchedActivity = candidate.value;
+        fallbackUsed = 'explicit';
+      }
+
+      if (output) {
+        break;
+      }
+    } catch (error: unknown) {
+      lastError = error;
+      output = '';
+      launchedActivity = activity;
+      fallbackUsed = undefined;
+      continue;
+    }
+  }
+
+  if (!output) {
+    if (lastError instanceof Error) {
+      throw new ADBCommandError('APP_START_FAILED', 'Failed to start app', {
+        packageName,
+        error: lastError.message,
+      });
+    }
+    throw new ADBCommandError('APP_START_FAILED', 'Failed to start app', { packageName });
+  }
+
+  let foregroundPackage: string | undefined;
+  if (waitForLaunch) {
+    const waitResult = waitForPackage(packageName, targetDeviceId, { timeoutMs: waitTimeoutMs });
+    foregroundPackage = waitResult.current;
+  }
 
   return {
     deviceId: targetDeviceId,
     packageName,
     activity,
+    launchedActivity,
+    fallbackUsed,
+    waitForLaunch,
+    foregroundPackage,
     output: output.trim(),
   };
 }
@@ -1869,6 +2642,7 @@ type UiNode = {
   className: string;
   clickable: boolean;
   password: boolean;
+  checked?: boolean;
   bounds?: { x1: number; y1: number; x2: number; y2: number };
 };
 
@@ -1885,6 +2659,7 @@ function extractUiNodes(xml: string): UiNode[] {
     const classMatch = node.match(/class="([^"]*)"/);
     const clickableMatch = node.match(/clickable="([^"]*)"/);
     const passwordMatch = node.match(/password="([^"]*)"/);
+    const checkedMatch = node.match(/checked="([^"]*)"/);
     const boundsMatch = node.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
     const text = textMatch ? textMatch[1] : '';
     const resourceId = idMatch ? idMatch[1] : '';
@@ -1892,6 +2667,7 @@ function extractUiNodes(xml: string): UiNode[] {
     const className = classMatch ? classMatch[1] : '';
     const clickable = clickableMatch ? clickableMatch[1] === 'true' : false;
     const password = passwordMatch ? passwordMatch[1] === 'true' : false;
+    const checked = checkedMatch ? checkedMatch[1] === 'true' : undefined;
     let bounds;
 
     if (boundsMatch) {
@@ -1903,7 +2679,7 @@ function extractUiNodes(xml: string): UiNode[] {
       };
     }
 
-    nodes.push({ text, resourceId, contentDesc, className, clickable, password, bounds });
+    nodes.push({ text, resourceId, contentDesc, className, clickable, password, checked, bounds });
   }
 
   return nodes;
@@ -1969,8 +2745,19 @@ function tapUiNode(deviceId: string, node: UiNode): { x: number; y: number; outp
 export function tapByText(
   text: string,
   deviceId?: string,
-  options: { matchMode?: MatchMode; index?: number } = {}
-): { deviceId: string; text: string; matchMode: MatchMode; index: number; found: boolean; x?: number; y?: number; output?: string } {
+  options: { matchMode?: MatchMode; index?: number; useFallback?: boolean } = {}
+): {
+  deviceId: string;
+  text: string;
+  matchMode: MatchMode;
+  index: number;
+  found: boolean;
+  x?: number;
+  y?: number;
+  output?: string;
+  clickableFallbackUsed?: boolean;
+  fallbackReason?: 'direct' | 'clickable_container' | 'nearest_clickable' | 'no_bounds';
+} {
   const targetDeviceId = resolveDeviceId(deviceId);
   const { xml } = dumpUiHierarchy(targetDeviceId);
   const nodes = extractUiNodes(xml);
@@ -1982,15 +2769,50 @@ export function tapByText(
     return { deviceId: targetDeviceId, text, matchMode, index, found: false };
   }
 
-  const { x, y, output } = tapUiNode(targetDeviceId, matches[index]);
-  return { deviceId: targetDeviceId, text, matchMode, index, found: true, x, y, output };
+  const selection = options.useFallback === false ? { node: matches[index], usedFallback: false } : resolveTapTarget(nodes, matches[index]);
+  if (!selection.node.bounds) {
+    const usedFallback = options.useFallback === false ? false : true;
+    return {
+      deviceId: targetDeviceId,
+      text,
+      matchMode,
+      index,
+      found: false,
+      clickableFallbackUsed: usedFallback,
+      fallbackReason: 'no_bounds',
+    };
+  }
+
+  const { x, y, output } = tapUiNode(targetDeviceId, selection.node);
+  return {
+    deviceId: targetDeviceId,
+    text,
+    matchMode,
+    index,
+    found: true,
+    x,
+    y,
+    output,
+    clickableFallbackUsed: selection.usedFallback,
+    fallbackReason: selection.fallbackReason,
+  };
 }
 
 export function tapById(
   resourceId: string,
   deviceId?: string,
-  options: { index?: number } = {}
-): { deviceId: string; resourceId: string; index: number; found: boolean; x?: number; y?: number; output?: string } {
+  options: { index?: number; useFallback?: boolean } = {}
+): {
+  deviceId: string;
+  resourceId: string;
+  index: number;
+  found: boolean;
+  x?: number;
+  y?: number;
+  output?: string;
+  clickableFallbackUsed?: boolean;
+  fallbackReason?: 'direct' | 'clickable_container' | 'nearest_clickable' | 'no_bounds';
+} {
   const targetDeviceId = resolveDeviceId(deviceId);
   const { xml } = dumpUiHierarchy(targetDeviceId);
   const nodes = extractUiNodes(xml);
@@ -2001,14 +2823,39 @@ export function tapById(
     return { deviceId: targetDeviceId, resourceId, index, found: false };
   }
 
-  const { x, y, output } = tapUiNode(targetDeviceId, matches[index]);
-  return { deviceId: targetDeviceId, resourceId, index, found: true, x, y, output };
+  const selection = options.useFallback === false
+    ? { node: matches[index], usedFallback: false }
+    : resolveTapTarget(nodes, matches[index]);
+  if (!selection.node.bounds) {
+    const usedFallback = options.useFallback === false ? false : true;
+    return {
+      deviceId: targetDeviceId,
+      resourceId,
+      index,
+      found: false,
+      clickableFallbackUsed: usedFallback,
+      fallbackReason: 'no_bounds',
+    };
+  }
+
+  const { x, y, output } = tapUiNode(targetDeviceId, selection.node);
+  return {
+    deviceId: targetDeviceId,
+    resourceId,
+    index,
+    found: true,
+    x,
+    y,
+    output,
+    clickableFallbackUsed: selection.usedFallback,
+    fallbackReason: selection.fallbackReason,
+  };
 }
 
 export function tapByDesc(
   contentDesc: string,
   deviceId?: string,
-  options: { matchMode?: MatchMode; index?: number } = {}
+  options: { matchMode?: MatchMode; index?: number; useFallback?: boolean } = {}
 ): {
   deviceId: string;
   contentDesc: string;
@@ -2018,6 +2865,8 @@ export function tapByDesc(
   x?: number;
   y?: number;
   output?: string;
+  clickableFallbackUsed?: boolean;
+  fallbackReason?: 'direct' | 'clickable_container' | 'nearest_clickable' | 'no_bounds';
 } {
   const targetDeviceId = resolveDeviceId(deviceId);
   const { xml } = dumpUiHierarchy(targetDeviceId);
@@ -2030,8 +2879,35 @@ export function tapByDesc(
     return { deviceId: targetDeviceId, contentDesc, matchMode, index, found: false };
   }
 
-  const { x, y, output } = tapUiNode(targetDeviceId, matches[index]);
-  return { deviceId: targetDeviceId, contentDesc, matchMode, index, found: true, x, y, output };
+  const selection = options.useFallback === false
+    ? { node: matches[index], usedFallback: false }
+    : resolveTapTarget(nodes, matches[index]);
+  if (!selection.node.bounds) {
+    const usedFallback = options.useFallback === false ? false : true;
+    return {
+      deviceId: targetDeviceId,
+      contentDesc,
+      matchMode,
+      index,
+      found: false,
+      clickableFallbackUsed: usedFallback,
+      fallbackReason: 'no_bounds',
+    };
+  }
+
+  const { x, y, output } = tapUiNode(targetDeviceId, selection.node);
+  return {
+    deviceId: targetDeviceId,
+    contentDesc,
+    matchMode,
+    index,
+    found: true,
+    x,
+    y,
+    output,
+    clickableFallbackUsed: selection.usedFallback,
+    fallbackReason: selection.fallbackReason,
+  };
 }
 
 export function waitForText(
@@ -3286,8 +4162,19 @@ export function waitForNodeCount(
 export function tapBySelectorIndex(
   selector: UiSelector,
   index: number,
-  deviceId?: string
-): { deviceId: string; selector: UiSelector; index: number; found: boolean; x?: number; y?: number; output?: string } {
+  deviceId?: string,
+  useFallback = true
+): {
+  deviceId: string;
+  selector: UiSelector;
+  index: number;
+  found: boolean;
+  x?: number;
+  y?: number;
+  output?: string;
+  clickableFallbackUsed?: boolean;
+  fallbackReason?: 'direct' | 'clickable_container' | 'nearest_clickable' | 'no_bounds';
+} {
   const targetDeviceId = resolveDeviceId(deviceId);
   const { xml } = dumpUiHierarchy(targetDeviceId);
   const nodes = extractUiNodes(xml);
@@ -3298,8 +4185,32 @@ export function tapBySelectorIndex(
     return { deviceId: targetDeviceId, selector, index, found: false };
   }
 
-  const { x, y, output } = tapUiNode(targetDeviceId, match);
-  return { deviceId: targetDeviceId, selector, index, found: true, x, y, output };
+  const selection = useFallback === false
+    ? { node: match, usedFallback: false }
+    : resolveTapTarget(nodes, match);
+  if (!selection.node.bounds) {
+    return {
+      deviceId: targetDeviceId,
+      selector,
+      index,
+      found: false,
+      clickableFallbackUsed: useFallback,
+      fallbackReason: 'no_bounds',
+    };
+  }
+
+  const { x, y, output } = tapUiNode(targetDeviceId, selection.node);
+  return {
+    deviceId: targetDeviceId,
+    selector,
+    index,
+    found: true,
+    x,
+    y,
+    output,
+    clickableFallbackUsed: selection.usedFallback,
+    fallbackReason: selection.fallbackReason,
+  };
 }
 
 export function typeById(
@@ -3322,4 +4233,280 @@ export function typeById(
   tapUiNode(targetDeviceId, matches[index]);
   const input = inputText(text, targetDeviceId);
   return { deviceId: targetDeviceId, resourceId, text, index, found: true, output: input.output };
+}
+
+export function runAndroidShellCommand(options: {
+  command: string;
+  deviceId?: string;
+  timeoutMs?: number;
+}): { deviceId: string; command: string; output: string } {
+  const result = executeADBCommandOnDevice(`shell ${options.command}`, options.deviceId, {
+    timeout: options.timeoutMs ?? DEFAULT_TIMEOUT,
+    maxBuffer: DEFAULT_BINARY_MAX_BUFFER,
+  });
+
+  return {
+    deviceId: result.deviceId,
+    command: options.command,
+    output: result.output.trim(),
+  };
+}
+
+export function runAndroidMonkey(options: {
+  deviceId?: string;
+  packageName?: string;
+  eventCount?: number;
+  throttleMs?: number;
+  seed?: number;
+  ignoreCrashes?: boolean;
+  ignoreTimeouts?: boolean;
+  ignoreSecurityExceptions?: boolean;
+  monitorNativeCrashes?: boolean;
+  timeoutMs?: number;
+}): {
+  deviceId: string;
+  packageName?: string;
+  eventCount: number;
+  throttleMs: number;
+  seed?: number;
+  output: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const eventCount = options.eventCount ?? 1000;
+  const throttleMs = options.throttleMs ?? 0;
+  const commandParts: string[] = ['shell monkey'];
+
+  if (options.packageName) {
+    commandParts.push(`-p ${escapeShellArg(options.packageName)}`);
+  }
+  if (throttleMs > 0) {
+    commandParts.push(`--throttle ${throttleMs}`);
+  }
+  if (typeof options.seed === 'number') {
+    commandParts.push(`-s ${Math.trunc(options.seed)}`);
+  }
+  if (options.ignoreCrashes !== false) {
+    commandParts.push('--ignore-crashes');
+  }
+  if (options.ignoreTimeouts !== false) {
+    commandParts.push('--ignore-timeouts');
+  }
+  if (options.ignoreSecurityExceptions !== false) {
+    commandParts.push('--ignore-security-exceptions');
+  }
+  if (options.monitorNativeCrashes !== false) {
+    commandParts.push('--monitor-native-crashes');
+  }
+
+  commandParts.push(String(eventCount));
+
+  const defaultTimeoutMs = Math.max(DEFAULT_TIMEOUT, eventCount * throttleMs + 30000);
+  const { output } = executeADBCommandOnDevice(commandParts.join(' '), targetDeviceId, {
+    timeout: options.timeoutMs ?? defaultTimeoutMs,
+    maxBuffer: DEFAULT_BINARY_MAX_BUFFER,
+  });
+
+  return {
+    deviceId: targetDeviceId,
+    packageName: options.packageName,
+    eventCount,
+    throttleMs,
+    seed: options.seed,
+    output: output.trim(),
+  };
+}
+
+export function recordAndroidScreen(options: {
+  deviceId?: string;
+  durationSec?: number;
+  bitRateMbps?: number;
+  size?: string;
+  rotate?: boolean;
+  bugreport?: boolean;
+  remotePath?: string;
+  localPath?: string;
+  deleteRemote?: boolean;
+}): {
+  deviceId: string;
+  durationSec: number;
+  remotePath: string;
+  localPath: string;
+  recordOutput: string;
+  pullOutput: string;
+  deleteOutput?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const durationSec = Math.max(1, Math.min(180, Math.trunc(options.durationSec ?? 15)));
+  const remotePath = options.remotePath ?? `/sdcard/mcp-screenrecord-${Date.now()}.mp4`;
+  const defaultLocalPath = path.resolve(
+    process.cwd(),
+    'artifacts',
+    path.basename(remotePath.endsWith('.mp4') ? remotePath : `${remotePath}.mp4`)
+  );
+  const localPath = options.localPath
+    ? path.resolve(process.cwd(), options.localPath)
+    : defaultLocalPath;
+  fs.mkdirSync(path.dirname(localPath), { recursive: true });
+
+  const recordParts = ['shell screenrecord', `--time-limit ${durationSec}`];
+  if (typeof options.bitRateMbps === 'number' && options.bitRateMbps > 0) {
+    recordParts.push(`--bit-rate ${Math.trunc(options.bitRateMbps * 1_000_000)}`);
+  }
+  if (options.size) {
+    recordParts.push(`--size ${escapeShellArg(options.size)}`);
+  }
+  if (options.rotate) {
+    recordParts.push('--rotate');
+  }
+  if (options.bugreport) {
+    recordParts.push('--bugreport');
+  }
+  recordParts.push(escapeShellArg(remotePath));
+
+  const { output: recordOutput } = executeADBCommandOnDevice(recordParts.join(' '), targetDeviceId, {
+    timeout: (durationSec + 20) * 1000,
+    maxBuffer: DEFAULT_BINARY_MAX_BUFFER,
+  });
+
+  const pullOutput = executeADBCommand(
+    `-s ${targetDeviceId} pull ${escapeShellArg(remotePath)} ${escapeShellArg(localPath)}`,
+    { timeout: 120000, maxBuffer: DEFAULT_BINARY_MAX_BUFFER }
+  );
+
+  let deleteOutput: string | undefined;
+  if (options.deleteRemote !== false) {
+    try {
+      const remove = executeADBCommandOnDevice(
+        `shell rm ${escapeShellArg(remotePath)}`,
+        targetDeviceId
+      );
+      deleteOutput = remove.output.trim();
+    } catch {
+      deleteOutput = undefined;
+    }
+  }
+
+  return {
+    deviceId: targetDeviceId,
+    durationSec,
+    remotePath,
+    localPath,
+    recordOutput: recordOutput.trim(),
+    pullOutput: pullOutput.trim(),
+    deleteOutput,
+  };
+}
+
+export function captureAndroidBugreport(options: {
+  deviceId?: string;
+  outputDir?: string;
+  filePrefix?: string;
+  timeoutMs?: number;
+}): {
+  deviceId: string;
+  outputDir: string;
+  outputBasePath: string;
+  generatedFiles: string[];
+  output: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const outputDir = path.resolve(process.cwd(), options.outputDir ?? 'artifacts/bugreports');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const rawPrefix = options.filePrefix ?? `bugreport-${targetDeviceId}-${Date.now()}`;
+  const safePrefix = rawPrefix.replace(/[^a-zA-Z0-9._-]+/g, '-');
+  const outputBasePath = path.join(outputDir, safePrefix);
+  const beforeFiles = new Set(fs.readdirSync(outputDir));
+
+  const output = executeADBCommand(
+    `-s ${targetDeviceId} bugreport ${escapeShellArg(outputBasePath)}`,
+    {
+      timeout: options.timeoutMs ?? 10 * 60 * 1000,
+      maxBuffer: DEFAULT_BINARY_MAX_BUFFER,
+    }
+  );
+
+  const generatedFiles = fs
+    .readdirSync(outputDir)
+    .filter(name => !beforeFiles.has(name))
+    .filter(name => name.startsWith(safePrefix))
+    .map(name => path.join(outputDir, name));
+
+  return {
+    deviceId: targetDeviceId,
+    outputDir,
+    outputBasePath,
+    generatedFiles,
+    output: output.trim(),
+  };
+}
+
+export function collectAndroidDiagnostics(options: {
+  deviceId?: string;
+  packageName?: string;
+  propertyPrefix?: string;
+  logcatLines?: number;
+  logcatSince?: string;
+  logcatPriority?: 'V' | 'D' | 'I' | 'W' | 'E' | 'F' | 'S';
+  includeUiDump?: boolean;
+  uiMaxChars?: number;
+  uiUseCache?: boolean;
+  uiMaxAgeMs?: number;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  activity: ReturnType<typeof getCurrentActivity>;
+  windowSize: ReturnType<typeof getWindowSize>;
+  screenHash: ReturnType<typeof getScreenHash>;
+  properties: ReturnType<typeof getAndroidProperties>;
+  logcat: ReturnType<typeof getLogcat>;
+  uiDump?: ReturnType<typeof dumpUiHierarchy>;
+  packageInstalled?: ReturnType<typeof isAppInstalled>;
+  packageVersion?: ReturnType<typeof getAppVersion>;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const activity = getCurrentActivity(targetDeviceId);
+  const windowSize = getWindowSize(targetDeviceId);
+  const screenHash = getScreenHash(targetDeviceId);
+  const properties = getAndroidProperties(targetDeviceId, {
+    prefix: options.propertyPrefix,
+  });
+  const logcat = getLogcat({
+    deviceId: targetDeviceId,
+    lines: options.logcatLines ?? 200,
+    since: options.logcatSince,
+    priority: options.logcatPriority,
+    packageName: options.packageName,
+  });
+
+  const includeUiDump = options.includeUiDump !== false;
+  const uiDump = includeUiDump
+    ? dumpUiHierarchy(targetDeviceId, {
+        maxChars: options.uiMaxChars,
+        cache: options.uiUseCache,
+        maxAgeMs: options.uiMaxAgeMs,
+      })
+    : undefined;
+
+  let packageInstalled: ReturnType<typeof isAppInstalled> | undefined;
+  let packageVersion: ReturnType<typeof getAppVersion> | undefined;
+  if (options.packageName) {
+    packageInstalled = isAppInstalled(options.packageName, targetDeviceId);
+    if (packageInstalled.installed) {
+      packageVersion = getAppVersion(options.packageName, targetDeviceId);
+    }
+  }
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    activity,
+    windowSize,
+    screenHash,
+    properties,
+    logcat,
+    uiDump,
+    packageInstalled,
+    packageVersion,
+  };
 }

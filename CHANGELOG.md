@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker support for containerized deployment
 - Unit and integration tests
 - Documentation and examples
+- New MCP tooling for settings-driven workflows: `open_android_settings`, `configure_usb_debugging`, and USB debugging state inspection/fallback automation.
+- New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
+- Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
+
+## [2.2.0] - 2026-02-19
+### Added
+- `run_android_shell`: run raw `adb shell` commands through MCP.
+- `run_android_monkey`: package-scoped or global monkey stress testing.
+- `record_android_screen`: record MP4 on-device and pull artifact locally.
+- `capture_android_bugreport`: create local bugreport artifacts for deep debugging.
+- `collect_android_diagnostics`: one-call snapshot for activity, window, hash, properties, logcat, and optional UI dump.
 
 ## [2.0.1] - 2026-01-25
 ### Added

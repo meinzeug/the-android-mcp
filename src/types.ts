@@ -222,6 +222,16 @@ export const StartAppInputSchema = z.object({
     .string()
     .optional()
     .describe('Optional fully qualified activity name to launch (e.g., .MainActivity).'),
+  waitForLaunch: z
+    .boolean()
+    .default(false)
+    .describe('Wait until package is in foreground after launch attempt.'),
+  waitTimeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Optional timeout in milliseconds when waitForLaunch is enabled.'),
 });
 
 export const StopAppInputSchema = z.object({
@@ -480,6 +490,164 @@ export const HotReloadSetupInputSchema = z.object({
     .describe('Max time to wait for Play Protect prompt handling (milliseconds).'),
 });
 
+export const RunAndroidShellInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  command: z.string().min(1).describe('Raw shell command to execute on the Android device.'),
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Optional timeout in milliseconds for the shell command.'),
+});
+
+export const RunAndroidMonkeyInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z.string().optional().describe('Optional package to constrain monkey events to.'),
+  eventCount: z
+    .number()
+    .int()
+    .positive()
+    .default(1000)
+    .describe('Number of monkey events to run.'),
+  throttleMs: z
+    .number()
+    .int()
+    .min(0)
+    .default(0)
+    .describe('Optional delay in milliseconds between events.'),
+  seed: z.number().int().optional().describe('Optional deterministic random seed.'),
+  ignoreCrashes: z
+    .boolean()
+    .default(true)
+    .describe('Continue on application crashes.'),
+  ignoreTimeouts: z
+    .boolean()
+    .default(true)
+    .describe('Continue on application timeouts.'),
+  ignoreSecurityExceptions: z
+    .boolean()
+    .default(true)
+    .describe('Continue on security exceptions.'),
+  monitorNativeCrashes: z
+    .boolean()
+    .default(true)
+    .describe('Monitor and report native crashes.'),
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Optional timeout in milliseconds for the monkey run.'),
+});
+
+export const RecordAndroidScreenInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  durationSec: z
+    .number()
+    .int()
+    .min(1)
+    .max(180)
+    .default(15)
+    .describe('Recording duration in seconds (Android screenrecord max: 180).'),
+  bitRateMbps: z
+    .number()
+    .positive()
+    .optional()
+    .describe('Optional video bitrate in Mbps.'),
+  size: z.string().optional().describe('Optional video size (e.g., 1280x720).'),
+  rotate: z.boolean().default(false).describe('Rotate the recording 90 degrees.'),
+  bugreport: z
+    .boolean()
+    .default(false)
+    .describe('Overlay bugreport diagnostics onto the recording.'),
+  remotePath: z
+    .string()
+    .optional()
+    .describe('Optional remote path on device to save the temporary recording.'),
+  localPath: z
+    .string()
+    .optional()
+    .describe('Optional local path to save the pulled recording file.'),
+  deleteRemote: z
+    .boolean()
+    .default(true)
+    .describe('Delete the temporary remote recording file after pulling.'),
+});
+
+export const CaptureBugreportInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  outputDir: z
+    .string()
+    .optional()
+    .describe('Optional local output directory for generated bugreport files.'),
+  filePrefix: z
+    .string()
+    .optional()
+    .describe('Optional filename prefix for bugreport artifacts.'),
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Optional timeout in milliseconds for bugreport capture.'),
+});
+
+export const CollectDiagnosticsInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z
+    .string()
+    .optional()
+    .describe('Optional package name for package-specific diagnostics.'),
+  propertyPrefix: z
+    .string()
+    .optional()
+    .describe('Optional Android property prefix filter (e.g., ro.build).'),
+  logcatLines: z
+    .number()
+    .int()
+    .positive()
+    .default(200)
+    .describe('Number of logcat lines to include.'),
+  logcatSince: z
+    .string()
+    .optional()
+    .describe('Optional logcat time filter (e.g., 1m or absolute timestamp).'),
+  logcatPriority: z
+    .enum(['V', 'D', 'I', 'W', 'E', 'F', 'S'])
+    .optional()
+    .describe('Optional minimum log priority for diagnostics logcat.'),
+  includeUiDump: z.boolean().default(true).describe('Include XML UI dump in diagnostics.'),
+  uiMaxChars: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Optional max XML chars for UI dump truncation.'),
+  uiUseCache: z.boolean().default(true).describe('Use cached UI dump if available.'),
+  uiMaxAgeMs: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Optional maximum cache age for UI dump in milliseconds.'),
+});
+
 // Tool output schemas
 export const TakeScreenshotOutputSchema = z.object({
   data: z.string().describe('Base64 encoded image data'),
@@ -531,6 +699,13 @@ export const StartAppOutputSchema = z.object({
   deviceId: z.string().describe('Target device ID'),
   packageName: z.string().describe('Android package name'),
   activity: z.string().optional().describe('Launched activity (if provided)'),
+  launchedActivity: z.string().optional().describe('Resolved launch activity used (if resolved)'),
+  fallbackUsed: z
+    .enum(['explicit', 'resolved-main', 'monkey'])
+    .optional()
+    .describe('Launch strategy used after trying explicit activity.'),
+  waitForLaunch: z.boolean().optional().describe('Whether foreground verification was requested.'),
+  foregroundPackage: z.string().optional().describe('Foreground package after launch attempt.'),
   output: z.string().describe('Raw ADB output'),
 });
 
@@ -658,6 +833,191 @@ export const OpenUrlOutputSchema = z.object({
   deviceId: z.string().describe('Target device ID'),
   url: z.string().describe('URL opened'),
   output: z.string().describe('Raw ADB output'),
+});
+
+export const OpenChromeUrlInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  url: z.string().min(1).describe('URL to open in Chrome.'),
+  browserPackage: z
+    .string()
+    .default('com.android.chrome')
+    .describe('Chrome package used to open the URL.'),
+  browserActivity: z
+    .string()
+    .default('com.google.android.apps.chrome.Main')
+    .describe('Chrome activity used for explicit launch.'),
+  fallbackToDefault: z
+    .boolean()
+    .default(true)
+    .describe('If explicit launch fails, fall back to default Android VIEW intent.'),
+  waitForReadyMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Optional wait after launch before returning (milliseconds).'),
+});
+
+export const OpenChromeUrlOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  url: z.string().describe('URL opened'),
+  browserPackage: z.string().describe('Browser package used'),
+  browserActivity: z.string().describe('Browser activity used'),
+  browserInstalled: z.boolean().describe('Whether browser package is installed'),
+  strategy: z
+    .string()
+    .describe('Execution strategy used: chrome-explicit, chrome-explicit-fallback, default-intent'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const OpenChromeUrlAndLoginInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  url: z.string().min(1).describe('URL to open in Chrome, then run login.'),
+  email: z.string().min(1).describe('Email/login value.'),
+  password: z.string().min(1).describe('Password value.'),
+  browserPackage: z
+    .string()
+    .default('com.android.chrome')
+    .describe('Chrome package used to open the URL.'),
+  browserActivity: z
+    .string()
+    .default('com.google.android.apps.chrome.Main')
+    .describe('Chrome activity used for explicit launch.'),
+  fallbackToDefault: z
+    .boolean()
+    .default(true)
+    .describe('If explicit launch fails, fall back to default Android VIEW intent.'),
+  waitForReadyMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Optional wait after launch before starting login (milliseconds).'),
+  submitLabels: z.array(z.string()).optional().describe('Custom submit button labels for login.'),
+  imeId: z
+    .string()
+    .optional()
+    .describe('Optional IME ID for ADB keyboard (default: com.android.adbkeyboard/.AdbIME).'),
+  hideKeyboard: z.boolean().default(true).describe('Hide keyboard before submit.'),
+  useAdbKeyboard: z.boolean().default(false).describe('Use ADB keyboard batching path for faster login.'),
+  submitFallback: z
+    .boolean()
+    .default(true)
+    .describe('Attempt editor action/enter if no submit button is found.'),
+});
+
+export const OpenChromeUrlAndLoginOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  url: z.string().describe('URL opened'),
+  openResult: OpenChromeUrlOutputSchema,
+  loginResult: z.object({
+    deviceId: z.string().describe('Target device ID'),
+    emailFieldFound: z.boolean().describe('Whether an email field was found'),
+    passwordFieldFound: z.boolean().describe('Whether a password field was found'),
+    submitFound: z.boolean().describe('Whether a submit button was found'),
+    usedIme: z.boolean().describe('Whether ADB keyboard was used'),
+    output: z.array(z.string()).describe('Raw ADB outputs'),
+  }),
+  steps: z.array(z.string()).describe('Combined execution output lines'),
+});
+
+export const OpenAndroidSettingsInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  screen: z
+    .enum(['settings', 'developer-options'])
+    .default('settings')
+    .describe('Settings screen shortcut to open.'),
+  activity: z.string().optional().describe('Optional explicit Android activity component to open.'),
+  waitForReadyMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Optional wait after launch before returning (milliseconds).'),
+});
+
+export const OpenAndroidSettingsOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  screen: z.string().describe('Settings screen shortcut that was used.'),
+  activity: z.string().describe('Android activity/component started.'),
+  output: z.string().describe('Raw ADB output'),
+});
+
+export const ConfigureUsbDebuggingInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  action: z
+    .enum(['query', 'enable', 'disable'])
+    .default('query')
+    .describe('Desired operation: query current state, enable, or disable USB debugging.'),
+  useSettingsApi: z
+    .boolean()
+    .default(true)
+    .describe('Try settings commands first (fastest path).'),
+  fallbackToUi: z
+    .boolean()
+    .default(true)
+    .describe('If settings commands fail, open developer settings and try a fast UI fallback.'),
+  waitForReadyMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Optional wait after launching settings before tapping fallback UI controls.'),
+});
+
+export const ConfigureUsbDebuggingOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  action: z.string().describe('Action executed.'),
+  requestedEnabled: z.boolean().optional().describe('Requested target state (for enable/disable).'),
+  adbEnabledBefore: z
+    .boolean()
+    .optional()
+    .describe('ADB-enabled state before action (global adb_enabled).'),
+  developmentSettingsEnabledBefore: z
+    .boolean()
+    .optional()
+    .describe('Developer settings state before action (secure development_settings_enabled).'),
+  adbEnabledAfter: z
+    .boolean()
+    .optional()
+    .describe('ADB-enabled state after action (global adb_enabled).'),
+  developmentSettingsEnabledAfter: z
+    .boolean()
+    .optional()
+    .describe('Developer settings state after action (secure development_settings_enabled).'),
+  adbEnabledRawBefore: z
+    .string()
+    .describe('Raw adb_enabled value read before action.'),
+  developmentSettingsEnabledRawBefore: z
+    .string()
+    .describe('Raw development_settings_enabled value read before action.'),
+  adbEnabledRawAfter: z
+    .string()
+    .optional()
+    .describe('Raw adb_enabled value read after action.'),
+  developmentSettingsEnabledRawAfter: z
+    .string()
+    .optional()
+    .describe('Raw development_settings_enabled value read after action.'),
+  success: z.boolean().describe('Whether requested action reached intended state.'),
+  strategy: z
+    .string()
+    .describe('Execution strategy used: settings-api, settings-api+ui-fallback, settings-api-failed, ui-open-only'),
+  openedActivity: z.string().optional().describe('Opened activity when UI fallback was used.'),
+  steps: z.array(z.string()).describe('Executed operation steps (for diagnostics).'),
+  output: z.string().describe('Raw ADB output summary'),
 });
 
 export const PasteClipboardInputSchema = z.object({
@@ -880,6 +1240,10 @@ export const TapByTextInputSchema = z.object({
   text: z.string().min(1).describe('Text to match.'),
   matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
   index: z.number().int().min(0).default(0).describe('Match index (0-based).'),
+  useFallback: z
+    .boolean()
+    .default(true)
+    .describe('Use clickable container fallback when matched node is not directly clickable.'),
 });
 
 export const TapByTextOutputSchema = z.object({
@@ -888,6 +1252,14 @@ export const TapByTextOutputSchema = z.object({
   matchMode: z.string().describe('Match mode used'),
   index: z.number().describe('Match index used'),
   found: z.boolean().describe('Whether a match was found'),
+  clickableFallbackUsed: z
+    .boolean()
+    .optional()
+    .describe('Whether a fallback tap target was used'),
+  fallbackReason: z
+    .string()
+    .optional()
+    .describe('Reason for fallback when no direct clickable match was found'),
   x: z.number().optional().describe('Tap X coordinate'),
   y: z.number().optional().describe('Tap Y coordinate'),
   output: z.string().optional().describe('Raw ADB output'),
@@ -900,6 +1272,10 @@ export const TapByIdInputSchema = z.object({
     .describe('Optional device ID. If not provided, uses the first available device.'),
   resourceId: z.string().min(1).describe('Resource-id to match.'),
   index: z.number().int().min(0).default(0).describe('Match index (0-based).'),
+  useFallback: z
+    .boolean()
+    .default(true)
+    .describe('Use clickable container fallback when matched node is not directly clickable.'),
 });
 
 export const TapByIdOutputSchema = z.object({
@@ -907,6 +1283,14 @@ export const TapByIdOutputSchema = z.object({
   resourceId: z.string().describe('Matched resource-id'),
   index: z.number().describe('Match index used'),
   found: z.boolean().describe('Whether a match was found'),
+  clickableFallbackUsed: z
+    .boolean()
+    .optional()
+    .describe('Whether a fallback tap target was used'),
+  fallbackReason: z
+    .string()
+    .optional()
+    .describe('Reason for fallback when no direct clickable match was found'),
   x: z.number().optional().describe('Tap X coordinate'),
   y: z.number().optional().describe('Tap Y coordinate'),
   output: z.string().optional().describe('Raw ADB output'),
@@ -920,6 +1304,10 @@ export const TapByDescInputSchema = z.object({
   contentDesc: z.string().min(1).describe('Content-desc to match.'),
   matchMode: z.enum(['exact', 'contains', 'regex']).default('exact').describe('Match mode.'),
   index: z.number().int().min(0).default(0).describe('Match index (0-based).'),
+  useFallback: z
+    .boolean()
+    .default(true)
+    .describe('Use clickable container fallback when matched node is not directly clickable.'),
 });
 
 export const TapByDescOutputSchema = z.object({
@@ -928,6 +1316,14 @@ export const TapByDescOutputSchema = z.object({
   matchMode: z.string().describe('Match mode used'),
   index: z.number().describe('Match index used'),
   found: z.boolean().describe('Whether a match was found'),
+  clickableFallbackUsed: z
+    .boolean()
+    .optional()
+    .describe('Whether a fallback tap target was used'),
+  fallbackReason: z
+    .string()
+    .optional()
+    .describe('Reason for fallback when no direct clickable match was found'),
   x: z.number().optional().describe('Tap X coordinate'),
   y: z.number().optional().describe('Tap Y coordinate'),
   output: z.string().optional().describe('Raw ADB output'),
@@ -1849,6 +2245,10 @@ export const TapBySelectorIndexInputSchema = z.object({
     .describe('Optional device ID. If not provided, uses the first available device.'),
   selector: UiSelectorSchema,
   index: z.number().int().min(0).default(0).describe('Match index (0-based).'),
+  useFallback: z
+    .boolean()
+    .default(true)
+    .describe('Use clickable container fallback when matched node is not directly clickable.'),
 });
 
 export const TapBySelectorIndexOutputSchema = z.object({
@@ -1856,6 +2256,14 @@ export const TapBySelectorIndexOutputSchema = z.object({
   selector: UiSelectorSchema,
   index: z.number().describe('Match index'),
   found: z.boolean().describe('Whether a match was found'),
+  clickableFallbackUsed: z
+    .boolean()
+    .optional()
+    .describe('Whether a fallback tap target was used'),
+  fallbackReason: z
+    .string()
+    .optional()
+    .describe('Reason for fallback when no direct clickable match was found'),
   x: z.number().optional().describe('Tap X coordinate'),
   y: z.number().optional().describe('Tap Y coordinate'),
   output: z.string().optional().describe('Raw ADB output'),
@@ -2195,6 +2603,52 @@ export const HotReloadSetupOutputSchema = z.object({
     .describe('Play Protect prompt handling result (if attempted)'),
 });
 
+export const RunAndroidShellOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  command: z.string().describe('Executed raw shell command'),
+  output: z.string().describe('Raw shell output'),
+});
+
+export const RunAndroidMonkeyOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  packageName: z.string().optional().describe('Package constraint used for monkey run'),
+  eventCount: z.number().describe('Number of monkey events executed'),
+  throttleMs: z.number().describe('Delay between events in milliseconds'),
+  seed: z.number().optional().describe('Random seed used for monkey run'),
+  output: z.string().describe('Raw monkey output'),
+});
+
+export const RecordAndroidScreenOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  durationSec: z.number().describe('Actual recording duration in seconds'),
+  remotePath: z.string().describe('Temporary recording path on device'),
+  localPath: z.string().describe('Local file path where recording was saved'),
+  recordOutput: z.string().describe('Raw output from screenrecord command'),
+  pullOutput: z.string().describe('Raw output from adb pull'),
+  deleteOutput: z.string().optional().describe('Raw output from remote file deletion'),
+});
+
+export const CaptureBugreportOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  outputDir: z.string().describe('Local directory used for bugreport artifacts'),
+  outputBasePath: z.string().describe('Bugreport base path passed to adb'),
+  generatedFiles: z.array(z.string()).describe('Generated bugreport artifact file paths'),
+  output: z.string().describe('Raw bugreport command output'),
+});
+
+export const CollectDiagnosticsOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when diagnostics were captured'),
+  activity: GetCurrentActivityOutputSchema.describe('Current foreground activity snapshot'),
+  windowSize: GetWindowSizeOutputSchema.describe('Current window size snapshot'),
+  screenHash: GetScreenHashOutputSchema.describe('Current screen hash snapshot'),
+  properties: GetAndroidPropertiesOutputSchema.describe('Captured Android properties'),
+  logcat: GetLogcatOutputSchema.describe('Captured logcat snippet'),
+  uiDump: DumpUiOutputSchema.optional().describe('Optional UI dump snapshot'),
+  packageInstalled: IsAppInstalledOutputSchema.optional().describe('Optional package install state'),
+  packageVersion: GetAppVersionOutputSchema.optional().describe('Optional package version details'),
+});
+
 export const CreateIssueInputSchema = z.object({
   repo: z.string().optional().describe('GitHub repo in owner/name format.'),
   title: z.string().min(1).describe('Issue title.'),
@@ -2337,6 +2791,14 @@ export const StartAppToolSchema = {
       type: 'string' as const,
       description: 'Optional fully qualified activity name to launch (e.g., .MainActivity).',
     },
+    waitForLaunch: {
+      type: 'boolean' as const,
+      description: 'Wait until package is in foreground after start command.',
+    },
+    waitTimeoutMs: {
+      type: 'number' as const,
+      description: 'Optional timeout in milliseconds for foreground verification.',
+    },
   },
   required: ['packageName'] as string[],
 };
@@ -2439,6 +2901,151 @@ export const OpenUrlToolSchema = {
     url: { type: 'string' as const, description: 'URL to open.' },
   },
   required: ['url'] as string[],
+};
+
+export const OpenChromeUrlToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    url: { type: 'string' as const, description: 'URL to open in Chrome.' },
+    browserPackage: {
+      type: 'string' as const,
+      default: 'com.android.chrome',
+      description: 'Chrome package used to open the URL.',
+    },
+    browserActivity: {
+      type: 'string' as const,
+      default: 'com.google.android.apps.chrome.Main',
+      description: 'Chrome activity used for explicit launch.',
+    },
+    fallbackToDefault: {
+      type: 'boolean' as const,
+      default: true,
+      description: 'If explicit launch fails, fall back to default Android VIEW intent.',
+    },
+    waitForReadyMs: {
+      type: 'number' as const,
+      description: 'Optional wait after launch before returning (milliseconds).',
+    },
+  },
+  required: ['url'] as string[],
+};
+
+export const OpenChromeUrlAndLoginToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    url: { type: 'string' as const, description: 'URL to open in Chrome, then run login.' },
+    email: { type: 'string' as const, description: 'Email/login value.' },
+    password: { type: 'string' as const, description: 'Password value.' },
+    browserPackage: {
+      type: 'string' as const,
+      default: 'com.android.chrome',
+      description: 'Chrome package used to open the URL.',
+    },
+    browserActivity: {
+      type: 'string' as const,
+      default: 'com.google.android.apps.chrome.Main',
+      description: 'Chrome activity used for explicit launch.',
+    },
+    fallbackToDefault: {
+      type: 'boolean' as const,
+      default: true,
+      description: 'If explicit launch fails, fall back to default Android VIEW intent.',
+    },
+    waitForReadyMs: {
+      type: 'number' as const,
+      description: 'Optional wait after launch before starting login (milliseconds).',
+    },
+    submitLabels: {
+      type: 'array' as const,
+      description: 'Custom submit button labels for login.',
+      items: { type: 'string' as const },
+    },
+    imeId: {
+      type: 'string' as const,
+      description: 'Optional IME ID for ADB keyboard (default: com.android.adbkeyboard/.AdbIME).',
+    },
+    hideKeyboard: {
+      type: 'boolean' as const,
+      default: true,
+      description: 'Hide keyboard before submit.',
+    },
+    useAdbKeyboard: {
+      type: 'boolean' as const,
+      default: false,
+      description: 'Use ADB keyboard batching path for faster login.',
+    },
+    submitFallback: {
+      type: 'boolean' as const,
+      default: true,
+      description: 'Attempt editor action/enter if no submit button is found.',
+    },
+  },
+  required: ['url', 'email', 'password'] as string[],
+};
+
+export const OpenAndroidSettingsToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    screen: {
+      type: 'string' as const,
+      enum: ['settings', 'developer-options'],
+      default: 'settings',
+      description: 'Settings screen shortcut to open.',
+    },
+    activity: {
+      type: 'string' as const,
+      description:
+        'Optional explicit Android activity component to open (overrides preset mapping).',
+    },
+    waitForReadyMs: {
+      type: 'number' as const,
+      description: 'Optional wait after launch before returning (milliseconds).',
+    },
+  },
+  required: [] as string[],
+};
+
+export const ConfigureUsbDebuggingToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    action: {
+      type: 'string' as const,
+      enum: ['query', 'enable', 'disable'],
+      default: 'query',
+      description: 'Desired operation: query current state, enable, or disable USB debugging.',
+    },
+    useSettingsApi: {
+      type: 'boolean' as const,
+      default: true,
+      description: 'Try settings commands first (fastest path).',
+    },
+    fallbackToUi: {
+      type: 'boolean' as const,
+      default: true,
+      description: 'If settings commands fail, open developer settings and try a fast UI fallback.',
+    },
+    waitForReadyMs: {
+      type: 'number' as const,
+      description: 'Optional wait after launching settings before tapping fallback UI controls (milliseconds).',
+    },
+  },
+  required: [] as string[],
 };
 
 export const PasteClipboardToolSchema = {
@@ -3835,6 +4442,198 @@ export const HotReloadSetupToolSchema = {
   required: ['packageName'] as string[],
 };
 
+export const RunAndroidShellToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    command: {
+      type: 'string' as const,
+      description: 'Raw shell command to execute on the Android device.',
+    },
+    timeoutMs: {
+      type: 'number' as const,
+      description: 'Optional timeout in milliseconds for the shell command.',
+    },
+  },
+  required: ['command'] as string[],
+};
+
+export const RunAndroidMonkeyToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: {
+      type: 'string' as const,
+      description: 'Optional package to constrain monkey events to.',
+    },
+    eventCount: {
+      type: 'number' as const,
+      description: 'Number of monkey events to run.',
+      default: 1000,
+    },
+    throttleMs: {
+      type: 'number' as const,
+      description: 'Optional delay in milliseconds between events.',
+      default: 0,
+    },
+    seed: {
+      type: 'number' as const,
+      description: 'Optional deterministic random seed.',
+    },
+    ignoreCrashes: {
+      type: 'boolean' as const,
+      description: 'Continue on application crashes.',
+      default: true,
+    },
+    ignoreTimeouts: {
+      type: 'boolean' as const,
+      description: 'Continue on application timeouts.',
+      default: true,
+    },
+    ignoreSecurityExceptions: {
+      type: 'boolean' as const,
+      description: 'Continue on security exceptions.',
+      default: true,
+    },
+    monitorNativeCrashes: {
+      type: 'boolean' as const,
+      description: 'Monitor and report native crashes.',
+      default: true,
+    },
+    timeoutMs: {
+      type: 'number' as const,
+      description: 'Optional timeout in milliseconds for the monkey run.',
+    },
+  },
+  required: [] as string[],
+};
+
+export const RecordAndroidScreenToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    durationSec: {
+      type: 'number' as const,
+      description: 'Recording duration in seconds (max 180).',
+      default: 15,
+    },
+    bitRateMbps: {
+      type: 'number' as const,
+      description: 'Optional video bitrate in Mbps.',
+    },
+    size: {
+      type: 'string' as const,
+      description: 'Optional video size (e.g., 1280x720).',
+    },
+    rotate: {
+      type: 'boolean' as const,
+      description: 'Rotate the recording 90 degrees.',
+      default: false,
+    },
+    bugreport: {
+      type: 'boolean' as const,
+      description: 'Overlay bugreport diagnostics onto the recording.',
+      default: false,
+    },
+    remotePath: {
+      type: 'string' as const,
+      description: 'Optional remote path on device to save the temporary recording.',
+    },
+    localPath: {
+      type: 'string' as const,
+      description: 'Optional local path to save the pulled recording file.',
+    },
+    deleteRemote: {
+      type: 'boolean' as const,
+      description: 'Delete the temporary remote recording file after pulling.',
+      default: true,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CaptureBugreportToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    outputDir: {
+      type: 'string' as const,
+      description: 'Optional local output directory for generated bugreport files.',
+    },
+    filePrefix: {
+      type: 'string' as const,
+      description: 'Optional filename prefix for bugreport artifacts.',
+    },
+    timeoutMs: {
+      type: 'number' as const,
+      description: 'Optional timeout in milliseconds for bugreport capture.',
+    },
+  },
+  required: [] as string[],
+};
+
+export const CollectDiagnosticsToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: {
+      type: 'string' as const,
+      description: 'Optional package name for package-specific diagnostics.',
+    },
+    propertyPrefix: {
+      type: 'string' as const,
+      description: 'Optional Android property prefix filter (e.g., ro.build).',
+    },
+    logcatLines: {
+      type: 'number' as const,
+      description: 'Number of logcat lines to include.',
+      default: 200,
+    },
+    logcatSince: {
+      type: 'string' as const,
+      description: 'Optional logcat time filter (e.g., 1m or absolute timestamp).',
+    },
+    logcatPriority: {
+      type: 'string' as const,
+      description: 'Optional minimum log priority (V/D/I/W/E/F/S).',
+    },
+    includeUiDump: {
+      type: 'boolean' as const,
+      description: 'Include XML UI dump in diagnostics.',
+      default: true,
+    },
+    uiMaxChars: {
+      type: 'number' as const,
+      description: 'Optional max XML chars for UI dump truncation.',
+    },
+    uiUseCache: {
+      type: 'boolean' as const,
+      description: 'Use cached UI dump if available.',
+      default: true,
+    },
+    uiMaxAgeMs: {
+      type: 'number' as const,
+      description: 'Optional maximum cache age for UI dump in milliseconds.',
+    },
+  },
+  required: [] as string[],
+};
+
 // Type exports
 export type TakeScreenshotInput = z.infer<typeof TakeScreenshotInputSchema>;
 export type ListDevicesInput = z.infer<typeof ListDevicesInputSchema>;
@@ -3864,6 +4663,14 @@ export type GetAndroidPropertiesInput = z.infer<typeof GetAndroidPropertiesInput
 export type GetAndroidPropertiesOutput = z.infer<typeof GetAndroidPropertiesOutputSchema>;
 export type OpenUrlInput = z.infer<typeof OpenUrlInputSchema>;
 export type OpenUrlOutput = z.infer<typeof OpenUrlOutputSchema>;
+export type OpenChromeUrlInput = z.infer<typeof OpenChromeUrlInputSchema>;
+export type OpenChromeUrlOutput = z.infer<typeof OpenChromeUrlOutputSchema>;
+export type OpenChromeUrlAndLoginInput = z.infer<typeof OpenChromeUrlAndLoginInputSchema>;
+export type OpenChromeUrlAndLoginOutput = z.infer<typeof OpenChromeUrlAndLoginOutputSchema>;
+export type OpenAndroidSettingsInput = z.infer<typeof OpenAndroidSettingsInputSchema>;
+export type OpenAndroidSettingsOutput = z.infer<typeof OpenAndroidSettingsOutputSchema>;
+export type ConfigureUsbDebuggingInput = z.infer<typeof ConfigureUsbDebuggingInputSchema>;
+export type ConfigureUsbDebuggingOutput = z.infer<typeof ConfigureUsbDebuggingOutputSchema>;
 export type PasteClipboardInput = z.infer<typeof PasteClipboardInputSchema>;
 export type PasteClipboardOutput = z.infer<typeof PasteClipboardOutputSchema>;
 export type DumpUiInput = z.infer<typeof DumpUiInputSchema>;
@@ -4003,5 +4810,15 @@ export type ListActivitiesInput = z.infer<typeof ListActivitiesInputSchema>;
 export type ListActivitiesOutput = z.infer<typeof ListActivitiesOutputSchema>;
 export type HotReloadSetupInput = z.infer<typeof HotReloadSetupInputSchema>;
 export type HotReloadSetupOutput = z.infer<typeof HotReloadSetupOutputSchema>;
+export type RunAndroidShellInput = z.infer<typeof RunAndroidShellInputSchema>;
+export type RunAndroidShellOutput = z.infer<typeof RunAndroidShellOutputSchema>;
+export type RunAndroidMonkeyInput = z.infer<typeof RunAndroidMonkeyInputSchema>;
+export type RunAndroidMonkeyOutput = z.infer<typeof RunAndroidMonkeyOutputSchema>;
+export type RecordAndroidScreenInput = z.infer<typeof RecordAndroidScreenInputSchema>;
+export type RecordAndroidScreenOutput = z.infer<typeof RecordAndroidScreenOutputSchema>;
+export type CaptureBugreportInput = z.infer<typeof CaptureBugreportInputSchema>;
+export type CaptureBugreportOutput = z.infer<typeof CaptureBugreportOutputSchema>;
+export type CollectDiagnosticsInput = z.infer<typeof CollectDiagnosticsInputSchema>;
+export type CollectDiagnosticsOutput = z.infer<typeof CollectDiagnosticsOutputSchema>;
 export type CreateIssueInput = z.infer<typeof CreateIssueInputSchema>;
 export type CreateIssueOutput = z.infer<typeof CreateIssueOutputSchema>;

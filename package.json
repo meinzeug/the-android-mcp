@@ -1,6 +1,6 @@
 {
   "name": "the-android-mcp",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "description": "ADB-powered MCP server for Android app install, control, hot reload, screenshots, and test automation",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -22,7 +22,11 @@
     "build:dist": "node scripts/build.js",
     "prepare": "husky install",
     "postinstall": "node dist/postinstall.js",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "release": "npm run build && npm publish --access public",
+    "release:patch": "npm version patch --no-git-tag-version && npm run release",
+    "release:minor": "npm version minor --no-git-tag-version && npm run release",
+    "release:major": "npm version major --no-git-tag-version && npm run release"
   },
   "keywords": [
     "mcp",
