@@ -35,6 +35,7 @@ const QUEUE_PRESETS_FILE = path.join(APP_STATE_DIR, 'web-ui-queue-presets.json')
 const RECORDER_SESSIONS_FILE = path.join(APP_STATE_DIR, 'web-ui-recorder-sessions.json');
 const SCHEDULES_FILE = path.join(APP_STATE_DIR, 'web-ui-schedules.json');
 const ALERT_RULES_FILE = path.join(APP_STATE_DIR, 'web-ui-alert-rules.json');
+const DEVICE_BASELINES_FILE = path.join(APP_STATE_DIR, 'web-ui-device-baselines.json');
 
 const SNAPSHOT_KINDS = [
   'radio',
@@ -191,6 +192,13 @@ interface AlertIncident {
   acknowledgedAt?: string;
 }
 
+interface DeviceBaseline {
+  name: string;
+  deviceId?: string;
+  capturedAt: string;
+  profile: JsonObject;
+}
+
 const serverStartedAt = Date.now();
 let eventSeq = 1;
 let jobSeq = 1;
@@ -225,6 +233,7 @@ const scheduleRunning: Record<number, boolean> = {};
 let alertRules: Record<number, AlertRule> = loadAlertRules();
 const alertIncidents: AlertIncident[] = [];
 let schedulesInitialized = false;
+let deviceBaselines: Record<string, DeviceBaseline> = loadDeviceBaselines();
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -1046,6 +1055,56 @@ function loadAlertRules(): Record<number, AlertRule> {
 function saveAlertRules(): void {
   ensureAppStateDir();
   fs.writeFileSync(ALERT_RULES_FILE, JSON.stringify(alertRules, null, 2), 'utf8');
+}
+
+function loadDeviceBaselines(): Record<string, DeviceBaseline> {
+  try {
+    ensureAppStateDir();
+    if (!fs.existsSync(DEVICE_BASELINES_FILE)) {
+      fs.writeFileSync(DEVICE_BASELINES_FILE, JSON.stringify({}, null, 2), 'utf8');
+      return {};
+    }
+    const raw = fs.readFileSync(DEVICE_BASELINES_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    const result: Record<string, DeviceBaseline> = {};
+    for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!value || typeof value !== 'object') {
+        continue;
+      }
+      const item = value as Record<string, unknown>;
+      const baselineName = typeof item.name === 'string' && item.name.trim().length > 0 ? item.name.trim() : name;
+      if (!baselineName) {
+        continue;
+      }
+      const profile = item.profile && typeof item.profile === 'object' && !Array.isArray(item.profile)
+        ? (item.profile as JsonObject)
+        : undefined;
+      if (!profile) {
+        continue;
+      }
+      result[baselineName] = {
+        name: baselineName,
+        deviceId: typeof item.deviceId === 'string' ? item.deviceId : undefined,
+        capturedAt: typeof item.capturedAt === 'string' ? item.capturedAt : nowIso(),
+        profile,
+      };
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+function saveDeviceBaselines(): void {
+  ensureAppStateDir();
+  fs.writeFileSync(DEVICE_BASELINES_FILE, JSON.stringify(deviceBaselines, null, 2), 'utf8');
+}
+
+function listDeviceBaselines(): DeviceBaseline[] {
+  return Object.values(deviceBaselines).sort((a, b) => b.capturedAt.localeCompare(a.capturedAt));
 }
 
 function loadSchedules(): void {
@@ -2370,6 +2429,124 @@ function runOpsRunbook(body: JsonObject): JsonObject {
   throw new Error(`Unknown runbook '${name}'`);
 }
 
+function saveDeviceBaseline(nameRaw: string, body: JsonObject): DeviceBaseline {
+  const name = nameRaw.trim();
+  if (!name) {
+    throw new Error('baseline name is required');
+  }
+  const profile = buildDeviceProfile(
+    extractDeviceId(body),
+    typeof body.packageName === 'string' ? body.packageName : 'com.android.chrome'
+  );
+  const baseline: DeviceBaseline = {
+    name,
+    deviceId: typeof profile.deviceId === 'string' ? profile.deviceId : undefined,
+    capturedAt: nowIso(),
+    profile,
+  };
+  deviceBaselines[name] = baseline;
+  saveDeviceBaselines();
+  pushEvent('device-baseline-saved', 'Device baseline saved', {
+    name,
+    deviceId: baseline.deviceId,
+  });
+  return baseline;
+}
+
+function compareWithDeviceBaseline(nameRaw: string, body: JsonObject): JsonObject {
+  const name = nameRaw.trim();
+  if (!name) {
+    throw new Error('baseline name is required');
+  }
+  const baseline = deviceBaselines[name];
+  if (!baseline) {
+    throw new Error(`baseline '${name}' not found`);
+  }
+  const current = buildDeviceProfile(
+    extractDeviceId(body),
+    typeof body.packageName === 'string' ? body.packageName : 'com.android.chrome'
+  );
+  const diff = diffSnapshot(baseline.profile, current);
+  const scoreBefore = typeof baseline.profile.healthScore === 'number' ? baseline.profile.healthScore : undefined;
+  const scoreCurrent = typeof current.healthScore === 'number' ? current.healthScore : undefined;
+  const scoreDelta = typeof scoreBefore === 'number' && typeof scoreCurrent === 'number'
+    ? Math.round((scoreCurrent - scoreBefore) * 100) / 100
+    : undefined;
+
+  return {
+    ok: true,
+    baseline: {
+      name: baseline.name,
+      deviceId: baseline.deviceId,
+      capturedAt: baseline.capturedAt,
+      healthScore: scoreBefore,
+    },
+    current: {
+      deviceId: current.deviceId,
+      capturedAt: current.capturedAt,
+      healthScore: scoreCurrent,
+    },
+    healthScoreDelta: scoreDelta,
+    diff,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function buildDiagnosticsReport(host: string, port: number): JsonObject {
+  const state = buildStatePayload(host, port);
+  const heatmap = buildLaneHeatmap();
+  const queueBoard = buildQueueBoard();
+  const failedJobs = jobs
+    .filter(job => job.status === 'failed')
+    .slice(0, 30)
+    .map(job => ({
+      id: job.id,
+      type: job.type,
+      laneId: job.laneId,
+      finishedAt: job.finishedAt,
+      error: job.error,
+    }));
+  const alerts = {
+    rules: listAlertRules(),
+    incidents: listAlertIncidents(80),
+  };
+
+  const markdownLines = [
+    '# the-android-mcp diagnostics report',
+    '',
+    `generatedAt: ${nowIso()}`,
+    `endpoint: ${state.endpoint}`,
+    `version: ${state.version}`,
+    '',
+    '## state',
+    `- queueDepth: ${state.queueDepth}`,
+    `- laneCount: ${state.laneCount}`,
+    `- pausedLaneCount: ${state.pausedLaneCount}`,
+    `- activeLaneCount: ${state.activeLaneCount}`,
+    `- connectedDeviceCount: ${state.connectedDeviceCount}`,
+    `- scheduleCount: ${state.scheduleCount}`,
+    '',
+    '## alerts',
+    `- rules: ${alerts.rules.length}`,
+    `- incidents: ${alerts.incidents.length}`,
+    '',
+    '## failed jobs (top)',
+    ...failedJobs.slice(0, 10).map(item => `- #${item.id} ${item.type} lane=${item.laneId} error=${item.error || '-'}`),
+  ];
+
+  return {
+    ok: true,
+    generatedAt: nowIso(),
+    state,
+    heatmap,
+    queueBoard,
+    failedJobs,
+    alerts,
+    markdown: markdownLines.join('\n'),
+    updateHint: UPDATE_HINT,
+  };
+}
+
 function runbookCatalog(): JsonObject[] {
   return [
     {
@@ -3423,6 +3600,26 @@ async function handleApi(
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/alerts/incidents/ack-all') {
+    await withMetric('alerts-incidents-ack-all', () => {
+      let acknowledged = 0;
+      for (const incident of alertIncidents) {
+        if (!incident.acknowledgedAt) {
+          incident.acknowledgedAt = nowIso();
+          acknowledged += 1;
+        }
+      }
+      pushEvent('alert-incidents-ack-all', 'All open alert incidents acknowledged', {
+        acknowledged,
+      });
+      sendJson(response, 200, {
+        ok: true,
+        acknowledged,
+      });
+    });
+    return;
+  }
+
   if (method === 'GET' && pathname === '/api/dashboard') {
     await withMetric('dashboard', () => {
       sendJson(response, 200, buildDashboardPayload(context.host, context.port));
@@ -3433,6 +3630,13 @@ async function handleApi(
   if (method === 'GET' && pathname === '/api/ops/board') {
     await withMetric('ops-board', () => {
       sendJson(response, 200, buildOpsBoard(context.host, context.port));
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/diagnostics/report') {
+    await withMetric('diagnostics-report', () => {
+      sendJson(response, 200, buildDiagnosticsReport(context.host, context.port));
     });
     return;
   }
@@ -3469,6 +3673,16 @@ async function handleApi(
         devices,
         count: devices.length,
         updateHint: UPDATE_HINT,
+      });
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/device/baselines') {
+    await withMetric('device-baselines-list', () => {
+      sendJson(response, 200, {
+        ok: true,
+        baselines: listDeviceBaselines(),
       });
     });
     return;
@@ -4173,6 +4387,45 @@ async function handleApi(
       const body = await readJsonBody(request);
       const result = runDeviceSmokeScenario(body);
       sendJson(response, 200, result);
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/device/baselines/save') {
+    await withMetric('device-baselines-save', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name : '';
+      try {
+        const baseline = saveDeviceBaseline(name, body);
+        sendJson(response, 200, {
+          ok: true,
+          baseline,
+          updateHint: UPDATE_HINT,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/device/compare-baseline') {
+    await withMetric('device-compare-baseline', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name : '';
+      try {
+        const result = compareWithDeviceBaseline(name, body);
+        pushEvent('device-compare-baseline', 'Device compared with baseline', {
+          name,
+          healthScoreDelta: result.healthScoreDelta,
+          changedCount: result.diff && typeof result.diff === 'object' ? (result.diff as Record<string, unknown>).changedCount : undefined,
+        });
+        sendJson(response, 200, result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
     });
     return;
   }
@@ -4886,6 +5139,17 @@ https://developer.android.com</textarea>
             <button class="s" id="queue-export-btn">Export queue</button>
             <button class="p" id="queue-import-btn">Import queue</button>
           </div>
+          <hr style="border:0;border-top:1px solid #2f4a61;" />
+          <input id="baseline-name" placeholder="baseline name" value="primary-device" />
+          <div class="split">
+            <button class="s" id="baseline-save-btn">Save baseline</button>
+            <button class="p" id="baseline-compare-btn">Compare baseline</button>
+          </div>
+          <button class="s" id="baseline-list-btn">List baselines</button>
+          <div class="split">
+            <button class="w" id="alerts-ack-all-btn">Ack all incidents</button>
+            <button class="s" id="diagnostics-report-btn">Load diagnostics report</button>
+          </div>
         </article>
 
         <article class="card stack">
@@ -4975,6 +5239,7 @@ https://developer.android.com</textarea>
       const $alertCooldown = document.getElementById('alert-cooldown');
       const $alerts = document.getElementById('alerts');
       const $queueImportExport = document.getElementById('queue-import-export');
+      const $baselineName = document.getElementById('baseline-name');
 
       function setMessage(text, isError) {
         $message.textContent = text;
@@ -6124,6 +6389,57 @@ https://developer.android.com</textarea>
         await refreshJobsAndLanes();
       }
 
+      async function saveBaselineUi() {
+        const name = ($baselineName.value || '').trim();
+        if (!name) {
+          throw new Error('baseline name required');
+        }
+        const result = await api('/api/device/baselines/save', 'POST', {
+          name,
+          deviceId: selectedDeviceId(),
+          packageName: 'com.android.chrome',
+        });
+        renderOutput(result);
+        setMessage('Baseline saved', false);
+      }
+
+      async function compareBaselineUi() {
+        const name = ($baselineName.value || '').trim();
+        if (!name) {
+          throw new Error('baseline name required');
+        }
+        const result = await api('/api/device/compare-baseline', 'POST', {
+          name,
+          deviceId: selectedDeviceId(),
+          packageName: 'com.android.chrome',
+        });
+        renderOutput(result);
+        setMessage('Baseline compared', false);
+      }
+
+      async function listBaselinesUi() {
+        const result = await api('/api/device/baselines');
+        renderOutput(result);
+        const baselines = Array.isArray(result.baselines) ? result.baselines : [];
+        if (baselines.length > 0) {
+          $baselineName.value = baselines[0].name;
+        }
+        setMessage('Baselines listed', false);
+      }
+
+      async function ackAllAlertsUi() {
+        const result = await api('/api/alerts/incidents/ack-all', 'POST', {});
+        renderOutput(result);
+        setMessage('All incidents acknowledged', false);
+        await loadAlertsUi();
+      }
+
+      async function loadDiagnosticsReportUi() {
+        const result = await api('/api/diagnostics/report');
+        renderOutput(result);
+        setMessage('Diagnostics report loaded', false);
+      }
+
       document.getElementById('open-url-btn').addEventListener('click', async function () {
         try { await openUrl($urlInput.value); } catch (error) { setMessage(String(error), true); }
       });
@@ -6298,6 +6614,21 @@ https://developer.android.com</textarea>
       document.getElementById('queue-import-btn').addEventListener('click', async function () {
         try { await importQueueUi(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('baseline-save-btn').addEventListener('click', async function () {
+        try { await saveBaselineUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('baseline-compare-btn').addEventListener('click', async function () {
+        try { await compareBaselineUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('baseline-list-btn').addEventListener('click', async function () {
+        try { await listBaselinesUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('alerts-ack-all-btn').addEventListener('click', async function () {
+        try { await ackAllAlertsUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('diagnostics-report-btn').addEventListener('click', async function () {
+        try { await loadDiagnosticsReportUi(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('clear-output-btn').addEventListener('click', function () {
         renderOutput({});
       });
@@ -6345,6 +6676,7 @@ https://developer.android.com</textarea>
           await loadQueueBoardUi();
           await listSchedulesUi();
           await loadAlertsUi();
+          await listBaselinesUi();
           renderOutput({ ok: true, message: 'UI ready', updateHint: '${UPDATE_HINT}' });
           setMessage('Ready.', false);
 
@@ -6369,6 +6701,11 @@ https://developer.android.com</textarea>
                 rules: rulesPayload.rules || [],
                 incidents: incidentsPayload.incidents || [],
               });
+              const baselinesPayload = await api('/api/device/baselines');
+              const baselines = Array.isArray(baselinesPayload.baselines) ? baselinesPayload.baselines : [];
+              if (baselines.length > 0 && (!$baselineName.value || !$baselineName.value.trim())) {
+                $baselineName.value = baselines[0].name;
+              }
             } catch (error) {
               setMessage('Background refresh failed', true);
             }
