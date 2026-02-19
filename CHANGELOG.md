@@ -24,6 +24,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.4.0] - 2026-02-19
+### Added
+- Multi-lane job orchestration backend for device-scoped queues with new APIs:
+- `GET /api/lanes`
+- `POST /api/jobs/bulk`
+- `POST /api/jobs/:id/retry`
+- New session lifecycle APIs:
+- `GET /api/session/export`
+- `POST /api/session/reset`
+- New profile matrix endpoint: `POST /api/device/profiles` for multi-device profiling.
+- Persistent session event log written to `~/.the-android-mcp/web-ui-session-events.ndjson`.
+
+### Improved
+- Web UI upgraded with dedicated panels for lanes, queue jobs, bulk enqueue, retry/cancel, and session controls.
+- Job execution now runs per-lane with concurrent lane processing and sequential execution inside each lane.
+- Event/metric coverage expanded for queue, lane, session, and profile operations.
+
 ## [3.3.0] - 2026-02-19
 ### Added
 - Job orchestrator APIs for queued backend execution:
