@@ -23,6 +23,7 @@ export const DEFAULT_WEB_UI_PORT = 50000;
 const UPDATE_HINT = 'npm install -g the-android-mcp@latest';
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_EVENTS = 500;
+const MAX_JOBS = 250;
 const WORKFLOW_DIR = path.join(os.homedir(), '.the-android-mcp');
 const WORKFLOW_FILE = path.join(WORKFLOW_DIR, 'web-ui-workflows.json');
 
@@ -34,6 +35,7 @@ const SNAPSHOT_KINDS = [
   'package-inventory',
 ] as const;
 type SnapshotKind = (typeof SNAPSHOT_KINDS)[number];
+type JobType = 'open_url' | 'snapshot_suite' | 'stress_run' | 'workflow_run';
 
 type JsonObject = Record<string, unknown>;
 
@@ -73,13 +75,30 @@ interface WorkflowDefinition {
   steps: WorkflowStep[];
 }
 
+interface JobRecord {
+  id: number;
+  type: JobType;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  durationMs?: number;
+  input: JsonObject;
+  result?: unknown;
+  error?: string;
+}
+
 const serverStartedAt = Date.now();
 let eventSeq = 1;
+let jobSeq = 1;
 const eventHistory: UiEvent[] = [];
 const sseClients = new Set<ServerResponse>();
 const metrics: Record<string, MetricEntry> = {};
 const snapshotCache: Partial<Record<SnapshotKind, unknown>> = {};
 let workflows: Record<string, WorkflowDefinition> = loadWorkflows();
+const jobs: JobRecord[] = [];
+const jobQueue: number[] = [];
+let jobRunnerActive = false;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -89,47 +108,16 @@ function isSnapshotKind(value: string): value is SnapshotKind {
   return SNAPSHOT_KINDS.includes(value as SnapshotKind);
 }
 
+function isJobType(value: string): value is JobType {
+  return value === 'open_url' || value === 'snapshot_suite' || value === 'stress_run' || value === 'workflow_run';
+}
+
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
   }
   const parsed = Math.trunc(value);
   return Math.max(min, Math.min(max, parsed));
-}
-
-function trackMetric(name: string, durationMs: number, ok: boolean, errorMessage?: string): void {
-  const entry = metrics[name] ?? {
-    name,
-    count: 0,
-    success: 0,
-    errors: 0,
-    totalDurationMs: 0,
-    lastDurationMs: 0,
-  };
-  entry.count += 1;
-  entry.totalDurationMs += durationMs;
-  entry.lastDurationMs = durationMs;
-  entry.lastAt = nowIso();
-  if (ok) {
-    entry.success += 1;
-  } else {
-    entry.errors += 1;
-    entry.lastError = errorMessage;
-  }
-  metrics[name] = entry;
-}
-
-async function withMetric<T>(name: string, fn: () => Promise<T> | T): Promise<T> {
-  const startedAt = Date.now();
-  try {
-    const result = await fn();
-    trackMetric(name, Date.now() - startedAt, true);
-    return result;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    trackMetric(name, Date.now() - startedAt, false, message);
-    throw error;
-  }
 }
 
 function pushEvent(type: string, message: string, data?: unknown): UiEvent {
@@ -161,6 +149,42 @@ function broadcastEvent(event: UiEvent): void {
       }
       sseClients.delete(client);
     }
+  }
+}
+
+function trackMetric(name: string, durationMs: number, ok: boolean, errorMessage?: string): void {
+  const entry = metrics[name] ?? {
+    name,
+    count: 0,
+    success: 0,
+    errors: 0,
+    totalDurationMs: 0,
+    lastDurationMs: 0,
+  };
+
+  entry.count += 1;
+  entry.totalDurationMs += durationMs;
+  entry.lastDurationMs = durationMs;
+  entry.lastAt = nowIso();
+  if (ok) {
+    entry.success += 1;
+  } else {
+    entry.errors += 1;
+    entry.lastError = errorMessage;
+  }
+  metrics[name] = entry;
+}
+
+async function withMetric<T>(name: string, fn: () => Promise<T> | T): Promise<T> {
+  const startedAt = Date.now();
+  try {
+    const result = await fn();
+    trackMetric(name, Date.now() - startedAt, true);
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    trackMetric(name, Date.now() - startedAt, false, message);
+    throw error;
   }
 }
 
@@ -220,7 +244,7 @@ function summarizeObjectShape(input: unknown): JsonObject {
 
 function normalizeWorkflowStep(value: unknown): WorkflowStep {
   if (!value || typeof value !== 'object') {
-    throw new Error('Invalid workflow step (must be object)');
+    throw new Error('Invalid workflow step: object expected');
   }
   const step = value as Record<string, unknown>;
   const type = step.type;
@@ -235,7 +259,7 @@ function normalizeWorkflowStep(value: unknown): WorkflowStep {
       throw new Error('Workflow open_url step requires valid url');
     }
     normalized.url = step.url;
-    normalized.waitForReadyMs = clampInt(step.waitForReadyMs, 1200, 200, 10000);
+    normalized.waitForReadyMs = clampInt(step.waitForReadyMs, 1000, 200, 10000);
     return normalized;
   }
 
@@ -270,28 +294,25 @@ function ensureWorkflowStore(): void {
 
 function defaultWorkflows(): Record<string, WorkflowDefinition> {
   const createdAt = nowIso();
-  const smoke: WorkflowDefinition = {
-    name: 'smoke-web-flow',
-    description: 'Open three URLs and capture radio/display quickly.',
-    updatedAt: createdAt,
-    steps: [
-      { type: 'open_url', url: 'https://www.wikipedia.org', waitForReadyMs: 1000 },
-      { type: 'snapshot', snapshot: 'radio' },
-      { type: 'open_url', url: 'https://news.ycombinator.com', waitForReadyMs: 1000 },
-      { type: 'snapshot', snapshot: 'display' },
-      { type: 'open_url', url: 'https://developer.android.com', waitForReadyMs: 1000 },
-    ],
-  };
-  const diagnostic: WorkflowDefinition = {
-    name: 'diagnostic-suite',
-    description: 'Capture full v3 snapshot suite for current device.',
-    updatedAt: createdAt,
-    steps: [{ type: 'snapshot_suite', packageName: 'com.android.chrome' }],
-  };
-
   return {
-    [smoke.name]: smoke,
-    [diagnostic.name]: diagnostic,
+    'smoke-web-flow': {
+      name: 'smoke-web-flow',
+      description: 'Open URLs and collect quick snapshots.',
+      updatedAt: createdAt,
+      steps: [
+        { type: 'open_url', url: 'https://www.wikipedia.org', waitForReadyMs: 1000 },
+        { type: 'snapshot', snapshot: 'radio' },
+        { type: 'open_url', url: 'https://news.ycombinator.com', waitForReadyMs: 1000 },
+        { type: 'snapshot', snapshot: 'display' },
+        { type: 'open_url', url: 'https://developer.android.com', waitForReadyMs: 1000 },
+      ],
+    },
+    'diagnostic-suite': {
+      name: 'diagnostic-suite',
+      description: 'Run complete v3 suite.',
+      updatedAt: createdAt,
+      steps: [{ type: 'snapshot_suite', packageName: 'com.android.chrome' }],
+    },
   };
 }
 
@@ -306,7 +327,7 @@ function loadWorkflows(): Record<string, WorkflowDefinition> {
 
     const raw = fs.readFileSync(WORKFLOW_FILE, 'utf8');
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return defaultWorkflows();
     }
 
@@ -320,7 +341,17 @@ function loadWorkflows(): Record<string, WorkflowDefinition> {
         continue;
       }
       const stepsValue = Array.isArray(item.steps) ? item.steps : [];
-      const steps = stepsValue.map(step => normalizeWorkflowStep(step));
+      const steps: WorkflowStep[] = [];
+      for (const stepValue of stepsValue) {
+        try {
+          steps.push(normalizeWorkflowStep(stepValue));
+        } catch {
+          // skip invalid step
+        }
+      }
+      if (steps.length === 0) {
+        continue;
+      }
       result[name] = {
         name,
         description: typeof item.description === 'string' ? item.description : undefined,
@@ -332,7 +363,6 @@ function loadWorkflows(): Record<string, WorkflowDefinition> {
     if (Object.keys(result).length === 0) {
       return defaultWorkflows();
     }
-
     return result;
   } catch {
     return defaultWorkflows();
@@ -441,7 +471,7 @@ function captureSnapshot(kind: SnapshotKind, options: {
 
 function diffSnapshot(prev: unknown, next: unknown): JsonObject {
   if (!prev || typeof prev !== 'object' || !next || typeof next !== 'object') {
-    return { changedCount: 0, changed: [], note: 'No comparable snapshots' };
+    return { changedCount: 0, changed: [], note: 'No comparable snapshots available' };
   }
 
   const a = prev as Record<string, unknown>;
@@ -470,7 +500,12 @@ function diffSnapshot(prev: unknown, next: unknown): JsonObject {
     const oldJson = JSON.stringify(oldValue);
     const newJson = JSON.stringify(newValue);
     if (oldJson !== newJson) {
-      changed.push({ key, type: 'value', before: oldValue, after: newValue });
+      changed.push({
+        key,
+        type: 'value',
+        before: oldValue,
+        after: newValue,
+      });
     }
   }
 
@@ -501,12 +536,85 @@ function getSnapshotSuite(deviceId?: string, packageName?: string): JsonObject {
   };
 }
 
+function buildDeviceProfile(deviceId?: string, packageName?: string): JsonObject {
+  const startedAt = Date.now();
+  const radio = captureAndroidRadioSnapshot({
+    deviceId,
+    includeWifiDump: false,
+    includeTelephonyDump: false,
+    includeBluetoothDump: false,
+    includeIpState: true,
+    includeConnectivityDump: false,
+  });
+  const display = captureAndroidDisplaySnapshot({
+    deviceId,
+    includeDisplayDump: false,
+    includeWindowDump: false,
+    includeSurfaceFlinger: false,
+  });
+  const location = captureAndroidLocationSnapshot({
+    deviceId,
+    packageName,
+    includeLocationDump: false,
+    includeLocationAppOps: true,
+  });
+  const power = captureAndroidPowerIdleSnapshot({
+    deviceId,
+    includePowerDump: false,
+    includeDeviceIdle: false,
+    includeBatteryStats: false,
+    includeThermal: false,
+  });
+  const packages = captureAndroidPackageInventorySnapshot({
+    deviceId,
+    includeThirdParty: true,
+    includeSystem: true,
+    includeDisabled: true,
+    includePackagePaths: false,
+    includeFeatures: false,
+    packageListLines: 600,
+  });
+
+  return {
+    capturedAt: nowIso(),
+    durationMs: Date.now() - startedAt,
+    deviceId: radio.deviceId,
+    radio: {
+      wifiEnabled: radio.wifiEnabled,
+      mobileDataEnabled: radio.mobileDataEnabled,
+      airplaneMode: radio.airplaneMode,
+      bluetoothEnabled: radio.bluetoothEnabled,
+    },
+    display: {
+      wmSize: display.wmSize,
+      wmDensity: display.wmDensity,
+      brightness: display.screenBrightness,
+      rotation: display.userRotation,
+    },
+    location: {
+      mode: location.locationMode,
+      mockLocation: location.mockLocation,
+      appOps: compactStringSummary(location.locationAppOps),
+    },
+    power: {
+      battery: compactStringSummary(power.battery),
+    },
+    packages: {
+      total: packages.packageCount,
+      thirdParty: packages.thirdPartyCount,
+      system: packages.systemCount,
+      disabled: packages.disabledCount,
+    },
+  };
+}
+
 function runStressScenario(body: JsonObject): JsonObject {
   const deviceId = extractDeviceId(body);
   const urlsValue = body.urls;
   const urls = Array.isArray(urlsValue)
     ? urlsValue.filter((entry): entry is string => typeof entry === 'string' && /^https?:\/\//i.test(entry))
     : [];
+
   const normalizedUrls =
     urls.length > 0
       ? urls
@@ -520,24 +628,24 @@ function runStressScenario(body: JsonObject): JsonObject {
   const steps: JsonObject[] = [];
 
   for (let loop = 1; loop <= loops; loop += 1) {
-    for (const url of normalizedUrls) {
-      const actionStarted = Date.now();
-      const open = openUrlInChrome(url, deviceId, {
+    for (const targetUrl of normalizedUrls) {
+      const openStarted = Date.now();
+      const open = openUrlInChrome(targetUrl, deviceId, {
         waitForReadyMs,
         fallbackToDefault: true,
       });
 
-      const record: JsonObject = {
+      const step: JsonObject = {
         kind: 'open_url',
         loop,
-        url,
+        url: targetUrl,
         strategy: open.strategy,
         deviceId: open.deviceId,
-        durationMs: Date.now() - actionStarted,
+        durationMs: Date.now() - openStarted,
       };
 
       if (includeSnapshotAfterEach) {
-        const snapshotStarted = Date.now();
+        const snapStarted = Date.now();
         const radio = captureAndroidRadioSnapshot({ deviceId: open.deviceId, includeWifiDump: false });
         const display = captureAndroidDisplaySnapshot({
           deviceId: open.deviceId,
@@ -545,8 +653,8 @@ function runStressScenario(body: JsonObject): JsonObject {
           includeWindowDump: false,
           includeSurfaceFlinger: false,
         });
-        record.snapshot = {
-          durationMs: Date.now() - snapshotStarted,
+        step.snapshot = {
+          durationMs: Date.now() - snapStarted,
           radio: {
             wifiEnabled: radio.wifiEnabled,
             mobileDataEnabled: radio.mobileDataEnabled,
@@ -555,12 +663,12 @@ function runStressScenario(body: JsonObject): JsonObject {
           display: {
             wmSize: display.wmSize,
             wmDensity: display.wmDensity,
-            screenBrightness: display.screenBrightness,
+            brightness: display.screenBrightness,
           },
         };
       }
 
-      steps.push(record);
+      steps.push(step);
     }
   }
 
@@ -596,7 +704,7 @@ async function runWorkflow(name: string, options: {
 
     if (step.type === 'open_url') {
       const result = openUrlInChrome(step.url || 'https://www.wikipedia.org', options.deviceId, {
-        waitForReadyMs: clampInt(step.waitForReadyMs, 1200, 200, 10000),
+        waitForReadyMs: clampInt(step.waitForReadyMs, 1000, 200, 10000),
         fallbackToDefault: true,
       });
       outputs.push({
@@ -610,15 +718,15 @@ async function runWorkflow(name: string, options: {
     }
 
     if (step.type === 'snapshot') {
-      const snapshotKind = step.snapshot || 'radio';
-      const snapshot = captureSnapshot(snapshotKind, {
+      const kind = step.snapshot || 'radio';
+      const snapshot = captureSnapshot(kind, {
         deviceId: options.deviceId,
         packageName: step.packageName || options.packageName,
         includeRaw: step.includeRaw === true || options.includeRaw === true,
       });
       outputs.push({
         step: 'snapshot',
-        snapshotKind,
+        snapshotKind: kind,
         durationMs: Date.now() - stepStarted,
         snapshot,
       });
@@ -655,6 +763,148 @@ async function runWorkflow(name: string, options: {
     durationMs: Date.now() - startedAt,
     updateHint: UPDATE_HINT,
   };
+}
+
+function createJob(type: JobType, input: JsonObject): JobRecord {
+  const job: JobRecord = {
+    id: jobSeq++,
+    type,
+    status: 'queued',
+    createdAt: nowIso(),
+    input,
+  };
+
+  jobs.unshift(job);
+  if (jobs.length > MAX_JOBS) {
+    jobs.splice(MAX_JOBS);
+  }
+  jobQueue.push(job.id);
+  pushEvent('job-queued', 'Job queued', { id: job.id, type: job.type });
+  void runJobQueue();
+  return job;
+}
+
+function getJobById(id: number): JobRecord | undefined {
+  return jobs.find(job => job.id === id);
+}
+
+function cancelQueuedJob(id: number): boolean {
+  const job = getJobById(id);
+  if (!job) {
+    return false;
+  }
+  if (job.status !== 'queued') {
+    return false;
+  }
+  job.status = 'cancelled';
+  job.finishedAt = nowIso();
+  job.durationMs = 0;
+  const queueIndex = jobQueue.indexOf(id);
+  if (queueIndex >= 0) {
+    jobQueue.splice(queueIndex, 1);
+  }
+  pushEvent('job-cancelled', 'Job cancelled', { id });
+  return true;
+}
+
+async function executeJob(job: JobRecord): Promise<unknown> {
+  if (job.type === 'open_url') {
+    const urlValue = typeof job.input.url === 'string' ? job.input.url : '';
+    if (!urlValue || !/^https?:\/\//i.test(urlValue)) {
+      throw new Error('Job open_url requires valid url');
+    }
+    const waitForReadyMs = clampInt(job.input.waitForReadyMs, 1000, 200, 10000);
+    return openUrlInChrome(urlValue, typeof job.input.deviceId === 'string' ? job.input.deviceId : undefined, {
+      waitForReadyMs,
+      fallbackToDefault: true,
+    });
+  }
+
+  if (job.type === 'snapshot_suite') {
+    return getSnapshotSuite(
+      typeof job.input.deviceId === 'string' ? job.input.deviceId : undefined,
+      typeof job.input.packageName === 'string' ? job.input.packageName : undefined
+    );
+  }
+
+  if (job.type === 'stress_run') {
+    return runStressScenario(job.input);
+  }
+
+  const workflowName = typeof job.input.name === 'string' ? job.input.name : '';
+  if (!workflowName) {
+    throw new Error('Job workflow_run requires workflow name');
+  }
+  return await runWorkflow(workflowName, {
+    deviceId: typeof job.input.deviceId === 'string' ? job.input.deviceId : undefined,
+    packageName: typeof job.input.packageName === 'string' ? job.input.packageName : undefined,
+    includeRaw: job.input.includeRaw === true,
+  });
+}
+
+async function runJobQueue(): Promise<void> {
+  if (jobRunnerActive) {
+    return;
+  }
+  jobRunnerActive = true;
+
+  while (jobQueue.length > 0) {
+    const jobId = jobQueue.shift();
+    if (!jobId) {
+      continue;
+    }
+    const job = getJobById(jobId);
+    if (!job || job.status !== 'queued') {
+      continue;
+    }
+
+    job.status = 'running';
+    job.startedAt = nowIso();
+    pushEvent('job-running', 'Job started', { id: job.id, type: job.type });
+
+    const startedAtMs = Date.now();
+    try {
+      const result = await executeJob(job);
+      job.result = result;
+      job.status = 'completed';
+      job.finishedAt = nowIso();
+      job.durationMs = Date.now() - startedAtMs;
+      pushEvent('job-completed', 'Job completed', {
+        id: job.id,
+        type: job.type,
+        durationMs: job.durationMs,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      job.status = 'failed';
+      job.error = message;
+      job.finishedAt = nowIso();
+      job.durationMs = Date.now() - startedAtMs;
+      pushEvent('job-failed', 'Job failed', {
+        id: job.id,
+        type: job.type,
+        error: message,
+      });
+    }
+  }
+
+  jobRunnerActive = false;
+}
+
+function listJobSummaries(): JsonObject[] {
+  return jobs
+    .slice()
+    .sort((a, b) => b.id - a.id)
+    .map(job => ({
+      id: job.id,
+      type: job.type,
+      status: job.status,
+      createdAt: job.createdAt,
+      startedAt: job.startedAt,
+      finishedAt: job.finishedAt,
+      durationMs: job.durationMs,
+      error: job.error,
+    }));
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<JsonObject> {
@@ -756,25 +1006,27 @@ function buildStatePayload(host: string, port: number): JsonObject {
     connectedDeviceCount: devices.length,
     eventCount: eventHistory.length,
     workflowCount: Object.keys(workflows).length,
+    queueDepth: jobQueue.length,
+    jobCount: jobs.length,
     snapshotKinds: SNAPSHOT_KINDS,
   };
 }
 
 function buildMetricsPayload(): JsonObject {
-  const items = Object.values(metrics)
+  const entries = Object.values(metrics)
     .sort((a, b) => b.count - a.count)
-    .map(item => ({
-      ...item,
-      avgDurationMs: item.count > 0 ? Math.round((item.totalDurationMs / item.count) * 100) / 100 : 0,
-      successRate: item.count > 0 ? Math.round((item.success / item.count) * 10000) / 100 : 0,
+    .map(entry => ({
+      ...entry,
+      avgDurationMs: entry.count > 0 ? Math.round((entry.totalDurationMs / entry.count) * 100) / 100 : 0,
+      successRate: entry.count > 0 ? Math.round((entry.success / entry.count) * 10000) / 100 : 0,
     }));
 
   return {
     generatedAt: nowIso(),
     uptimeMs: Date.now() - serverStartedAt,
-    totalActions: items.reduce((sum, item) => sum + item.count, 0),
-    errors: items.reduce((sum, item) => sum + item.errors, 0),
-    entries: items,
+    totalActions: entries.reduce((sum, item) => sum + item.count, 0),
+    errors: entries.reduce((sum, item) => sum + item.errors, 0),
+    entries,
   };
 }
 
@@ -845,11 +1097,142 @@ async function handleApi(
     return;
   }
 
+  if (method === 'GET' && pathname === '/api/jobs') {
+    await withMetric('jobs-list', () => {
+      sendJson(response, 200, {
+        jobs: listJobSummaries(),
+        queueDepth: jobQueue.length,
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/jobs') {
+    await withMetric('jobs-create', async () => {
+      const body = await readJsonBody(request);
+      const typeValue = typeof body.type === 'string' ? body.type : '';
+      if (!isJobType(typeValue)) {
+        sendJson(response, 400, { error: 'type must be one of open_url, snapshot_suite, stress_run, workflow_run' });
+        return;
+      }
+
+      const input = body.input && typeof body.input === 'object' && !Array.isArray(body.input)
+        ? (body.input as JsonObject)
+        : {};
+
+      const job = createJob(typeValue, input);
+      sendJson(response, 200, {
+        ok: true,
+        job,
+        queueDepth: jobQueue.length,
+      });
+    });
+    return;
+  }
+
+  if (method === 'GET' && /^\/api\/jobs\/\d+$/.test(pathname)) {
+    await withMetric('jobs-get', () => {
+      const id = Number(pathname.slice('/api/jobs/'.length));
+      const job = getJobById(id);
+      if (!job) {
+        sendJson(response, 404, { error: `job ${id} not found` });
+        return;
+      }
+      sendJson(response, 200, { ok: true, job });
+    });
+    return;
+  }
+
+  if (method === 'POST' && /^\/api\/jobs\/\d+\/cancel$/.test(pathname)) {
+    await withMetric('jobs-cancel', () => {
+      const id = Number(pathname.split('/')[3]);
+      const ok = cancelQueuedJob(id);
+      if (!ok) {
+        sendJson(response, 400, { error: `job ${id} cannot be cancelled` });
+        return;
+      }
+      sendJson(response, 200, { ok: true, id });
+    });
+    return;
+  }
+
   if (method === 'GET' && pathname === '/api/workflows') {
     await withMetric('workflows-list', () => {
       sendJson(response, 200, {
         workflows: workflowsList(),
         count: Object.keys(workflows).length,
+      });
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/workflows/export') {
+    await withMetric('workflows-export', () => {
+      sendJson(response, 200, {
+        exportedAt: nowIso(),
+        workflows,
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/workflows/import') {
+    await withMetric('workflows-import', async () => {
+      const body = await readJsonBody(request);
+      const replace = body.replace === true;
+      const payload = body.workflows;
+
+      const imported: Record<string, WorkflowDefinition> = replace ? {} : { ...workflows };
+
+      const consumeDefinition = (value: unknown): void => {
+        if (!value || typeof value !== 'object') {
+          return;
+        }
+        const item = value as Record<string, unknown>;
+        const name = typeof item.name === 'string' ? item.name.trim() : '';
+        if (!name) {
+          return;
+        }
+        const stepsRaw = Array.isArray(item.steps) ? item.steps : [];
+        const steps: WorkflowStep[] = [];
+        for (const stepValue of stepsRaw) {
+          steps.push(normalizeWorkflowStep(stepValue));
+        }
+        if (steps.length === 0) {
+          return;
+        }
+        imported[name] = {
+          name,
+          description: typeof item.description === 'string' ? item.description : undefined,
+          updatedAt: nowIso(),
+          steps,
+        };
+      };
+
+      if (Array.isArray(payload)) {
+        for (const value of payload) {
+          consumeDefinition(value);
+        }
+      } else if (payload && typeof payload === 'object') {
+        for (const value of Object.values(payload as Record<string, unknown>)) {
+          consumeDefinition(value);
+        }
+      } else {
+        sendJson(response, 400, { error: 'workflows must be array or object' });
+        return;
+      }
+
+      workflows = imported;
+      saveWorkflows();
+      pushEvent('workflow-import', 'Workflows imported', {
+        count: Object.keys(workflows).length,
+        replace,
+      });
+
+      sendJson(response, 200, {
+        ok: true,
+        count: Object.keys(workflows).length,
+        workflows: workflowsList(),
       });
     });
     return;
@@ -872,13 +1255,12 @@ async function handleApi(
       }
 
       const steps = stepsRaw.map(step => normalizeWorkflowStep(step));
-      const workflow: WorkflowDefinition = {
+      workflows[name] = {
         name,
         description,
         updatedAt: nowIso(),
         steps,
       };
-      workflows[name] = workflow;
       saveWorkflows();
 
       pushEvent('workflow-saved', 'Workflow saved', {
@@ -888,7 +1270,7 @@ async function handleApi(
 
       sendJson(response, 200, {
         ok: true,
-        workflow,
+        workflow: workflows[name],
       });
     });
     return;
@@ -905,11 +1287,10 @@ async function handleApi(
         sendJson(response, 404, { error: `workflow '${name}' not found` });
         return;
       }
+
       delete workflows[name];
       saveWorkflows();
-
       pushEvent('workflow-deleted', 'Workflow deleted', { name });
-
       sendJson(response, 200, { ok: true, name });
     });
     return;
@@ -948,12 +1329,10 @@ async function handleApi(
         sendJson(response, 400, { error: 'url must be valid http/https URL' });
         return;
       }
-      const deviceId = extractDeviceId(body);
-      const waitForReadyMs = clampInt(body.waitForReadyMs, 1200, 200, 10000);
 
       const startedAt = Date.now();
-      const result = openUrlInChrome(targetUrl, deviceId, {
-        waitForReadyMs,
+      const result = openUrlInChrome(targetUrl, extractDeviceId(body), {
+        waitForReadyMs: clampInt(body.waitForReadyMs, 1000, 200, 10000),
         fallbackToDefault: true,
       });
 
@@ -974,6 +1353,28 @@ async function handleApi(
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/device/profile') {
+    await withMetric('device-profile', async () => {
+      const body = await readJsonBody(request);
+      const profile = buildDeviceProfile(
+        extractDeviceId(body),
+        typeof body.packageName === 'string' ? body.packageName : undefined
+      );
+
+      pushEvent('device-profile', 'Device profile captured', {
+        deviceId: profile.deviceId,
+        durationMs: profile.durationMs,
+      });
+
+      sendJson(response, 200, {
+        ok: true,
+        profile,
+        updateHint: UPDATE_HINT,
+      });
+    });
+    return;
+  }
+
   if (method === 'POST' && pathname === '/api/snapshot-suite') {
     await withMetric('snapshot-suite', async () => {
       const body = await readJsonBody(request);
@@ -981,9 +1382,11 @@ async function handleApi(
         extractDeviceId(body),
         typeof body.packageName === 'string' ? body.packageName : undefined
       );
+
       pushEvent('snapshot-suite', 'Captured full snapshot suite', {
         durationMs: suite.durationMs,
       });
+
       sendJson(response, 200, {
         ok: true,
         suite,
@@ -1008,11 +1411,11 @@ async function handleApi(
         packageName: typeof body.packageName === 'string' ? body.packageName : undefined,
         includeRaw: true,
       });
-      const currentRaw = (fresh.raw as unknown) ?? null;
-      snapshotCache[kindValue] = currentRaw ?? snapshotCache[kindValue];
-      const diff = diffSnapshot(prev, currentRaw);
+      const raw = fresh.raw;
+      snapshotCache[kindValue] = raw;
+      const diff = diffSnapshot(prev, raw);
 
-      pushEvent('snapshot-diff', 'Captured snapshot diff', {
+      pushEvent('snapshot-diff', 'Snapshot diff captured', {
         kind: kindValue,
         changedCount: diff.changedCount,
       });
@@ -1044,7 +1447,7 @@ async function handleApi(
         includeRaw: body.includeRaw === true,
       });
 
-      pushEvent('snapshot', 'Captured snapshot', {
+      pushEvent('snapshot', 'Snapshot captured', {
         kind: kindValue,
         deviceId: result.deviceId,
       });
@@ -1062,10 +1465,12 @@ async function handleApi(
     await withMetric('stress-run', async () => {
       const body = await readJsonBody(request);
       const result = runStressScenario(body);
-      pushEvent('stress-run', 'Completed stress run', {
+
+      pushEvent('stress-run', 'Stress run completed', {
         totalSteps: result.totalSteps,
         durationMs: result.durationMs,
       });
+
       sendJson(response, 200, result);
     });
     return;
@@ -1079,7 +1484,7 @@ const INDEX_HTML = String.raw`<!doctype html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>the-android-mcp web ui v3.2</title>
+    <title>the-android-mcp web ui v3.3</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -1110,7 +1515,7 @@ const INDEX_HTML = String.raw`<!doctype html>
           linear-gradient(155deg, var(--bg0), var(--bg1) 44%, var(--bg2));
         padding: 16px;
       }
-      .app { max-width: 1450px; margin: 0 auto; display: grid; gap: 12px; }
+      .app { max-width: 1500px; margin: 0 auto; display: grid; gap: 12px; }
       .hero {
         border: 1px solid var(--line);
         border-radius: 18px;
@@ -1140,7 +1545,7 @@ const INDEX_HTML = String.raw`<!doctype html>
       .grid {
         display: grid;
         gap: 10px;
-        grid-template-columns: 1.1fr 1fr 1fr;
+        grid-template-columns: 1fr 1fr 1fr;
       }
       .card {
         border: 1px solid var(--line);
@@ -1162,13 +1567,13 @@ const INDEX_HTML = String.raw`<!doctype html>
         padding: 9px;
         font: inherit;
       }
-      textarea { min-height: 94px; resize: vertical; }
+      textarea { min-height: 90px; resize: vertical; }
       button { cursor: pointer; font-weight: 700; transition: transform 120ms ease, filter 120ms ease; }
       button:hover { transform: translateY(-1px); filter: brightness(1.08); }
       .p { background: linear-gradient(130deg, #0d7666, #155f75); }
       .s { background: linear-gradient(130deg, #1d3348, #192b3c); }
       .w { background: linear-gradient(130deg, #7a5917, #61401f); }
-      .events, .metrics {
+      .events, .metrics, .jobs {
         max-height: 300px;
         overflow: auto;
         border: 1px solid #2f4a61;
@@ -1176,7 +1581,7 @@ const INDEX_HTML = String.raw`<!doctype html>
         padding: 8px;
         background: #0b141d;
       }
-      .event, .metric {
+      .item {
         border: 1px solid #2e4a61;
         border-radius: 8px;
         padding: 6px;
@@ -1220,15 +1625,16 @@ const INDEX_HTML = String.raw`<!doctype html>
           <span class="pill" id="version-pill">v3</span>
           <span class="pill" id="device-pill">device: n/a</span>
           <span class="pill" id="workflow-pill">workflows: 0</span>
+          <span class="pill" id="queue-pill">queue: 0</span>
           <span class="pill">port: 50000</span>
         </div>
-        <h1 style="margin:0;font-size:1.45rem;">the-android-mcp v3.2 command center</h1>
-        <p class="muted">Live backend integration, workflow engine, snapshot diff, stress automation, and streaming events.</p>
+        <h1 style="margin:0;font-size:1.45rem;">the-android-mcp v3.3 command center</h1>
+        <p class="muted">Upgraded backend integration with job queue, workflow engine, snapshot diff, metrics, and live events.</p>
       </section>
 
       <section class="grid">
         <article class="card stack">
-          <h2>Device + URL actions</h2>
+          <h2>Device operations</h2>
           <select id="device-select"></select>
           <input id="url-input" type="url" value="https://www.wikipedia.org" />
           <div class="split">
@@ -1240,6 +1646,17 @@ const INDEX_HTML = String.raw`<!doctype html>
             <button class="s quick-url" data-url="https://news.ycombinator.com">Hacker News</button>
             <button class="s quick-url" data-url="https://developer.android.com">Android Docs</button>
             <button class="s quick-url" data-url="https://www.youtube.com">YouTube</button>
+          </div>
+          <div class="split">
+            <button class="s" id="profile-btn">Device profile</button>
+            <button class="w" id="stress-btn">Run stress</button>
+          </div>
+          <textarea id="stress-urls">https://www.wikipedia.org
+https://news.ycombinator.com
+https://developer.android.com</textarea>
+          <div class="split">
+            <input id="stress-loops" type="number" min="1" max="5" value="1" />
+            <input id="stress-wait" type="number" min="200" max="6000" value="1000" />
           </div>
           <p class="muted">Update hint: <code>npm install -g the-android-mcp@latest</code></p>
         </article>
@@ -1257,37 +1674,41 @@ const INDEX_HTML = String.raw`<!doctype html>
             <button class="s" id="snapshot-btn">Capture</button>
             <button class="w" id="snapshot-diff-btn">Capture diff</button>
           </div>
-          <p class="muted">Diff compares latest capture with previous capture of same type.</p>
-        </article>
 
-        <article class="card stack">
-          <h2>Stress run</h2>
-          <textarea id="stress-urls">https://www.wikipedia.org
-https://news.ycombinator.com
-https://developer.android.com</textarea>
-          <div class="split">
-            <input id="stress-loops" type="number" min="1" max="5" value="1" />
-            <input id="stress-wait" type="number" min="200" max="6000" value="1000" />
-          </div>
-          <button class="w" id="stress-btn">Run stress</button>
-          <p class="muted">Config: loops / wait-ms</p>
-        </article>
-
-        <article class="card stack">
-          <h2>Workflow engine</h2>
+          <h2 style="margin-top:8px;">Workflow engine</h2>
           <select id="workflow-select"></select>
           <input id="workflow-name" placeholder="workflow name" value="" />
           <textarea id="workflow-steps">[
   {"type":"open_url","url":"https://www.wikipedia.org","waitForReadyMs":1000},
   {"type":"snapshot","snapshot":"radio"},
-  {"type":"open_url","url":"https://developer.android.com","waitForReadyMs":1000},
   {"type":"snapshot_suite","packageName":"com.android.chrome"}
 ]</textarea>
           <div class="split">
             <button class="p" id="workflow-save-btn">Save</button>
             <button class="p" id="workflow-run-btn">Run</button>
           </div>
-          <button class="s" id="workflow-delete-btn">Delete selected</button>
+          <div class="split">
+            <button class="s" id="workflow-delete-btn">Delete</button>
+            <button class="s" id="workflow-export-btn">Export</button>
+          </div>
+          <button class="s" id="workflow-import-btn">Import from editor</button>
+        </article>
+
+        <article class="card stack">
+          <h2>Job orchestrator</h2>
+          <select id="job-type">
+            <option value="open_url">open_url</option>
+            <option value="snapshot_suite">snapshot_suite</option>
+            <option value="stress_run">stress_run</option>
+            <option value="workflow_run">workflow_run</option>
+          </select>
+          <input id="job-url" type="url" value="https://developer.android.com" />
+          <select id="job-workflow"></select>
+          <div class="split">
+            <button class="p" id="job-enqueue-btn">Enqueue job</button>
+            <button class="s" id="job-refresh-btn">Refresh jobs</button>
+          </div>
+          <div id="jobs" class="jobs"></div>
         </article>
 
         <article class="card stack">
@@ -1317,18 +1738,21 @@ https://developer.android.com</textarea>
       const state = {
         deviceId: undefined,
         workflows: [],
+        jobs: [],
       };
 
       const $status = document.getElementById('status');
       const $versionPill = document.getElementById('version-pill');
       const $devicePill = document.getElementById('device-pill');
       const $workflowPill = document.getElementById('workflow-pill');
+      const $queuePill = document.getElementById('queue-pill');
       const $deviceSelect = document.getElementById('device-select');
       const $urlInput = document.getElementById('url-input');
       const $message = document.getElementById('message');
       const $output = document.getElementById('output');
       const $events = document.getElementById('events');
       const $metrics = document.getElementById('metrics');
+      const $jobs = document.getElementById('jobs');
       const $snapshotKind = document.getElementById('snapshot-kind');
       const $stressUrls = document.getElementById('stress-urls');
       const $stressLoops = document.getElementById('stress-loops');
@@ -1336,6 +1760,9 @@ https://developer.android.com</textarea>
       const $workflowSelect = document.getElementById('workflow-select');
       const $workflowName = document.getElementById('workflow-name');
       const $workflowSteps = document.getElementById('workflow-steps');
+      const $jobType = document.getElementById('job-type');
+      const $jobUrl = document.getElementById('job-url');
+      const $jobWorkflow = document.getElementById('job-workflow');
 
       function setMessage(text, isError) {
         $message.textContent = text;
@@ -1352,14 +1779,14 @@ https://developer.android.com</textarea>
           return;
         }
         const item = document.createElement('div');
-        item.className = 'event';
+        item.className = 'item';
         const meta = document.createElement('div');
         meta.className = 'meta';
         meta.textContent = '[' + (event.at || new Date().toISOString()) + '] ' + event.type;
-        const message = document.createElement('div');
-        message.textContent = event.message || '';
+        const text = document.createElement('div');
+        text.textContent = event.message || '';
         item.appendChild(meta);
-        item.appendChild(message);
+        item.appendChild(text);
         if (event.data) {
           const data = document.createElement('div');
           data.style.color = '#a5c6db';
@@ -1368,7 +1795,7 @@ https://developer.android.com</textarea>
           item.appendChild(data);
         }
         $events.prepend(item);
-        while ($events.children.length > 100) {
+        while ($events.children.length > 120) {
           $events.removeChild($events.lastChild);
         }
       }
@@ -1376,9 +1803,9 @@ https://developer.android.com</textarea>
       function renderMetrics(payload) {
         const entries = Array.isArray(payload.entries) ? payload.entries : [];
         $metrics.innerHTML = '';
-        for (const entry of entries.slice(0, 20)) {
+        for (const entry of entries.slice(0, 30)) {
           const item = document.createElement('div');
-          item.className = 'metric';
+          item.className = 'item';
           item.innerHTML =
             '<div class="meta">' + entry.name + '</div>' +
             '<div>count=' + entry.count + ' success=' + entry.success + ' errors=' + entry.errors + '</div>' +
@@ -1387,6 +1814,42 @@ https://developer.android.com</textarea>
         }
         if (!entries.length) {
           $metrics.textContent = 'No metrics yet.';
+        }
+      }
+
+      function renderJobs(payload) {
+        const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+        state.jobs = jobs;
+        $jobs.innerHTML = '';
+        for (const job of jobs.slice(0, 40)) {
+          const item = document.createElement('div');
+          item.className = 'item';
+          item.innerHTML =
+            '<div class="meta">#' + job.id + ' ' + job.type + ' [' + job.status + ']</div>' +
+            '<div>created=' + (job.createdAt || '-') + '</div>' +
+            '<div>duration=' + (job.durationMs || 0) + 'ms</div>' +
+            (job.error ? '<div style="color:#ff8f8f;">' + job.error + '</div>' : '');
+          if (job.status === 'queued') {
+            const cancel = document.createElement('button');
+            cancel.className = 'w';
+            cancel.textContent = 'Cancel';
+            cancel.style.marginTop = '6px';
+            cancel.addEventListener('click', async function () {
+              try {
+                const result = await api('/api/jobs/' + job.id + '/cancel', 'POST', {});
+                renderOutput(result);
+                await refreshJobs();
+                setMessage('Job cancelled', false);
+              } catch (error) {
+                setMessage(String(error), true);
+              }
+            });
+            item.appendChild(cancel);
+          }
+          $jobs.appendChild(item);
+        }
+        if (!jobs.length) {
+          $jobs.textContent = 'No jobs yet.';
         }
       }
 
@@ -1407,14 +1870,39 @@ https://developer.android.com</textarea>
         return state.deviceId || undefined;
       }
 
-      async function refreshState() {
+      function selectedWorkflowName() {
+        const value = ($workflowSelect.value || '').trim();
+        return value || undefined;
+      }
+
+      function currentStressConfig() {
+        return {
+          urls: $stressUrls.value
+            .split('\n')
+            .map(function (line) { return line.trim(); })
+            .filter(function (line) { return line.length > 0; }),
+          loops: Number($stressLoops.value || '1'),
+          waitForReadyMs: Number($stressWait.value || '1000'),
+          includeSnapshotAfterEach: true,
+        };
+      }
+
+      async function refreshJobs() {
+        const payload = await api('/api/jobs');
+        renderJobs(payload);
+      }
+
+      async function refreshCore() {
         const statePayload = await api('/api/state');
         $status.textContent = statePayload.connectedDeviceCount > 0 ? 'online' : 'no-device';
         $versionPill.textContent = 'v' + statePayload.version;
         $workflowPill.textContent = 'workflows: ' + statePayload.workflowCount;
+        $queuePill.textContent = 'queue: ' + statePayload.queueDepth;
 
         const devicesPayload = await api('/api/devices');
         const devices = Array.isArray(devicesPayload.devices) ? devicesPayload.devices : [];
+        const previousDevice = state.deviceId;
+
         $deviceSelect.innerHTML = '';
         for (const device of devices) {
           const option = document.createElement('option');
@@ -1422,7 +1910,14 @@ https://developer.android.com</textarea>
           option.textContent = device.id + ' (' + (device.model || 'unknown') + ')';
           $deviceSelect.appendChild(option);
         }
-        state.deviceId = devices[0] ? devices[0].id : undefined;
+
+        state.deviceId = undefined;
+        if (previousDevice && devices.some(function (d) { return d.id === previousDevice; })) {
+          state.deviceId = previousDevice;
+        } else if (devices[0]) {
+          state.deviceId = devices[0].id;
+        }
+
         if (state.deviceId) {
           $deviceSelect.value = state.deviceId;
           $devicePill.textContent = 'device: ' + state.deviceId;
@@ -1431,23 +1926,40 @@ https://developer.android.com</textarea>
         }
 
         const workflowsPayload = await api('/api/workflows');
-        state.workflows = Array.isArray(workflowsPayload.workflows) ? workflowsPayload.workflows : [];
-        $workflowSelect.innerHTML = '';
-        for (const workflow of state.workflows) {
-          const option = document.createElement('option');
-          option.value = workflow.name;
-          option.textContent = workflow.name;
-          $workflowSelect.appendChild(option);
-        }
-        if (state.workflows.length > 0) {
-          const selected = state.workflows[0];
-          $workflowSelect.value = selected.name;
-          $workflowName.value = selected.name;
-          $workflowSteps.value = JSON.stringify(selected.steps || [], null, 2);
+        const workflows = Array.isArray(workflowsPayload.workflows) ? workflowsPayload.workflows : [];
+        state.workflows = workflows;
+
+        const renderWorkflowSelect = function (select) {
+          const prev = (select.value || '').trim();
+          select.innerHTML = '';
+          for (const workflow of workflows) {
+            const option = document.createElement('option');
+            option.value = workflow.name;
+            option.textContent = workflow.name;
+            select.appendChild(option);
+          }
+          if (prev && workflows.some(function (w) { return w.name === prev; })) {
+            select.value = prev;
+          } else if (workflows[0]) {
+            select.value = workflows[0].name;
+          }
+        };
+
+        renderWorkflowSelect($workflowSelect);
+        renderWorkflowSelect($jobWorkflow);
+
+        if ($workflowSelect.value) {
+          const selected = workflows.find(function (w) { return w.name === $workflowSelect.value; });
+          if (selected) {
+            $workflowName.value = selected.name;
+            $workflowSteps.value = JSON.stringify(selected.steps || [], null, 2);
+          }
         }
 
         const metricsPayload = await api('/api/metrics');
         renderMetrics(metricsPayload);
+
+        await refreshJobs();
       }
 
       function connectEvents() {
@@ -1472,6 +1984,16 @@ https://developer.android.com</textarea>
         setMessage('URL opened', false);
       }
 
+      async function runSuite() {
+        setMessage('Running suite', false);
+        const result = await api('/api/snapshot-suite', 'POST', {
+          deviceId: selectedDeviceId(),
+          packageName: 'com.android.chrome',
+        });
+        renderOutput(result);
+        setMessage('Suite completed', false);
+      }
+
       async function captureSnapshot() {
         const kind = $snapshotKind.value;
         setMessage('Capturing snapshot: ' + kind, false);
@@ -1486,44 +2008,38 @@ https://developer.android.com</textarea>
 
       async function captureSnapshotDiff() {
         const kind = $snapshotKind.value;
-        setMessage('Capturing snapshot diff: ' + kind, false);
+        setMessage('Capturing diff: ' + kind, false);
         const result = await api('/api/snapshot/diff', 'POST', {
           deviceId: selectedDeviceId(),
           packageName: 'com.android.chrome',
           kind: kind,
         });
         renderOutput(result);
-        setMessage('Snapshot diff done', false);
+        setMessage('Snapshot diff completed', false);
       }
 
-      async function runSuite() {
-        setMessage('Running full suite', false);
-        const result = await api('/api/snapshot-suite', 'POST', {
+      async function captureDeviceProfile() {
+        setMessage('Capturing device profile', false);
+        const result = await api('/api/device/profile', 'POST', {
           deviceId: selectedDeviceId(),
           packageName: 'com.android.chrome',
         });
         renderOutput(result);
-        setMessage('Suite done', false);
+        setMessage('Device profile ready', false);
       }
 
       async function runStress() {
         setMessage('Running stress', false);
-        const urls = $stressUrls.value
-          .split('\n')
-          .map(function (line) { return line.trim(); })
-          .filter(function (line) { return line.length > 0; });
-        const loops = Number($stressLoops.value || '1');
-        const waitForReadyMs = Number($stressWait.value || '1000');
-
+        const cfg = currentStressConfig();
         const result = await api('/api/stress-run', 'POST', {
           deviceId: selectedDeviceId(),
-          urls,
-          loops,
-          waitForReadyMs,
+          urls: cfg.urls,
+          loops: cfg.loops,
+          waitForReadyMs: cfg.waitForReadyMs,
           includeSnapshotAfterEach: true,
         });
         renderOutput(result);
-        setMessage('Stress run done', false);
+        setMessage('Stress run complete', false);
       }
 
       async function saveWorkflow() {
@@ -1535,7 +2051,7 @@ https://developer.android.com</textarea>
         try {
           steps = JSON.parse($workflowSteps.value || '[]');
         } catch (error) {
-          throw new Error('workflow steps must be valid JSON array');
+          throw new Error('workflow steps must be valid JSON');
         }
         const result = await api('/api/workflows', 'POST', {
           name,
@@ -1543,11 +2059,11 @@ https://developer.android.com</textarea>
         });
         renderOutput(result);
         setMessage('Workflow saved', false);
-        await refreshState();
+        await refreshCore();
       }
 
       async function runWorkflow() {
-        const name = ($workflowSelect.value || '').trim();
+        const name = selectedWorkflowName();
         if (!name) {
           throw new Error('select workflow first');
         }
@@ -1558,18 +2074,76 @@ https://developer.android.com</textarea>
           includeRaw: false,
         });
         renderOutput(result);
-        setMessage('Workflow done', false);
+        setMessage('Workflow executed', false);
       }
 
       async function deleteWorkflow() {
-        const name = ($workflowSelect.value || '').trim();
+        const name = selectedWorkflowName();
         if (!name) {
           throw new Error('select workflow first');
         }
         const result = await api('/api/workflows/' + encodeURIComponent(name), 'DELETE');
         renderOutput(result);
         setMessage('Workflow deleted', false);
-        await refreshState();
+        await refreshCore();
+      }
+
+      async function exportWorkflows() {
+        const result = await api('/api/workflows/export');
+        $workflowSteps.value = JSON.stringify(result.workflows || {}, null, 2);
+        renderOutput(result);
+        setMessage('Workflows exported into editor', false);
+      }
+
+      async function importWorkflows() {
+        let parsed;
+        try {
+          parsed = JSON.parse($workflowSteps.value || '{}');
+        } catch (error) {
+          throw new Error('workflow editor content must be valid JSON');
+        }
+
+        const result = await api('/api/workflows/import', 'POST', {
+          workflows: parsed,
+          replace: false,
+        });
+        renderOutput(result);
+        setMessage('Workflows imported', false);
+        await refreshCore();
+      }
+
+      async function enqueueJob() {
+        const type = ($jobType.value || '').trim();
+        const input = { deviceId: selectedDeviceId() };
+
+        if (type === 'open_url') {
+          input.url = $jobUrl.value || 'https://developer.android.com';
+          input.waitForReadyMs = 1000;
+        } else if (type === 'snapshot_suite') {
+          input.packageName = 'com.android.chrome';
+        } else if (type === 'stress_run') {
+          const cfg = currentStressConfig();
+          input.urls = cfg.urls;
+          input.loops = cfg.loops;
+          input.waitForReadyMs = cfg.waitForReadyMs;
+          input.includeSnapshotAfterEach = true;
+        } else if (type === 'workflow_run') {
+          const workflowName = ($jobWorkflow.value || '').trim();
+          if (!workflowName) {
+            throw new Error('select workflow for workflow_run job');
+          }
+          input.name = workflowName;
+          input.packageName = 'com.android.chrome';
+          input.includeRaw = false;
+        }
+
+        const result = await api('/api/jobs', 'POST', {
+          type,
+          input,
+        });
+        renderOutput(result);
+        setMessage('Job enqueued', false);
+        await refreshJobs();
       }
 
       document.getElementById('open-url-btn').addEventListener('click', async function () {
@@ -1584,6 +2158,9 @@ https://developer.android.com</textarea>
       document.getElementById('snapshot-diff-btn').addEventListener('click', async function () {
         try { await captureSnapshotDiff(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('profile-btn').addEventListener('click', async function () {
+        try { await captureDeviceProfile(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('stress-btn').addEventListener('click', async function () {
         try { await runStress(); } catch (error) { setMessage(String(error), true); }
       });
@@ -1596,20 +2173,27 @@ https://developer.android.com</textarea>
       document.getElementById('workflow-delete-btn').addEventListener('click', async function () {
         try { await deleteWorkflow(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('workflow-export-btn').addEventListener('click', async function () {
+        try { await exportWorkflows(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('workflow-import-btn').addEventListener('click', async function () {
+        try { await importWorkflows(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('job-enqueue-btn').addEventListener('click', async function () {
+        try { await enqueueJob(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('job-refresh-btn').addEventListener('click', async function () {
+        try { await refreshJobs(); setMessage('Jobs refreshed', false); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('refresh-state-btn').addEventListener('click', async function () {
-        try {
-          await refreshState();
-          setMessage('State refreshed', false);
-        } catch (error) {
-          setMessage(String(error), true);
-        }
+        try { await refreshCore(); setMessage('State refreshed', false); } catch (error) { setMessage(String(error), true); }
       });
       document.getElementById('clear-output-btn').addEventListener('click', function () {
         renderOutput({});
       });
 
       $deviceSelect.addEventListener('change', function () {
-        state.deviceId = $deviceSelect.value;
+        state.deviceId = $deviceSelect.value || undefined;
         $devicePill.textContent = 'device: ' + (state.deviceId || 'none');
       });
 
@@ -1628,7 +2212,7 @@ https://developer.android.com</textarea>
       }
 
       $workflowSelect.addEventListener('change', function () {
-        const selected = state.workflows.find(function (item) { return item.name === $workflowSelect.value; });
+        const selected = state.workflows.find(function (w) { return w.name === $workflowSelect.value; });
         if (selected) {
           $workflowName.value = selected.name;
           $workflowSteps.value = JSON.stringify(selected.steps || [], null, 2);
@@ -1637,8 +2221,8 @@ https://developer.android.com</textarea>
 
       async function init() {
         try {
-          await refreshState();
-          const history = await api('/api/history?limit=30');
+          await refreshCore();
+          const history = await api('/api/history?limit=40');
           const events = Array.isArray(history.events) ? history.events : [];
           for (let i = events.length - 1; i >= 0; i -= 1) {
             addEvent(events[i]);
@@ -1646,12 +2230,14 @@ https://developer.android.com</textarea>
           connectEvents();
           renderOutput({ ok: true, message: 'UI ready', updateHint: '${UPDATE_HINT}' });
           setMessage('Ready.', false);
+
           setInterval(async function () {
             try {
               const metricsPayload = await api('/api/metrics');
               renderMetrics(metricsPayload);
+              await refreshJobs();
             } catch (error) {
-              setMessage('Metrics refresh failed', true);
+              setMessage('Background refresh failed', true);
             }
           }, 5000);
         } catch (error) {
