@@ -24,6 +24,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.16.0] - 2026-02-19
+### Added
+- New operations scenario management workflows:
+- `GET /api/ops/scenarios`
+- `POST /api/ops/scenarios`
+- `DELETE /api/ops/scenarios/:name`
+- `POST /api/ops/scenarios/run`
+- New control-room history workflows:
+- `GET /api/ops/control-room/history`
+- `POST /api/ops/control-room/history/reset`
+- New operations drill/readiness workflows:
+- `POST /api/ops/chaos-drill`
+- `GET /api/ops/release-readiness`
+- New policy preset workflows:
+- `GET /api/ops/policy-presets`
+- `POST /api/ops/policy-presets`
+- `POST /api/ops/policy-presets/apply`
+- `DELETE /api/ops/policy-presets/:name`
+- New watchdog profile workflows:
+- `GET /api/ops/watchdog/profiles`
+- `POST /api/ops/watchdog/profiles`
+- `POST /api/ops/watchdog/profiles/run`
+- `DELETE /api/ops/watchdog/profiles/:name`
+- New operations action queue workflows:
+- `GET /api/ops/action-queue`
+- `POST /api/ops/action-queue/enqueue`
+- `POST /api/ops/action-queue/run-next`
+- `POST /api/ops/action-queue/run-all`
+- `POST /api/ops/action-queue/clear`
+- New release gate workflows:
+- `GET /api/ops/gate`
+- `POST /api/ops/gate`
+- `GET /api/ops/gate/evaluate`
+- New Web UI controls and panels for:
+- scenario save/list/run
+- chaos drill execution
+- release readiness report
+- control-room history load/reset
+- dedicated scenario/history panels.
+- policy preset save/list/apply
+- watchdog profile save/list/run
+- action queue enqueue/execute/clear
+- gate policy load/save/evaluate
+
+### Improved
+- Control-room payload generation now feeds history points for better trend visibility in operations mode.
+- State/ops/audit/session payloads now include scenario and control-history context for stronger backend-bound observability.
+
 ## [3.15.0] - 2026-02-19
 ### Added
 - New operations scenario backend workflows:

@@ -38,6 +38,8 @@ const ALERT_RULES_FILE = path.join(APP_STATE_DIR, 'web-ui-alert-rules.json');
 const DEVICE_BASELINES_FILE = path.join(APP_STATE_DIR, 'web-ui-device-baselines.json');
 const QUEUE_SNAPSHOTS_FILE = path.join(APP_STATE_DIR, 'web-ui-queue-snapshots.json');
 const OPS_SCENARIOS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-scenarios.json');
+const OPS_POLICY_PRESETS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-policy-presets.json');
+const WATCHDOG_PROFILES_FILE = path.join(APP_STATE_DIR, 'web-ui-watchdog-profiles.json');
 
 const SNAPSHOT_KINDS = [
   'radio',
@@ -241,6 +243,36 @@ interface ControlRoomHistoryPoint {
   failedJobCount: number;
 }
 
+interface OpsPolicyPreset {
+  name: string;
+  updatedAt: string;
+  description?: string;
+  policy: OpsPolicy;
+}
+
+interface WatchdogProfile {
+  name: string;
+  updatedAt: string;
+  description?: string;
+  laneId?: string;
+  autoHealOnAlert: boolean;
+  retryFailedLimit: number;
+  maxRunbooks: number;
+}
+
+interface OpsActionQueueItem {
+  id: number;
+  type: 'stabilize' | 'watchdog' | 'chaos-drill' | 'scenario-run' | 'campaign';
+  createdAt: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  payload: JsonObject;
+  startedAt?: string;
+  finishedAt?: string;
+  durationMs?: number;
+  result?: JsonObject;
+  error?: string;
+}
+
 const serverStartedAt = Date.now();
 let eventSeq = 1;
 let jobSeq = 1;
@@ -279,6 +311,16 @@ let schedulesInitialized = false;
 let deviceBaselines: Record<string, DeviceBaseline> = loadDeviceBaselines();
 let queueSnapshots: Record<string, QueueSnapshotRecord> = loadQueueSnapshots();
 let opsScenarios: Record<string, OpsScenario> = loadOpsScenarios();
+let opsPolicyPresets: Record<string, OpsPolicyPreset> = loadOpsPolicyPresets();
+let watchdogProfiles: Record<string, WatchdogProfile> = loadWatchdogProfiles();
+const opsActionQueue: OpsActionQueueItem[] = [];
+let opsActionSeq = 1;
+let opsGatePolicy: JsonObject = {
+  minScore: 80,
+  allowedSeverity: 'green',
+  maxFailedJobs: 0,
+  maxOpenIncidents: 0,
+};
 const runbookExecutions: RunbookExecution[] = [];
 const controlRoomHistory: ControlRoomHistoryPoint[] = [];
 let controlRoomHistorySeq = 1;
@@ -1272,6 +1314,136 @@ function saveOpsScenarios(): void {
 
 function listOpsScenarios(): OpsScenario[] {
   return Object.values(opsScenarios).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function defaultOpsPolicyPresets(): Record<string, OpsPolicyPreset> {
+  return {
+    'balanced-default': {
+      name: 'balanced-default',
+      updatedAt: nowIso(),
+      description: 'Balanced queue/failure policy for daily operation.',
+      policy: {
+        maxQueuePerLane: 60,
+        autoPauseOnFailure: true,
+        failurePauseThreshold: 6,
+        autoRetryFailedLimit: 15,
+      },
+    },
+  };
+}
+
+function loadOpsPolicyPresets(): Record<string, OpsPolicyPreset> {
+  try {
+    ensureAppStateDir();
+    if (!fs.existsSync(OPS_POLICY_PRESETS_FILE)) {
+      const defaults = defaultOpsPolicyPresets();
+      fs.writeFileSync(OPS_POLICY_PRESETS_FILE, JSON.stringify(defaults, null, 2), 'utf8');
+      return defaults;
+    }
+    const raw = fs.readFileSync(OPS_POLICY_PRESETS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return defaultOpsPolicyPresets();
+    }
+    const result: Record<string, OpsPolicyPreset> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        continue;
+      }
+      const item = value as Record<string, unknown>;
+      const name = typeof item.name === 'string' && item.name.trim().length > 0 ? item.name.trim() : key;
+      if (!name) {
+        continue;
+      }
+      const policyRaw = item.policy && typeof item.policy === 'object' && !Array.isArray(item.policy)
+        ? (item.policy as Record<string, unknown>)
+        : {};
+      result[name] = {
+        name,
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : nowIso(),
+        description: typeof item.description === 'string' ? item.description : undefined,
+        policy: {
+          maxQueuePerLane: clampInt(policyRaw.maxQueuePerLane, 60, 1, 10000),
+          autoPauseOnFailure: policyRaw.autoPauseOnFailure !== false,
+          failurePauseThreshold: clampInt(policyRaw.failurePauseThreshold, 6, 1, 10000),
+          autoRetryFailedLimit: clampInt(policyRaw.autoRetryFailedLimit, 15, 1, 10000),
+        },
+      };
+    }
+    return Object.keys(result).length > 0 ? result : defaultOpsPolicyPresets();
+  } catch {
+    return defaultOpsPolicyPresets();
+  }
+}
+
+function saveOpsPolicyPresets(): void {
+  ensureAppStateDir();
+  fs.writeFileSync(OPS_POLICY_PRESETS_FILE, JSON.stringify(opsPolicyPresets, null, 2), 'utf8');
+}
+
+function listOpsPolicyPresets(): OpsPolicyPreset[] {
+  return Object.values(opsPolicyPresets).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function defaultWatchdogProfiles(): Record<string, WatchdogProfile> {
+  return {
+    'watchdog-default': {
+      name: 'watchdog-default',
+      updatedAt: nowIso(),
+      description: 'Default watchdog profile.',
+      autoHealOnAlert: true,
+      retryFailedLimit: 12,
+      maxRunbooks: 2,
+    },
+  };
+}
+
+function loadWatchdogProfiles(): Record<string, WatchdogProfile> {
+  try {
+    ensureAppStateDir();
+    if (!fs.existsSync(WATCHDOG_PROFILES_FILE)) {
+      const defaults = defaultWatchdogProfiles();
+      fs.writeFileSync(WATCHDOG_PROFILES_FILE, JSON.stringify(defaults, null, 2), 'utf8');
+      return defaults;
+    }
+    const raw = fs.readFileSync(WATCHDOG_PROFILES_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return defaultWatchdogProfiles();
+    }
+    const result: Record<string, WatchdogProfile> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        continue;
+      }
+      const item = value as Record<string, unknown>;
+      const name = typeof item.name === 'string' && item.name.trim().length > 0 ? item.name.trim() : key;
+      if (!name) {
+        continue;
+      }
+      result[name] = {
+        name,
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : nowIso(),
+        description: typeof item.description === 'string' ? item.description : undefined,
+        laneId: typeof item.laneId === 'string' && item.laneId.trim().length > 0 ? item.laneId.trim() : undefined,
+        autoHealOnAlert: item.autoHealOnAlert !== false,
+        retryFailedLimit: clampInt(item.retryFailedLimit, 12, 0, 500),
+        maxRunbooks: clampInt(item.maxRunbooks, 2, 1, 50),
+      };
+    }
+    return Object.keys(result).length > 0 ? result : defaultWatchdogProfiles();
+  } catch {
+    return defaultWatchdogProfiles();
+  }
+}
+
+function saveWatchdogProfiles(): void {
+  ensureAppStateDir();
+  fs.writeFileSync(WATCHDOG_PROFILES_FILE, JSON.stringify(watchdogProfiles, null, 2), 'utf8');
+}
+
+function listWatchdogProfiles(): WatchdogProfile[] {
+  return Object.values(watchdogProfiles).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function loadSchedules(): void {
@@ -3460,6 +3632,320 @@ function runWatchdog(body: JsonObject, host: string, port: number): JsonObject {
   };
 }
 
+function saveOpsPolicyPreset(nameRaw: string, body: JsonObject): OpsPolicyPreset {
+  const name = nameRaw.trim();
+  if (!name) {
+    throw new Error('policy preset name is required');
+  }
+  const preset: OpsPolicyPreset = {
+    name,
+    updatedAt: nowIso(),
+    description: typeof body.description === 'string' ? body.description : undefined,
+    policy: {
+      maxQueuePerLane: clampInt(body.maxQueuePerLane, opsPolicy.maxQueuePerLane, 1, 10000),
+      autoPauseOnFailure: body.autoPauseOnFailure !== false,
+      failurePauseThreshold: clampInt(body.failurePauseThreshold, opsPolicy.failurePauseThreshold, 1, 10000),
+      autoRetryFailedLimit: clampInt(body.autoRetryFailedLimit, opsPolicy.autoRetryFailedLimit, 1, 10000),
+    },
+  };
+  opsPolicyPresets[name] = preset;
+  saveOpsPolicyPresets();
+  pushEvent('ops-policy-preset-saved', 'Ops policy preset saved', { name });
+  return preset;
+}
+
+function deleteOpsPolicyPreset(nameRaw: string): boolean {
+  const name = nameRaw.trim();
+  if (!name || !opsPolicyPresets[name]) {
+    return false;
+  }
+  delete opsPolicyPresets[name];
+  saveOpsPolicyPresets();
+  pushEvent('ops-policy-preset-deleted', 'Ops policy preset deleted', { name });
+  return true;
+}
+
+function applyOpsPolicyPreset(nameRaw: string): JsonObject {
+  const name = nameRaw.trim();
+  if (!name) {
+    throw new Error('policy preset name is required');
+  }
+  const preset = opsPolicyPresets[name];
+  if (!preset) {
+    throw new Error(`policy preset '${name}' not found`);
+  }
+  const policy = updatePolicy({
+    maxQueuePerLane: preset.policy.maxQueuePerLane,
+    autoPauseOnFailure: preset.policy.autoPauseOnFailure,
+    failurePauseThreshold: preset.policy.failurePauseThreshold,
+    autoRetryFailedLimit: preset.policy.autoRetryFailedLimit,
+  });
+  pushEvent('ops-policy-preset-applied', 'Ops policy preset applied', { name });
+  return {
+    ok: true,
+    name,
+    policy,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function saveWatchdogProfile(nameRaw: string, body: JsonObject): WatchdogProfile {
+  const name = nameRaw.trim();
+  if (!name) {
+    throw new Error('watchdog profile name is required');
+  }
+  const profile: WatchdogProfile = {
+    name,
+    updatedAt: nowIso(),
+    description: typeof body.description === 'string' ? body.description : undefined,
+    laneId: typeof body.laneId === 'string' && body.laneId.trim().length > 0 ? body.laneId.trim() : undefined,
+    autoHealOnAlert: body.autoHealOnAlert !== false,
+    retryFailedLimit: clampInt(body.retryFailedLimit, 12, 0, 500),
+    maxRunbooks: clampInt(body.maxRunbooks, 2, 1, 50),
+  };
+  watchdogProfiles[name] = profile;
+  saveWatchdogProfiles();
+  pushEvent('watchdog-profile-saved', 'Watchdog profile saved', { name });
+  return profile;
+}
+
+function deleteWatchdogProfile(nameRaw: string): boolean {
+  const name = nameRaw.trim();
+  if (!name || !watchdogProfiles[name]) {
+    return false;
+  }
+  delete watchdogProfiles[name];
+  saveWatchdogProfiles();
+  pushEvent('watchdog-profile-deleted', 'Watchdog profile deleted', { name });
+  return true;
+}
+
+function runWatchdogProfile(nameRaw: string, body: JsonObject, host: string, port: number): JsonObject {
+  const name = nameRaw.trim();
+  if (!name) {
+    throw new Error('watchdog profile name is required');
+  }
+  const profile = watchdogProfiles[name];
+  if (!profile) {
+    throw new Error(`watchdog profile '${name}' not found`);
+  }
+  return runWatchdog({
+    ...body,
+    laneId: typeof body.laneId === 'string' && body.laneId.trim().length > 0 ? body.laneId : profile.laneId,
+    autoHealOnAlert: profile.autoHealOnAlert,
+    retryFailedLimit: profile.retryFailedLimit,
+    maxRunbooks: profile.maxRunbooks,
+  }, host, port);
+}
+
+function currentOpsGatePolicy(): JsonObject {
+  return {
+    minScore: clampInt(opsGatePolicy.minScore, 80, 0, 100),
+    allowedSeverity: typeof opsGatePolicy.allowedSeverity === 'string' ? opsGatePolicy.allowedSeverity : 'green',
+    maxFailedJobs: clampInt(opsGatePolicy.maxFailedJobs, 0, 0, 100000),
+    maxOpenIncidents: clampInt(opsGatePolicy.maxOpenIncidents, 0, 0, 100000),
+  };
+}
+
+function updateOpsGatePolicy(body: JsonObject): JsonObject {
+  opsGatePolicy = {
+    minScore: clampInt(body.minScore, clampInt(opsGatePolicy.minScore, 80, 0, 100), 0, 100),
+    allowedSeverity: typeof body.allowedSeverity === 'string' ? body.allowedSeverity : (typeof opsGatePolicy.allowedSeverity === 'string' ? opsGatePolicy.allowedSeverity : 'green'),
+    maxFailedJobs: clampInt(body.maxFailedJobs, clampInt(opsGatePolicy.maxFailedJobs, 0, 0, 100000), 0, 100000),
+    maxOpenIncidents: clampInt(body.maxOpenIncidents, clampInt(opsGatePolicy.maxOpenIncidents, 0, 0, 100000), 0, 100000),
+  };
+  pushEvent('ops-gate-policy-updated', 'Ops gate policy updated', opsGatePolicy);
+  return currentOpsGatePolicy();
+}
+
+function evaluateOpsGate(host: string, port: number): JsonObject {
+  const policy = currentOpsGatePolicy();
+  const control = buildControlRoomPayload(host, port);
+  const diagnostics = buildDiagnosticsReport(host, port);
+  const failedJobsCount = Array.isArray(diagnostics.failedJobs) ? diagnostics.failedJobs.length : 0;
+  const openIncidentsCount = alertIncidents.filter(item => !item.acknowledgedAt).length;
+
+  const checks = [
+    {
+      check: 'score',
+      pass: typeof control.score === 'number' && control.score >= clampInt(policy.minScore, 80, 0, 100),
+      value: control.score,
+      expected: `>= ${policy.minScore}`,
+    },
+    {
+      check: 'severity',
+      pass: String(control.severity || 'unknown') === String(policy.allowedSeverity || 'green'),
+      value: control.severity,
+      expected: String(policy.allowedSeverity || 'green'),
+    },
+    {
+      check: 'failedJobs',
+      pass: failedJobsCount <= clampInt(policy.maxFailedJobs, 0, 0, 100000),
+      value: failedJobsCount,
+      expected: `<= ${policy.maxFailedJobs}`,
+    },
+    {
+      check: 'openIncidents',
+      pass: openIncidentsCount <= clampInt(policy.maxOpenIncidents, 0, 0, 100000),
+      value: openIncidentsCount,
+      expected: `<= ${policy.maxOpenIncidents}`,
+    },
+  ];
+  const pass = checks.every(item => item.pass);
+  return {
+    ok: true,
+    pass,
+    checkedAt: nowIso(),
+    policy,
+    control,
+    checks,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function listOpsActionQueue(): JsonObject {
+  return {
+    ok: true,
+    count: opsActionQueue.length,
+    queue: opsActionQueue.slice(-200),
+  };
+}
+
+function enqueueOpsAction(body: JsonObject): OpsActionQueueItem {
+  const type = typeof body.type === 'string' ? body.type : '';
+  if (
+    type !== 'stabilize' &&
+    type !== 'watchdog' &&
+    type !== 'chaos-drill' &&
+    type !== 'scenario-run' &&
+    type !== 'campaign'
+  ) {
+    throw new Error('type must be stabilize, watchdog, chaos-drill, scenario-run, or campaign');
+  }
+  const item: OpsActionQueueItem = {
+    id: opsActionSeq++,
+    type,
+    createdAt: nowIso(),
+    status: 'queued',
+    payload: body.payload && typeof body.payload === 'object' && !Array.isArray(body.payload)
+      ? (body.payload as JsonObject)
+      : {},
+  };
+  opsActionQueue.push(item);
+  if (opsActionQueue.length > 600) {
+    opsActionQueue.splice(0, opsActionQueue.length - 600);
+  }
+  pushEvent('ops-action-enqueued', 'Ops action queued', { id: item.id, type: item.type });
+  return item;
+}
+
+function executeOpsActionItem(item: OpsActionQueueItem, host: string, port: number): JsonObject {
+  if (item.type === 'stabilize') {
+    return runOpsStabilize(item.payload, host, port);
+  }
+  if (item.type === 'watchdog') {
+    return runWatchdog(item.payload, host, port);
+  }
+  if (item.type === 'chaos-drill') {
+    return runChaosDrill(item.payload, host, port);
+  }
+  if (item.type === 'scenario-run') {
+    return runOpsScenario(item.payload, host, port);
+  }
+  return runRunbookCampaign(item.payload);
+}
+
+function runNextOpsAction(host: string, port: number): JsonObject {
+  const next = opsActionQueue.find(item => item.status === 'queued');
+  if (!next) {
+    return {
+      ok: true,
+      hasNext: false,
+      queue: opsActionQueue.length,
+    };
+  }
+  next.status = 'running';
+  next.startedAt = nowIso();
+  const startedAt = Date.now();
+  try {
+    const result = executeOpsActionItem(next, host, port);
+    next.status = 'completed';
+    next.result = result;
+    next.finishedAt = nowIso();
+    next.durationMs = Date.now() - startedAt;
+    pushEvent('ops-action-completed', 'Ops action completed', { id: next.id, type: next.type, durationMs: next.durationMs });
+    return {
+      ok: true,
+      hasNext: true,
+      item: next,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    next.status = 'failed';
+    next.error = message;
+    next.finishedAt = nowIso();
+    next.durationMs = Date.now() - startedAt;
+    pushEvent('ops-action-failed', 'Ops action failed', { id: next.id, type: next.type, error: message });
+    return {
+      ok: false,
+      hasNext: true,
+      item: next,
+      error: message,
+    };
+  }
+}
+
+function runAllOpsActions(host: string, port: number, maxItemsRaw: unknown): JsonObject {
+  const maxItems = clampInt(maxItemsRaw, 25, 1, 400);
+  const results: JsonObject[] = [];
+  for (let i = 0; i < maxItems; i += 1) {
+    const run = runNextOpsAction(host, port);
+    results.push(run);
+    if (run.hasNext !== true) {
+      break;
+    }
+  }
+  return {
+    ok: results.every(item => item.ok !== false),
+    requested: maxItems,
+    executed: results.filter(item => item.hasNext === true).length,
+    queue: opsActionQueue.length,
+    results,
+  };
+}
+
+function clearOpsActionQueue(body: JsonObject): JsonObject {
+  const removeCompleted = body.removeCompleted !== false;
+  const removeFailed = body.removeFailed !== false;
+  const removeQueued = body.removeQueued !== false;
+  const removeRunning = body.removeRunning === true;
+  const before = opsActionQueue.length;
+  const keep = opsActionQueue.filter(item => {
+    if (item.status === 'completed' && removeCompleted) {
+      return false;
+    }
+    if (item.status === 'failed' && removeFailed) {
+      return false;
+    }
+    if (item.status === 'queued' && removeQueued) {
+      return false;
+    }
+    if (item.status === 'running' && removeRunning) {
+      return false;
+    }
+    return true;
+  });
+  opsActionQueue.splice(0, opsActionQueue.length, ...keep);
+  const removed = before - opsActionQueue.length;
+  pushEvent('ops-action-queue-cleared', 'Ops action queue pruned', { removed });
+  return {
+    ok: true,
+    before,
+    after: opsActionQueue.length,
+    removed,
+  };
+}
+
 function buildAuditExport(host: string, port: number): JsonObject {
   return {
     ok: true,
@@ -3470,6 +3956,10 @@ function buildAuditExport(host: string, port: number): JsonObject {
     runbookExecutions: runbookExecutions.slice(-300),
     alertIncidents: listAlertIncidents(300),
     queueSnapshots: listQueueSnapshots().slice(0, 120),
+    opsPolicyPresets: listOpsPolicyPresets(),
+    watchdogProfiles: listWatchdogProfiles(),
+    opsGatePolicy: currentOpsGatePolicy(),
+    opsActionQueue: opsActionQueue.slice(-200),
     opsScenarios: listOpsScenarios(),
     controlRoomHistory: listControlRoomHistory(200),
     schedules: schedulesList(),
@@ -4540,6 +5030,9 @@ function buildStatePayload(host: string, port: number): JsonObject {
     scheduleCount: Object.keys(schedules).length,
     baselineCount: Object.keys(deviceBaselines).length,
     queueSnapshotCount: Object.keys(queueSnapshots).length,
+    opsPolicyPresetCount: Object.keys(opsPolicyPresets).length,
+    watchdogProfileCount: Object.keys(watchdogProfiles).length,
+    opsActionQueueCount: opsActionQueue.length,
     opsScenarioCount: Object.keys(opsScenarios).length,
     controlRoomHistoryCount: controlRoomHistory.length,
     runbookExecutionCount: runbookExecutions.length,
@@ -4617,6 +5110,10 @@ function buildOpsBoard(host: string, port: number): JsonObject {
       laneCount: item.laneCount,
       queuedCount: item.queuedCount,
     })),
+    opsPolicyPresets: listOpsPolicyPresets(),
+    watchdogProfiles: listWatchdogProfiles(),
+    opsGatePolicy: currentOpsGatePolicy(),
+    opsActionQueue: opsActionQueue.slice(-40),
     opsScenarios: listOpsScenarios(),
     controlRoomHistory: listControlRoomHistory(80),
     updateHint: UPDATE_HINT,
@@ -4665,6 +5162,10 @@ function buildSessionExport(): JsonObject {
     runbookExecutions,
     deviceBaselines,
     queueSnapshots,
+    opsPolicyPresets,
+    watchdogProfiles,
+    opsGatePolicy: currentOpsGatePolicy(),
+    opsActionQueue,
     opsScenarios,
     controlRoomHistory,
     lanes: lanesSummary(),
@@ -4943,6 +5444,182 @@ async function handleApi(
   if (method === 'GET' && pathname === '/api/ops/release-readiness') {
     await withMetric('ops-release-readiness', () => {
       sendJson(response, 200, buildReleaseReadiness(context.host, context.port));
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/gate') {
+    await withMetric('ops-gate-get', () => {
+      sendJson(response, 200, {
+        ok: true,
+        policy: currentOpsGatePolicy(),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/gate') {
+    await withMetric('ops-gate-update', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, {
+        ok: true,
+        policy: updateOpsGatePolicy(body),
+      });
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/gate/evaluate') {
+    await withMetric('ops-gate-evaluate', () => {
+      sendJson(response, 200, evaluateOpsGate(context.host, context.port));
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/policy-presets') {
+    await withMetric('ops-policy-presets-list', () => {
+      sendJson(response, 200, {
+        ok: true,
+        presets: listOpsPolicyPresets(),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/policy-presets') {
+    await withMetric('ops-policy-presets-save', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name : '';
+      try {
+        const preset = saveOpsPolicyPreset(name, body);
+        sendJson(response, 200, { ok: true, preset, updateHint: UPDATE_HINT });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/policy-presets/apply') {
+    await withMetric('ops-policy-presets-apply', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name : '';
+      try {
+        sendJson(response, 200, applyOpsPolicyPreset(name));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'DELETE' && pathname.startsWith('/api/ops/policy-presets/')) {
+    await withMetric('ops-policy-presets-delete', () => {
+      const name = decodeURIComponent(pathname.slice('/api/ops/policy-presets/'.length));
+      const ok = deleteOpsPolicyPreset(name);
+      if (!ok) {
+        sendJson(response, 404, { error: `policy preset '${name}' not found` });
+        return;
+      }
+      sendJson(response, 200, { ok: true, name });
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/watchdog/profiles') {
+    await withMetric('watchdog-profiles-list', () => {
+      sendJson(response, 200, {
+        ok: true,
+        profiles: listWatchdogProfiles(),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/watchdog/profiles') {
+    await withMetric('watchdog-profiles-save', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name : '';
+      try {
+        const profile = saveWatchdogProfile(name, body);
+        sendJson(response, 200, { ok: true, profile, updateHint: UPDATE_HINT });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/watchdog/profiles/run') {
+    await withMetric('watchdog-profiles-run', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name : '';
+      try {
+        sendJson(response, 200, runWatchdogProfile(name, body, context.host, context.port));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'DELETE' && pathname.startsWith('/api/ops/watchdog/profiles/')) {
+    await withMetric('watchdog-profiles-delete', () => {
+      const name = decodeURIComponent(pathname.slice('/api/ops/watchdog/profiles/'.length));
+      const ok = deleteWatchdogProfile(name);
+      if (!ok) {
+        sendJson(response, 404, { error: `watchdog profile '${name}' not found` });
+        return;
+      }
+      sendJson(response, 200, { ok: true, name });
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/action-queue') {
+    await withMetric('ops-action-queue-list', () => {
+      sendJson(response, 200, listOpsActionQueue());
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/action-queue/enqueue') {
+    await withMetric('ops-action-queue-enqueue', async () => {
+      const body = await readJsonBody(request);
+      try {
+        const item = enqueueOpsAction(body);
+        sendJson(response, 200, { ok: true, item, updateHint: UPDATE_HINT });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/action-queue/run-next') {
+    await withMetric('ops-action-queue-run-next', () => {
+      sendJson(response, 200, runNextOpsAction(context.host, context.port));
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/action-queue/run-all') {
+    await withMetric('ops-action-queue-run-all', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, runAllOpsActions(context.host, context.port, body.maxItems));
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/action-queue/clear') {
+    await withMetric('ops-action-queue-clear', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, clearOpsActionQueue(body));
     });
     return;
   }
@@ -6736,6 +7413,60 @@ https://developer.android.com</textarea>
           </div>
           <div id="ops-scenarios-panel" class="metrics"></div>
           <div id="control-history-panel" class="metrics"></div>
+          <hr style="border:0;border-top:1px solid #2f4a61;" />
+          <input id="ops-policy-preset-name" placeholder="policy preset name" value="balanced-default" />
+          <div class="split">
+            <button class="s" id="ops-policy-presets-list-btn">List policy presets</button>
+            <button class="s" id="ops-policy-preset-save-btn">Save policy preset</button>
+          </div>
+          <button class="p" id="ops-policy-preset-apply-btn">Apply policy preset</button>
+          <div id="ops-policy-presets-panel" class="metrics"></div>
+          <hr style="border:0;border-top:1px solid #2f4a61;" />
+          <input id="watchdog-profile-name" placeholder="watchdog profile name" value="watchdog-default" />
+          <div class="split">
+            <button class="s" id="watchdog-profiles-list-btn">List watchdog profiles</button>
+            <button class="s" id="watchdog-profile-save-btn">Save watchdog profile</button>
+          </div>
+          <button class="p" id="watchdog-profile-run-btn">Run watchdog profile</button>
+          <div id="watchdog-profiles-panel" class="metrics"></div>
+          <hr style="border:0;border-top:1px solid #2f4a61;" />
+          <select id="ops-action-type">
+            <option value="stabilize">stabilize</option>
+            <option value="watchdog">watchdog</option>
+            <option value="chaos-drill">chaos-drill</option>
+            <option value="scenario-run">scenario-run</option>
+            <option value="campaign">campaign</option>
+          </select>
+          <textarea id="ops-action-payload">{"laneId":"","name":"stability-default"}</textarea>
+          <div class="split">
+            <button class="s" id="ops-action-enqueue-btn">Enqueue action</button>
+            <button class="s" id="ops-action-list-btn">List action queue</button>
+          </div>
+          <div class="split">
+            <button class="p" id="ops-action-run-next-btn">Run next action</button>
+            <button class="p" id="ops-action-run-all-btn">Run all actions</button>
+          </div>
+          <button class="w" id="ops-action-clear-btn">Clear action queue</button>
+          <div id="ops-action-queue-panel" class="metrics"></div>
+          <hr style="border:0;border-top:1px solid #2f4a61;" />
+          <div class="split">
+            <input id="ops-gate-min-score" type="number" min="0" max="100" value="80" />
+            <select id="ops-gate-severity">
+              <option value="green">green</option>
+              <option value="amber">amber</option>
+              <option value="red">red</option>
+            </select>
+          </div>
+          <div class="split">
+            <input id="ops-gate-max-failed" type="number" min="0" value="0" />
+            <input id="ops-gate-max-incidents" type="number" min="0" value="0" />
+          </div>
+          <div class="split">
+            <button class="s" id="ops-gate-load-btn">Load gate</button>
+            <button class="s" id="ops-gate-save-btn">Save gate</button>
+          </div>
+          <button class="p" id="ops-gate-eval-btn">Evaluate gate</button>
+          <div id="ops-gate-panel" class="metrics"></div>
         </article>
 
         <article class="card stack">
@@ -6840,6 +7571,18 @@ https://developer.android.com</textarea>
       const $opsScenarioUrl = document.getElementById('ops-scenario-url');
       const $opsScenariosPanel = document.getElementById('ops-scenarios-panel');
       const $controlHistoryPanel = document.getElementById('control-history-panel');
+      const $opsPolicyPresetName = document.getElementById('ops-policy-preset-name');
+      const $opsPolicyPresetsPanel = document.getElementById('ops-policy-presets-panel');
+      const $watchdogProfileName = document.getElementById('watchdog-profile-name');
+      const $watchdogProfilesPanel = document.getElementById('watchdog-profiles-panel');
+      const $opsActionType = document.getElementById('ops-action-type');
+      const $opsActionPayload = document.getElementById('ops-action-payload');
+      const $opsActionQueuePanel = document.getElementById('ops-action-queue-panel');
+      const $opsGateMinScore = document.getElementById('ops-gate-min-score');
+      const $opsGateSeverity = document.getElementById('ops-gate-severity');
+      const $opsGateMaxFailed = document.getElementById('ops-gate-max-failed');
+      const $opsGateMaxIncidents = document.getElementById('ops-gate-max-incidents');
+      const $opsGatePanel = document.getElementById('ops-gate-panel');
       const $queueSnapshotName = document.getElementById('queue-snapshot-name');
       const $campaignDeviceIds = document.getElementById('campaign-device-ids');
 
@@ -7099,6 +7842,90 @@ https://developer.android.com</textarea>
         }
         if (!points.length) {
           $controlHistoryPanel.textContent = 'No control history.';
+        }
+      }
+
+      function renderPolicyPresets(payload) {
+        if (!$opsPolicyPresetsPanel) {
+          return;
+        }
+        const presets = Array.isArray(payload && payload.presets) ? payload.presets : [];
+        $opsPolicyPresetsPanel.innerHTML = '';
+        for (const preset of presets.slice(0, 20)) {
+          const policy = preset.policy || {};
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">' + preset.name + '</div>' +
+            '<div>maxQueue=' + (policy.maxQueuePerLane || '-') + ' failPause=' + (policy.failurePauseThreshold || '-') + ' retry=' + (policy.autoRetryFailedLimit || '-') + '</div>' +
+            '<div>autoPause=' + String(policy.autoPauseOnFailure) + '</div>';
+          $opsPolicyPresetsPanel.appendChild(row);
+        }
+        if (!presets.length) {
+          $opsPolicyPresetsPanel.textContent = 'No policy presets.';
+        }
+      }
+
+      function renderWatchdogProfiles(payload) {
+        if (!$watchdogProfilesPanel) {
+          return;
+        }
+        const profiles = Array.isArray(payload && payload.profiles) ? payload.profiles : [];
+        $watchdogProfilesPanel.innerHTML = '';
+        for (const profile of profiles.slice(0, 20)) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">' + profile.name + '</div>' +
+            '<div>autoHealOnAlert=' + String(profile.autoHealOnAlert) + ' retry=' + profile.retryFailedLimit + ' maxRunbooks=' + profile.maxRunbooks + '</div>' +
+            '<div>lane=' + (profile.laneId || '-') + '</div>';
+          $watchdogProfilesPanel.appendChild(row);
+        }
+        if (!profiles.length) {
+          $watchdogProfilesPanel.textContent = 'No watchdog profiles.';
+        }
+      }
+
+      function renderActionQueue(payload) {
+        if (!$opsActionQueuePanel) {
+          return;
+        }
+        const queue = Array.isArray(payload && payload.queue) ? payload.queue : [];
+        $opsActionQueuePanel.innerHTML = '';
+        for (const item of queue.slice(-30).reverse()) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">#' + item.id + ' ' + item.type + ' [' + item.status + ']</div>' +
+            '<div>created=' + item.createdAt + ' durationMs=' + (item.durationMs || 0) + '</div>' +
+            (item.error ? '<div style="color:#ff8f8f;">' + item.error + '</div>' : '');
+          $opsActionQueuePanel.appendChild(row);
+        }
+        if (!queue.length) {
+          $opsActionQueuePanel.textContent = 'No queued actions.';
+        }
+      }
+
+      function renderGate(payload) {
+        if (!$opsGatePanel) {
+          return;
+        }
+        const policy = payload && payload.policy ? payload.policy : {};
+        $opsGatePanel.innerHTML = '';
+        const head = document.createElement('div');
+        head.className = 'item';
+        head.innerHTML =
+          '<div class="meta">gate policy</div>' +
+          '<div>minScore=' + (policy.minScore || 0) + ' severity=' + (policy.allowedSeverity || 'green') + ' maxFailed=' + (policy.maxFailedJobs || 0) + ' maxIncidents=' + (policy.maxOpenIncidents || 0) + '</div>';
+        $opsGatePanel.appendChild(head);
+        const checks = Array.isArray(payload && payload.checks) ? payload.checks : [];
+        for (const item of checks.slice(0, 10)) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">' + item.check + ' [' + (item.pass ? 'pass' : 'fail') + ']</div>' +
+            '<div>value=' + item.value + ' expected=' + item.expected + '</div>';
+          $opsGatePanel.appendChild(row);
         }
       }
 
@@ -8440,6 +9267,180 @@ https://developer.android.com</textarea>
         setMessage('Control history reset', false);
       }
 
+      async function listPolicyPresetsUi() {
+        const result = await api('/api/ops/policy-presets');
+        renderPolicyPresets(result);
+        renderOutput(result);
+        const presets = Array.isArray(result.presets) ? result.presets : [];
+        if (presets.length > 0) {
+          $opsPolicyPresetName.value = presets[0].name;
+        }
+        setMessage('Policy presets loaded', false);
+      }
+
+      async function savePolicyPresetUi() {
+        const name = ($opsPolicyPresetName.value || '').trim();
+        if (!name) {
+          throw new Error('policy preset name required');
+        }
+        const result = await api('/api/ops/policy-presets', 'POST', {
+          name,
+          description: 'web-ui policy preset',
+          maxQueuePerLane: Number($policyMaxQueue.value || '60'),
+          failurePauseThreshold: Number($policyFailThreshold.value || '6'),
+          autoRetryFailedLimit: Number($policyRetryLimit.value || '15'),
+          autoPauseOnFailure: $policyAutoPause.value === 'true',
+        });
+        renderOutput(result);
+        setMessage('Policy preset saved', false);
+        await listPolicyPresetsUi();
+      }
+
+      async function applyPolicyPresetUi() {
+        const name = ($opsPolicyPresetName.value || '').trim();
+        if (!name) {
+          throw new Error('policy preset name required');
+        }
+        const result = await api('/api/ops/policy-presets/apply', 'POST', { name });
+        renderOutput(result);
+        setMessage('Policy preset applied', false);
+        await loadPolicyUi();
+      }
+
+      async function listWatchdogProfilesUi() {
+        const result = await api('/api/ops/watchdog/profiles');
+        renderWatchdogProfiles(result);
+        renderOutput(result);
+        const profiles = Array.isArray(result.profiles) ? result.profiles : [];
+        if (profiles.length > 0) {
+          $watchdogProfileName.value = profiles[0].name;
+        }
+        setMessage('Watchdog profiles loaded', false);
+      }
+
+      async function saveWatchdogProfileUi() {
+        const name = ($watchdogProfileName.value || '').trim();
+        if (!name) {
+          throw new Error('watchdog profile name required');
+        }
+        const result = await api('/api/ops/watchdog/profiles', 'POST', {
+          name,
+          description: 'web-ui watchdog profile',
+          laneId: selectedLaneId(),
+          autoHealOnAlert: asBoolean($watchdogAutoHeal.value, true),
+          retryFailedLimit: Number($autoHealRetryLimit.value || '15'),
+          maxRunbooks: Number($autoHealRunbooks.value || '2'),
+        });
+        renderOutput(result);
+        setMessage('Watchdog profile saved', false);
+        await listWatchdogProfilesUi();
+      }
+
+      async function runWatchdogProfileUi() {
+        const name = ($watchdogProfileName.value || '').trim();
+        if (!name) {
+          throw new Error('watchdog profile name required');
+        }
+        const result = await api('/api/ops/watchdog/profiles/run', 'POST', {
+          name,
+          laneId: selectedLaneId(),
+        });
+        renderOutput(result);
+        setMessage('Watchdog profile executed', false);
+        if (result.controlAfter) {
+          renderControlRoom(result.controlAfter);
+        }
+      }
+
+      async function listOpsActionQueueUi() {
+        const result = await api('/api/ops/action-queue');
+        renderActionQueue(result);
+        renderOutput(result);
+        setMessage('Ops action queue loaded', false);
+      }
+
+      async function enqueueOpsActionUi() {
+        const type = ($opsActionType.value || '').trim();
+        if (!type) {
+          throw new Error('ops action type required');
+        }
+        let payload = {};
+        const raw = ($opsActionPayload.value || '').trim();
+        if (raw) {
+          try {
+            payload = JSON.parse(raw);
+          } catch (error) {
+            throw new Error('ops action payload must be valid JSON');
+          }
+        }
+        const result = await api('/api/ops/action-queue/enqueue', 'POST', {
+          type,
+          payload,
+        });
+        renderOutput(result);
+        setMessage('Ops action enqueued', false);
+        await listOpsActionQueueUi();
+      }
+
+      async function runNextOpsActionUi() {
+        const result = await api('/api/ops/action-queue/run-next', 'POST', {});
+        renderOutput(result);
+        setMessage('Ran next ops action', false);
+        await listOpsActionQueueUi();
+      }
+
+      async function runAllOpsActionUi() {
+        const result = await api('/api/ops/action-queue/run-all', 'POST', {
+          maxItems: 40,
+        });
+        renderOutput(result);
+        setMessage('Ran ops action queue', false);
+        await listOpsActionQueueUi();
+      }
+
+      async function clearOpsActionQueueUi() {
+        const result = await api('/api/ops/action-queue/clear', 'POST', {
+          removeCompleted: true,
+          removeFailed: true,
+          removeQueued: true,
+          removeRunning: false,
+        });
+        renderOutput(result);
+        setMessage('Ops action queue cleared', false);
+        await listOpsActionQueueUi();
+      }
+
+      async function loadGateUi() {
+        const result = await api('/api/ops/gate');
+        renderGate(result);
+        renderOutput(result);
+        const policy = result.policy || {};
+        $opsGateMinScore.value = String(policy.minScore || 80);
+        $opsGateSeverity.value = String(policy.allowedSeverity || 'green');
+        $opsGateMaxFailed.value = String(policy.maxFailedJobs || 0);
+        $opsGateMaxIncidents.value = String(policy.maxOpenIncidents || 0);
+        setMessage('Ops gate loaded', false);
+      }
+
+      async function saveGateUi() {
+        const result = await api('/api/ops/gate', 'POST', {
+          minScore: Number($opsGateMinScore.value || '80'),
+          allowedSeverity: $opsGateSeverity.value || 'green',
+          maxFailedJobs: Number($opsGateMaxFailed.value || '0'),
+          maxOpenIncidents: Number($opsGateMaxIncidents.value || '0'),
+        });
+        renderGate(result);
+        renderOutput(result);
+        setMessage('Ops gate updated', false);
+      }
+
+      async function evaluateGateUi() {
+        const result = await api('/api/ops/gate/evaluate');
+        renderGate(result);
+        renderOutput(result);
+        setMessage(result.pass ? 'Ops gate PASS' : 'Ops gate FAIL', !result.pass);
+      }
+
       async function runOpsStabilizeUi() {
         const result = await api('/api/ops/stabilize', 'POST', {
           laneId: selectedLaneId(),
@@ -8737,6 +9738,48 @@ https://developer.android.com</textarea>
       document.getElementById('control-history-reset-btn').addEventListener('click', async function () {
         try { await resetControlHistoryUi(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('ops-policy-presets-list-btn').addEventListener('click', async function () {
+        try { await listPolicyPresetsUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-policy-preset-save-btn').addEventListener('click', async function () {
+        try { await savePolicyPresetUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-policy-preset-apply-btn').addEventListener('click', async function () {
+        try { await applyPolicyPresetUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('watchdog-profiles-list-btn').addEventListener('click', async function () {
+        try { await listWatchdogProfilesUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('watchdog-profile-save-btn').addEventListener('click', async function () {
+        try { await saveWatchdogProfileUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('watchdog-profile-run-btn').addEventListener('click', async function () {
+        try { await runWatchdogProfileUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-action-list-btn').addEventListener('click', async function () {
+        try { await listOpsActionQueueUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-action-enqueue-btn').addEventListener('click', async function () {
+        try { await enqueueOpsActionUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-action-run-next-btn').addEventListener('click', async function () {
+        try { await runNextOpsActionUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-action-run-all-btn').addEventListener('click', async function () {
+        try { await runAllOpsActionUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-action-clear-btn').addEventListener('click', async function () {
+        try { await clearOpsActionQueueUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-gate-load-btn').addEventListener('click', async function () {
+        try { await loadGateUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-gate-save-btn').addEventListener('click', async function () {
+        try { await saveGateUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-gate-eval-btn').addEventListener('click', async function () {
+        try { await evaluateGateUi(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('clear-output-btn').addEventListener('click', function () {
         renderOutput({});
       });
@@ -8744,6 +9787,23 @@ https://developer.android.com</textarea>
       $deviceSelect.addEventListener('change', function () {
         state.deviceId = $deviceSelect.value || undefined;
         $devicePill.textContent = 'device: ' + (state.deviceId || 'none');
+      });
+
+      $opsActionType.addEventListener('change', function () {
+        const laneId = selectedLaneId() || '';
+        const scenarioName = ($opsScenarioName.value || '').trim() || 'stability-default';
+        const nextType = ($opsActionType.value || '').trim();
+        if (nextType === 'stabilize') {
+          $opsActionPayload.value = JSON.stringify({ laneId }, null, 2);
+        } else if (nextType === 'watchdog') {
+          $opsActionPayload.value = JSON.stringify({ laneId, autoHealOnAlert: true }, null, 2);
+        } else if (nextType === 'chaos-drill') {
+          $opsActionPayload.value = JSON.stringify({ deviceId: selectedDeviceId(), url: $opsScenarioUrl.value || 'https://developer.android.com' }, null, 2);
+        } else if (nextType === 'scenario-run') {
+          $opsActionPayload.value = JSON.stringify({ name: scenarioName, laneId }, null, 2);
+        } else {
+          $opsActionPayload.value = JSON.stringify({ name: 'smoke-now', deviceIds: selectedDeviceId() ? [selectedDeviceId()] : [] }, null, 2);
+        }
       });
 
       for (const button of document.querySelectorAll('.quick-url')) {
@@ -8789,6 +9849,10 @@ https://developer.android.com</textarea>
           await listQueueSnapshotsUi();
           await listOpsScenariosUi();
           await loadControlHistoryUi();
+          await listPolicyPresetsUi();
+          await listWatchdogProfilesUi();
+          await listOpsActionQueueUi();
+          await loadGateUi();
           renderOutput({ ok: true, message: 'UI ready', updateHint: '${UPDATE_HINT}' });
           setMessage('Ready.', false);
 
@@ -8807,6 +9871,8 @@ https://developer.android.com</textarea>
               renderControlRoom(controlRoomPayload);
               const controlHistoryPayload = await api('/api/ops/control-room/history?limit=120');
               renderControlHistory(controlHistoryPayload);
+              const actionQueuePayload = await api('/api/ops/action-queue');
+              renderActionQueue(actionQueuePayload);
               const schedulesPayload = await api('/api/schedules');
               renderSchedules(schedulesPayload);
               const queueBoardPayload = await api('/api/board/queue');
