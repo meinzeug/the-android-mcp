@@ -24,6 +24,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.10.0] - 2026-02-19
+### Added
+- New alerting backend with rules + incidents:
+- `GET /api/alerts/rules`
+- `POST /api/alerts/rules`
+- `DELETE /api/alerts/rules/:id`
+- `GET /api/alerts/incidents`
+- `POST /api/alerts/check`
+- `POST /api/alerts/incidents/:id/ack`
+- New runbook discovery/preview backend:
+- `GET /api/runbook/catalog`
+- `POST /api/runbook/preview`
+- New queue transfer backend:
+- `GET /api/queue/export`
+- `POST /api/queue/import`
+- New persistent schedule storage and auto-restore on Web UI startup.
+- New Web UI controls for alerts, runbook preview/catalog, and queue export/import.
+
+### Improved
+- WebSocket realtime channel now transports alert events for low-latency operator feedback.
+- Session export now includes schedules and alert state for better diagnostics handoff.
+- Ops board enriched with live alert and schedule context.
+
 ## [3.9.0] - 2026-02-19
 ### Added
 - New websocket realtime backend stream:

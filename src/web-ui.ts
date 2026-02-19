@@ -33,6 +33,8 @@ const WORKFLOW_FILE = path.join(APP_STATE_DIR, 'web-ui-workflows.json');
 const SESSION_EVENTS_FILE = path.join(APP_STATE_DIR, 'web-ui-session-events.ndjson');
 const QUEUE_PRESETS_FILE = path.join(APP_STATE_DIR, 'web-ui-queue-presets.json');
 const RECORDER_SESSIONS_FILE = path.join(APP_STATE_DIR, 'web-ui-recorder-sessions.json');
+const SCHEDULES_FILE = path.join(APP_STATE_DIR, 'web-ui-schedules.json');
+const ALERT_RULES_FILE = path.join(APP_STATE_DIR, 'web-ui-alert-rules.json');
 
 const SNAPSHOT_KINDS = [
   'radio',
@@ -166,11 +168,36 @@ interface ScheduleTask {
   lastError?: string;
 }
 
+interface AlertRule {
+  id: number;
+  name: string;
+  metric: 'queueDepth' | 'failedJobs' | 'pausedLanes';
+  operator: 'gte' | 'lte';
+  threshold: number;
+  cooldownMs: number;
+  enabled: boolean;
+  updatedAt: string;
+  lastTriggeredAt?: string;
+}
+
+interface AlertIncident {
+  id: number;
+  ruleId: number;
+  ruleName: string;
+  metric: string;
+  value: number;
+  threshold: number;
+  at: string;
+  acknowledgedAt?: string;
+}
+
 const serverStartedAt = Date.now();
 let eventSeq = 1;
 let jobSeq = 1;
 let timelineSeq = 1;
 let scheduleSeq = 1;
+let alertRuleSeq = 1;
+let alertIncidentSeq = 1;
 
 const eventHistory: UiEvent[] = [];
 const dashboardTimeline: TimelinePoint[] = [];
@@ -195,6 +222,9 @@ const lanes: Record<string, LaneState> = {};
 const schedules: Record<number, ScheduleTask> = {};
 const scheduleTimers: Record<number, NodeJS.Timeout> = {};
 const scheduleRunning: Record<number, boolean> = {};
+let alertRules: Record<number, AlertRule> = loadAlertRules();
+const alertIncidents: AlertIncident[] = [];
+let schedulesInitialized = false;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -276,6 +306,77 @@ function updatePolicy(input: JsonObject): OpsPolicy {
   };
   pushEvent('policy-updated', 'Ops policy updated', getPolicyPayload());
   return opsPolicy;
+}
+
+function alertMetricValue(metric: AlertRule['metric']): number {
+  const totals = laneTotals();
+  if (metric === 'queueDepth') {
+    return totals.queueDepth;
+  }
+  if (metric === 'pausedLanes') {
+    return totals.pausedLaneCount;
+  }
+  return jobs.filter(job => job.status === 'failed').length;
+}
+
+function listAlertRules(): AlertRule[] {
+  return Object.values(alertRules).sort((a, b) => a.id - b.id);
+}
+
+function listAlertIncidents(limit: number): AlertIncident[] {
+  const max = clampInt(limit, 120, 1, 1000);
+  return alertIncidents.slice(-max).reverse();
+}
+
+function evaluateAlertRulesNow(): JsonObject {
+  const now = Date.now();
+  const created: AlertIncident[] = [];
+  for (const rule of Object.values(alertRules)) {
+    if (!rule.enabled) {
+      continue;
+    }
+    const value = alertMetricValue(rule.metric);
+    const matches = rule.operator === 'gte' ? value >= rule.threshold : value <= rule.threshold;
+    if (!matches) {
+      continue;
+    }
+    const lastTriggeredMs = rule.lastTriggeredAt ? Date.parse(rule.lastTriggeredAt) : 0;
+    if (Number.isFinite(lastTriggeredMs) && lastTriggeredMs > 0 && now - lastTriggeredMs < rule.cooldownMs) {
+      continue;
+    }
+    const incident: AlertIncident = {
+      id: alertIncidentSeq++,
+      ruleId: rule.id,
+      ruleName: rule.name,
+      metric: rule.metric,
+      value,
+      threshold: rule.threshold,
+      at: nowIso(),
+    };
+    alertIncidents.push(incident);
+    if (alertIncidents.length > 600) {
+      alertIncidents.splice(0, alertIncidents.length - 600);
+    }
+    rule.lastTriggeredAt = incident.at;
+    rule.updatedAt = nowIso();
+    created.push(incident);
+    pushEvent('alert-triggered', 'Alert rule triggered', {
+      ruleId: rule.id,
+      name: rule.name,
+      metric: rule.metric,
+      value,
+      threshold: rule.threshold,
+      incidentId: incident.id,
+    });
+  }
+  if (created.length > 0) {
+    saveAlertRules();
+  }
+  return {
+    ok: true,
+    createdCount: created.length,
+    incidents: created,
+  };
 }
 
 function captureTimelinePoint(reason: string): TimelinePoint {
@@ -846,6 +947,193 @@ function loadRecorderSessions(): Record<string, RecorderSession> {
 function saveRecorderSessions(): void {
   ensureAppStateDir();
   fs.writeFileSync(RECORDER_SESSIONS_FILE, JSON.stringify(recorderSessions, null, 2), 'utf8');
+}
+
+function defaultAlertRules(): Record<number, AlertRule> {
+  const createdAt = nowIso();
+  return {
+    1: {
+      id: 1,
+      name: 'High queue depth',
+      metric: 'queueDepth',
+      operator: 'gte',
+      threshold: 12,
+      cooldownMs: 120000,
+      enabled: true,
+      updatedAt: createdAt,
+    },
+    2: {
+      id: 2,
+      name: 'Many failed jobs',
+      metric: 'failedJobs',
+      operator: 'gte',
+      threshold: 3,
+      cooldownMs: 120000,
+      enabled: true,
+      updatedAt: createdAt,
+    },
+  };
+}
+
+function loadAlertRules(): Record<number, AlertRule> {
+  try {
+    ensureAppStateDir();
+    if (!fs.existsSync(ALERT_RULES_FILE)) {
+      const defaults = defaultAlertRules();
+      fs.writeFileSync(ALERT_RULES_FILE, JSON.stringify(defaults, null, 2), 'utf8');
+      alertRuleSeq = 3;
+      return defaults;
+    }
+
+    const raw = fs.readFileSync(ALERT_RULES_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      const defaults = defaultAlertRules();
+      alertRuleSeq = 3;
+      return defaults;
+    }
+
+    const result: Record<number, AlertRule> = {};
+    let maxId = 0;
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!value || typeof value !== 'object') {
+        continue;
+      }
+      const item = value as Record<string, unknown>;
+      const id = Number(item.id ?? key);
+      if (!Number.isFinite(id) || id <= 0) {
+        continue;
+      }
+      const metric = typeof item.metric === 'string' ? item.metric : '';
+      const operator = typeof item.operator === 'string' ? item.operator : '';
+      if (metric !== 'queueDepth' && metric !== 'failedJobs' && metric !== 'pausedLanes') {
+        continue;
+      }
+      if (operator !== 'gte' && operator !== 'lte') {
+        continue;
+      }
+      result[id] = {
+        id,
+        name: typeof item.name === 'string' && item.name.trim().length > 0 ? item.name : `rule-${id}`,
+        metric,
+        operator,
+        threshold: clampInt(item.threshold, 1, 0, 100000),
+        cooldownMs: clampInt(item.cooldownMs, 120000, 1000, 86400000),
+        enabled: item.enabled !== false,
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : nowIso(),
+        lastTriggeredAt: typeof item.lastTriggeredAt === 'string' ? item.lastTriggeredAt : undefined,
+      };
+      if (id > maxId) {
+        maxId = id;
+      }
+    }
+
+    if (Object.keys(result).length === 0) {
+      const defaults = defaultAlertRules();
+      alertRuleSeq = 3;
+      return defaults;
+    }
+
+    alertRuleSeq = maxId + 1;
+    return result;
+  } catch {
+    const defaults = defaultAlertRules();
+    alertRuleSeq = 3;
+    return defaults;
+  }
+}
+
+function saveAlertRules(): void {
+  ensureAppStateDir();
+  fs.writeFileSync(ALERT_RULES_FILE, JSON.stringify(alertRules, null, 2), 'utf8');
+}
+
+function loadSchedules(): void {
+  try {
+    ensureAppStateDir();
+    if (!fs.existsSync(SCHEDULES_FILE)) {
+      fs.writeFileSync(SCHEDULES_FILE, JSON.stringify({ scheduleSeq: 1, schedules: {} }, null, 2), 'utf8');
+      return;
+    }
+    const raw = fs.readFileSync(SCHEDULES_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return;
+    }
+    const payload = parsed as Record<string, unknown>;
+    const schedulesRaw = payload.schedules && typeof payload.schedules === 'object'
+      ? (payload.schedules as Record<string, unknown>)
+      : {};
+    const restored: Record<number, ScheduleTask> = {};
+    let maxId = 0;
+    for (const value of Object.values(schedulesRaw)) {
+      if (!value || typeof value !== 'object') {
+        continue;
+      }
+      const item = value as Record<string, unknown>;
+      const id = Number(item.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        continue;
+      }
+      const runbook = typeof item.runbook === 'string' ? item.runbook : '';
+      if (!runbook) {
+        continue;
+      }
+      const task: ScheduleTask = {
+        id,
+        name: typeof item.name === 'string' && item.name.trim().length > 0 ? item.name : `schedule-${id}`,
+        runbook,
+        everyMs: clampInt(item.everyMs, 30000, 1000, 24 * 60 * 60 * 1000),
+        deviceId: typeof item.deviceId === 'string' && item.deviceId.trim().length > 0 ? item.deviceId : undefined,
+        active: item.active === true,
+        runs: clampInt(item.runs, 0, 0, 1000000),
+        failures: clampInt(item.failures, 0, 0, 1000000),
+        createdAt: typeof item.createdAt === 'string' ? item.createdAt : nowIso(),
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : nowIso(),
+        lastRunAt: typeof item.lastRunAt === 'string' ? item.lastRunAt : undefined,
+        lastError: typeof item.lastError === 'string' ? item.lastError : undefined,
+      };
+      restored[id] = task;
+      if (id > maxId) {
+        maxId = id;
+      }
+    }
+    for (const id of Object.keys(schedules)) {
+      delete schedules[Number(id)];
+    }
+    Object.assign(schedules, restored);
+
+    const storedSeq = Number(payload.scheduleSeq);
+    if (Number.isFinite(storedSeq) && storedSeq > maxId) {
+      scheduleSeq = Math.trunc(storedSeq);
+    } else {
+      scheduleSeq = maxId + 1;
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function saveSchedules(): void {
+  ensureAppStateDir();
+  const payload = {
+    scheduleSeq,
+    schedules,
+  };
+  fs.writeFileSync(SCHEDULES_FILE, JSON.stringify(payload, null, 2), 'utf8');
+}
+
+function ensureSchedulesInitialized(): void {
+  if (schedulesInitialized) {
+    return;
+  }
+  loadSchedules();
+  for (const task of Object.values(schedules)) {
+    if (task.active) {
+      startSchedule(task.id);
+    }
+  }
+  schedulesInitialized = true;
 }
 
 function recorderSessionsList(): RecorderSession[] {
@@ -2082,6 +2370,178 @@ function runOpsRunbook(body: JsonObject): JsonObject {
   throw new Error(`Unknown runbook '${name}'`);
 }
 
+function runbookCatalog(): JsonObject[] {
+  return [
+    {
+      name: 'recover-lane',
+      description: 'Resume lane and retry failed jobs according to policy.',
+      required: [],
+      optional: ['laneId', 'deviceId'],
+    },
+    {
+      name: 'purge-lane',
+      description: 'Cancel queued jobs for lane and prune terminal history.',
+      required: [],
+      optional: ['laneId', 'deviceId'],
+    },
+    {
+      name: 'smoke-now',
+      description: 'Open URL now and capture immediate device smoke profile.',
+      required: [],
+      optional: ['deviceId', 'url', 'waitForReadyMs', 'packageName'],
+    },
+    {
+      name: 'autopilot-lite',
+      description: 'Queue a lightweight autopilot burst for selected device(s).',
+      required: [],
+      optional: ['deviceId', 'deviceIds', 'urls', 'waitForReadyMs', 'packageName'],
+    },
+  ];
+}
+
+function previewRunbook(body: JsonObject): JsonObject {
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  if (!name) {
+    throw new Error('runbook name is required');
+  }
+  const deviceId = extractDeviceId(body);
+  const laneId = typeof body.laneId === 'string'
+    ? body.laneId
+    : (deviceId ? `device:${deviceId}` : 'device:default');
+  const queueDepth = lanes[laneId]?.queue.length ?? 0;
+
+  if (name === 'recover-lane') {
+    return {
+      ok: true,
+      runbook: name,
+      laneId,
+      preview: [
+        'resume lane if paused',
+        `retry failed jobs (limit=${opsPolicy.autoRetryFailedLimit})`,
+      ],
+      expectedEffects: {
+        queueDepthAfter: `>= ${queueDepth}`,
+      },
+    };
+  }
+  if (name === 'purge-lane') {
+    return {
+      ok: true,
+      runbook: name,
+      laneId,
+      preview: [
+        'cancel queued jobs for lane',
+        'prune terminal jobs, keep recent history',
+      ],
+      expectedEffects: {
+        queueDepthAfter: 0,
+      },
+    };
+  }
+  if (name === 'smoke-now') {
+    return {
+      ok: true,
+      runbook: name,
+      laneId,
+      preview: [
+        'open target URL on device',
+        'capture radio/display/location/power/package profile summary',
+      ],
+      expectedEffects: {
+        addsEvents: ['open-url', 'device-smoke'],
+      },
+    };
+  }
+  if (name === 'autopilot-lite') {
+    return {
+      ok: true,
+      runbook: name,
+      laneId,
+      preview: [
+        'enqueue lightweight autopilot bundle',
+        'execute open_url + device_profile per target device',
+      ],
+      expectedEffects: {
+        queueDepthIncrease: '>= 2',
+      },
+    };
+  }
+  throw new Error(`Unknown runbook '${name}'`);
+}
+
+function exportQueueState(): JsonObject {
+  const lanesExport: JsonObject[] = [];
+  for (const lane of Object.values(lanes).sort((a, b) => a.id.localeCompare(b.id))) {
+    const queued = lane.queue
+      .map(id => getJobById(id))
+      .filter((job): job is JobRecord => Boolean(job && job.status === 'queued'))
+      .map(job => ({
+        id: job.id,
+        type: job.type,
+        input: job.input,
+      }));
+    lanesExport.push({
+      laneId: lane.id,
+      deviceId: lane.deviceId,
+      paused: lane.paused,
+      queueDepth: lane.queue.length,
+      queued,
+    });
+  }
+  return {
+    ok: true,
+    exportedAt: nowIso(),
+    laneCount: lanesExport.length,
+    lanes: lanesExport,
+  };
+}
+
+function importQueueState(body: JsonObject): JsonObject {
+  const clearExisting = body.clearExisting === true;
+  const lanesRaw = Array.isArray(body.lanes) ? body.lanes : [];
+  if (clearExisting) {
+    cancelQueuedJobs({});
+  }
+  const created: JobRecord[] = [];
+  for (const laneRaw of lanesRaw) {
+    if (!laneRaw || typeof laneRaw !== 'object') {
+      continue;
+    }
+    const laneItem = laneRaw as Record<string, unknown>;
+    const queuedRaw = Array.isArray(laneItem.queued) ? laneItem.queued : [];
+    const targetDeviceId = typeof laneItem.deviceId === 'string' && laneItem.deviceId.trim().length > 0
+      ? laneItem.deviceId.trim()
+      : undefined;
+    for (const queuedItemRaw of queuedRaw) {
+      if (!queuedItemRaw || typeof queuedItemRaw !== 'object') {
+        continue;
+      }
+      const queuedItem = queuedItemRaw as Record<string, unknown>;
+      const typeValue = typeof queuedItem.type === 'string' ? queuedItem.type : '';
+      if (!isJobType(typeValue)) {
+        continue;
+      }
+      const input = queuedItem.input && typeof queuedItem.input === 'object' && !Array.isArray(queuedItem.input)
+        ? (queuedItem.input as JsonObject)
+        : {};
+      if (targetDeviceId && !input.deviceId) {
+        input.deviceId = targetDeviceId;
+      }
+      created.push(createJob(typeValue, input));
+    }
+  }
+  pushEvent('queue-imported', 'Queue state imported', {
+    createdCount: created.length,
+    clearExisting,
+  });
+  return {
+    ok: true,
+    clearExisting,
+    createdCount: created.length,
+    jobs: created,
+  };
+}
+
 function schedulesList(): JsonObject[] {
   return Object.values(schedules)
     .sort((a, b) => a.id - b.id)
@@ -2113,6 +2573,7 @@ function stopSchedule(id: number): ScheduleTask | undefined {
   delete scheduleRunning[id];
   task.active = false;
   task.updatedAt = nowIso();
+  saveSchedules();
   pushEvent('schedule-stopped', 'Schedule stopped', { id, name: task.name });
   return task;
 }
@@ -2134,6 +2595,7 @@ async function executeSchedule(task: ScheduleTask): Promise<void> {
     task.runs += 1;
     task.lastRunAt = nowIso();
     task.updatedAt = nowIso();
+    saveSchedules();
     pushEvent('schedule-run', 'Schedule tick executed', {
       id: task.id,
       name: task.name,
@@ -2145,6 +2607,7 @@ async function executeSchedule(task: ScheduleTask): Promise<void> {
     task.failures += 1;
     task.lastError = message;
     task.updatedAt = nowIso();
+    saveSchedules();
     pushEvent('schedule-run-failed', 'Schedule tick failed', {
       id: task.id,
       name: task.name,
@@ -2166,6 +2629,7 @@ function startSchedule(id: number): ScheduleTask | undefined {
   }
   task.active = true;
   task.updatedAt = nowIso();
+  saveSchedules();
   scheduleTimers[id] = setInterval(() => {
     void executeSchedule(task);
   }, task.everyMs);
@@ -2200,6 +2664,7 @@ function createSchedule(body: JsonObject): ScheduleTask {
     updatedAt: nowIso(),
   };
   schedules[task.id] = task;
+  saveSchedules();
   pushEvent('schedule-created', 'Schedule created', {
     id: task.id,
     name: task.name,
@@ -2219,6 +2684,7 @@ function deleteSchedule(id: number): boolean {
   }
   stopSchedule(id);
   delete schedules[id];
+  saveSchedules();
   pushEvent('schedule-deleted', 'Schedule deleted', {
     id,
     name: task.name,
@@ -2574,6 +3040,7 @@ function resetSession(options: { keepWorkflows?: boolean }): void {
   for (const id of Object.keys(schedules)) {
     delete schedules[Number(id)];
   }
+  saveSchedules();
   for (const key of Object.keys(metrics)) {
     delete metrics[key];
   }
@@ -2756,6 +3223,11 @@ function buildOpsBoard(host: string, port: number): JsonObject {
       } : null,
       sessions: recorderSessionsList().slice(0, 20),
     },
+    alerts: {
+      rules: listAlertRules(),
+      incidents: listAlertIncidents(40),
+    },
+    schedules: schedulesList(),
     updateHint: UPDATE_HINT,
   };
 }
@@ -2793,6 +3265,11 @@ function buildSessionExport(): JsonObject {
     recorder: {
       activeRecorder,
       sessions: recorderSessions,
+    },
+    schedules,
+    alerts: {
+      rules: alertRules,
+      incidents: alertIncidents,
     },
     lanes: lanesSummary(),
     jobs,
@@ -2849,6 +3326,99 @@ async function handleApi(
         ok: true,
         policy,
       });
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/alerts/rules') {
+    await withMetric('alerts-rules-list', () => {
+      sendJson(response, 200, {
+        ok: true,
+        rules: listAlertRules(),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/alerts/rules') {
+    await withMetric('alerts-rules-save', async () => {
+      const body = await readJsonBody(request);
+      const idRaw = Number(body.id);
+      const id = Number.isFinite(idRaw) && idRaw > 0 ? Math.trunc(idRaw) : alertRuleSeq++;
+      const metric = typeof body.metric === 'string' ? body.metric : '';
+      const operator = typeof body.operator === 'string' ? body.operator : '';
+      if (metric !== 'queueDepth' && metric !== 'failedJobs' && metric !== 'pausedLanes') {
+        sendJson(response, 400, { error: 'metric must be queueDepth, failedJobs, or pausedLanes' });
+        return;
+      }
+      if (operator !== 'gte' && operator !== 'lte') {
+        sendJson(response, 400, { error: 'operator must be gte or lte' });
+        return;
+      }
+      const name = typeof body.name === 'string' && body.name.trim().length > 0 ? body.name.trim() : `rule-${id}`;
+      const rule: AlertRule = {
+        id,
+        name,
+        metric,
+        operator,
+        threshold: clampInt(body.threshold, 1, 0, 100000),
+        cooldownMs: clampInt(body.cooldownMs, 120000, 1000, 86400000),
+        enabled: body.enabled !== false,
+        updatedAt: nowIso(),
+        lastTriggeredAt: alertRules[id]?.lastTriggeredAt,
+      };
+      alertRules[id] = rule;
+      saveAlertRules();
+      pushEvent('alert-rule-saved', 'Alert rule saved', { id, name });
+      sendJson(response, 200, { ok: true, rule });
+    });
+    return;
+  }
+
+  if (method === 'DELETE' && /^\/api\/alerts\/rules\/\d+$/.test(pathname)) {
+    await withMetric('alerts-rules-delete', () => {
+      const id = Number(pathname.split('/')[4]);
+      if (!alertRules[id]) {
+        sendJson(response, 404, { error: `alert rule ${id} not found` });
+        return;
+      }
+      delete alertRules[id];
+      saveAlertRules();
+      pushEvent('alert-rule-deleted', 'Alert rule deleted', { id });
+      sendJson(response, 200, { ok: true, id });
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/alerts/incidents') {
+    await withMetric('alerts-incidents-list', () => {
+      const limitRaw = Number(url.searchParams.get('limit') ?? '120');
+      sendJson(response, 200, {
+        ok: true,
+        incidents: listAlertIncidents(limitRaw),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/alerts/check') {
+    await withMetric('alerts-check', () => {
+      sendJson(response, 200, evaluateAlertRulesNow());
+    });
+    return;
+  }
+
+  if (method === 'POST' && /^\/api\/alerts\/incidents\/\d+\/ack$/.test(pathname)) {
+    await withMetric('alerts-incidents-ack', () => {
+      const id = Number(pathname.split('/')[4]);
+      const incident = alertIncidents.find(item => item.id === id);
+      if (!incident) {
+        sendJson(response, 404, { error: `incident ${id} not found` });
+        return;
+      }
+      incident.acknowledgedAt = nowIso();
+      pushEvent('alert-incident-ack', 'Alert incident acknowledged', { id, ruleId: incident.ruleId });
+      sendJson(response, 200, { ok: true, incident });
     });
     return;
   }
@@ -3071,6 +3641,21 @@ async function handleApi(
   if (method === 'GET' && pathname === '/api/board/queue') {
     await withMetric('board-queue', () => {
       sendJson(response, 200, buildQueueBoard());
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/queue/export') {
+    await withMetric('queue-export', () => {
+      sendJson(response, 200, exportQueueState());
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/queue/import') {
+    await withMetric('queue-import', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, importQueueState(body));
     });
     return;
   }
@@ -3755,6 +4340,30 @@ async function handleApi(
     return;
   }
 
+  if (method === 'GET' && pathname === '/api/runbook/catalog') {
+    await withMetric('runbook-catalog', () => {
+      sendJson(response, 200, {
+        ok: true,
+        items: runbookCatalog(),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/runbook/preview') {
+    await withMetric('runbook-preview', async () => {
+      const body = await readJsonBody(request);
+      try {
+        const result = previewRunbook(body);
+        sendJson(response, 200, result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
   if (method === 'GET' && pathname === '/api/schedules') {
     await withMetric('schedules-list', () => {
       sendJson(response, 200, {
@@ -4244,6 +4853,39 @@ https://developer.android.com</textarea>
           </div>
           <button class="w" id="schedule-delete-btn">Delete schedule</button>
           <div id="schedules" class="metrics"></div>
+          <hr style="border:0;border-top:1px solid #2f4a61;" />
+          <input id="alert-name" placeholder="alert name" value="Queue spike" />
+          <div class="split">
+            <select id="alert-metric">
+              <option value="queueDepth">queueDepth</option>
+              <option value="failedJobs">failedJobs</option>
+              <option value="pausedLanes">pausedLanes</option>
+            </select>
+            <select id="alert-operator">
+              <option value="gte">gte</option>
+              <option value="lte">lte</option>
+            </select>
+          </div>
+          <div class="split">
+            <input id="alert-threshold" type="number" min="0" value="10" />
+            <input id="alert-cooldown" type="number" min="1000" value="120000" />
+          </div>
+          <div class="split">
+            <button class="s" id="alert-save-btn">Save alert rule</button>
+            <button class="p" id="alerts-check-btn">Check alerts now</button>
+          </div>
+          <button class="s" id="alerts-load-btn">Load alert incidents</button>
+          <div id="alerts" class="metrics"></div>
+          <hr style="border:0;border-top:1px solid #2f4a61;" />
+          <div class="split">
+            <button class="s" id="runbook-preview-btn">Preview runbook</button>
+            <button class="s" id="runbook-catalog-btn">Runbook catalog</button>
+          </div>
+          <textarea id="queue-import-export">{"lanes":[]}</textarea>
+          <div class="split">
+            <button class="s" id="queue-export-btn">Export queue</button>
+            <button class="p" id="queue-import-btn">Import queue</button>
+          </div>
         </article>
 
         <article class="card stack">
@@ -4326,6 +4968,13 @@ https://developer.android.com</textarea>
       const $scheduleRunbook = document.getElementById('schedule-runbook');
       const $scheduleId = document.getElementById('schedule-id');
       const $schedules = document.getElementById('schedules');
+      const $alertName = document.getElementById('alert-name');
+      const $alertMetric = document.getElementById('alert-metric');
+      const $alertOperator = document.getElementById('alert-operator');
+      const $alertThreshold = document.getElementById('alert-threshold');
+      const $alertCooldown = document.getElementById('alert-cooldown');
+      const $alerts = document.getElementById('alerts');
+      const $queueImportExport = document.getElementById('queue-import-export');
 
       function setMessage(text, isError) {
         $message.textContent = text;
@@ -4546,6 +5195,25 @@ https://developer.android.com</textarea>
         const lane = lanes[0];
         const ids = Array.isArray(lane.queuedJobs) ? lane.queuedJobs.map(function (job) { return job.id; }) : [];
         $reorderJobIds.value = JSON.stringify(ids, null, 2);
+      }
+
+      function renderAlerts(payload) {
+        const incidents = Array.isArray(payload.incidents) ? payload.incidents : [];
+        const rules = Array.isArray(payload.rules) ? payload.rules : [];
+        $alerts.innerHTML = '';
+        const head = document.createElement('div');
+        head.className = 'item';
+        head.innerHTML = '<div class="meta">rules=' + rules.length + ' incidents=' + incidents.length + '</div>';
+        $alerts.appendChild(head);
+        for (const item of incidents.slice(0, 20)) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">incident #' + item.id + ' rule=' + item.ruleName + '</div>' +
+            '<div>' + item.metric + ' value=' + item.value + ' threshold=' + item.threshold + '</div>' +
+            '<div>at=' + item.at + ' ack=' + (item.acknowledgedAt || '-') + '</div>';
+          $alerts.appendChild(row);
+        }
       }
 
       function renderLanes(payload) {
@@ -5385,6 +6053,77 @@ https://developer.android.com</textarea>
         await listSchedulesUi();
       }
 
+      async function saveAlertRuleUi() {
+        const result = await api('/api/alerts/rules', 'POST', {
+          name: $alertName.value || 'alert-rule',
+          metric: $alertMetric.value || 'queueDepth',
+          operator: $alertOperator.value || 'gte',
+          threshold: Number($alertThreshold.value || '10'),
+          cooldownMs: Number($alertCooldown.value || '120000'),
+          enabled: true,
+        });
+        renderOutput(result);
+        setMessage('Alert rule saved', false);
+        await loadAlertsUi();
+      }
+
+      async function checkAlertsUi() {
+        const result = await api('/api/alerts/check', 'POST', {});
+        renderOutput(result);
+        setMessage('Alert check completed', false);
+        await loadAlertsUi();
+      }
+
+      async function loadAlertsUi() {
+        const [rulesPayload, incidentsPayload] = await Promise.all([
+          api('/api/alerts/rules'),
+          api('/api/alerts/incidents?limit=80'),
+        ]);
+        renderAlerts({
+          rules: rulesPayload.rules || [],
+          incidents: incidentsPayload.incidents || [],
+        });
+      }
+
+      async function previewRunbookUi() {
+        const result = await api('/api/runbook/preview', 'POST', {
+          name: $runbookName.value || 'recover-lane',
+          deviceId: selectedDeviceId(),
+          laneId: selectedDeviceId() ? 'device:' + selectedDeviceId() : 'device:default',
+        });
+        renderOutput(result);
+        setMessage('Runbook preview loaded', false);
+      }
+
+      async function loadRunbookCatalogUi() {
+        const result = await api('/api/runbook/catalog');
+        renderOutput(result);
+        setMessage('Runbook catalog loaded', false);
+      }
+
+      async function exportQueueUi() {
+        const result = await api('/api/queue/export');
+        $queueImportExport.value = JSON.stringify(result, null, 2);
+        renderOutput(result);
+        setMessage('Queue exported', false);
+      }
+
+      async function importQueueUi() {
+        let parsed;
+        try {
+          parsed = JSON.parse($queueImportExport.value || '{}');
+        } catch (error) {
+          throw new Error('queue import payload must be valid JSON');
+        }
+        const result = await api('/api/queue/import', 'POST', {
+          lanes: parsed.lanes || [],
+          clearExisting: false,
+        });
+        renderOutput(result);
+        setMessage('Queue imported', false);
+        await refreshJobsAndLanes();
+      }
+
       document.getElementById('open-url-btn').addEventListener('click', async function () {
         try { await openUrl($urlInput.value); } catch (error) { setMessage(String(error), true); }
       });
@@ -5538,6 +6277,27 @@ https://developer.android.com</textarea>
       document.getElementById('schedule-delete-btn').addEventListener('click', async function () {
         try { await deleteScheduleUi(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('alert-save-btn').addEventListener('click', async function () {
+        try { await saveAlertRuleUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('alerts-check-btn').addEventListener('click', async function () {
+        try { await checkAlertsUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('alerts-load-btn').addEventListener('click', async function () {
+        try { await loadAlertsUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('runbook-preview-btn').addEventListener('click', async function () {
+        try { await previewRunbookUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('runbook-catalog-btn').addEventListener('click', async function () {
+        try { await loadRunbookCatalogUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('queue-export-btn').addEventListener('click', async function () {
+        try { await exportQueueUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('queue-import-btn').addEventListener('click', async function () {
+        try { await importQueueUi(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('clear-output-btn').addEventListener('click', function () {
         renderOutput({});
       });
@@ -5584,6 +6344,7 @@ https://developer.android.com</textarea>
           await loadOpsBoardUi();
           await loadQueueBoardUi();
           await listSchedulesUi();
+          await loadAlertsUi();
           renderOutput({ ok: true, message: 'UI ready', updateHint: '${UPDATE_HINT}' });
           setMessage('Ready.', false);
 
@@ -5600,6 +6361,14 @@ https://developer.android.com</textarea>
               renderOpsBoard(opsBoardPayload);
               const schedulesPayload = await api('/api/schedules');
               renderSchedules(schedulesPayload);
+              const queueBoardPayload = await api('/api/board/queue');
+              renderQueueBoard(queueBoardPayload);
+              const incidentsPayload = await api('/api/alerts/incidents?limit=80');
+              const rulesPayload = await api('/api/alerts/rules');
+              renderAlerts({
+                rules: rulesPayload.rules || [],
+                incidents: incidentsPayload.incidents || [],
+              });
             } catch (error) {
               setMessage('Background refresh failed', true);
             }
@@ -5618,6 +6387,7 @@ https://developer.android.com</textarea>
 export function startWebUiServer(options: { host?: string; port?: number } = {}): http.Server {
   const host = options.host ?? DEFAULT_WEB_UI_HOST;
   const port = options.port ?? DEFAULT_WEB_UI_PORT;
+  ensureSchedulesInitialized();
 
   const server = http.createServer(async (request, response) => {
     try {
