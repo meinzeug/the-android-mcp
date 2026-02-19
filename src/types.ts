@@ -738,6 +738,88 @@ export const CaptureCrashSnapshotInputSchema = z.object({
     .describe('Include dumpsys dropbox crash entries (can be large).'),
 });
 
+export const CaptureNotificationSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z.string().optional().describe('Optional package name filter for notification lines.'),
+  includeListeners: z.boolean().default(true).describe('Include notification listeners snapshot.'),
+  includePolicy: z.boolean().default(true).describe('Include notification policy snapshot.'),
+  includeStats: z.boolean().default(true).describe('Include notification stats snapshot.'),
+  maxLines: z
+    .number()
+    .int()
+    .positive()
+    .default(800)
+    .describe('Maximum lines to keep from full notification dump output.'),
+});
+
+export const CaptureProcessSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z.string().optional().describe('Optional package name for PID-scoped process details.'),
+  topLines: z
+    .number()
+    .int()
+    .positive()
+    .default(60)
+    .describe('Number of lines to keep from top output.'),
+  includeProcStatus: z
+    .boolean()
+    .default(true)
+    .describe('Include /proc/<pid>/status when package PID is available.'),
+  includeThreads: z
+    .boolean()
+    .default(false)
+    .describe('Include per-thread process listing when package PID is available.'),
+  includeOpenFiles: z
+    .boolean()
+    .default(false)
+    .describe('Include /proc/<pid>/fd listing when package PID is available.'),
+});
+
+export const CaptureServicesSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z.string().optional().describe('Optional package name for package dump section.'),
+  includeJobs: z.boolean().default(true).describe('Include jobscheduler snapshot.'),
+  includeAlarms: z.boolean().default(true).describe('Include alarm manager snapshot.'),
+  includeBroadcasts: z.boolean().default(true).describe('Include activity broadcasts snapshot.'),
+  includePackageServices: z
+    .boolean()
+    .default(true)
+    .describe('Include dumpsys package snapshot for packageName.'),
+});
+
+export const CaptureSensorsSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  includeThermal: z.boolean().default(true).describe('Include thermalservice snapshot.'),
+  includePower: z.boolean().default(true).describe('Include power manager snapshot.'),
+  includeDisplay: z.boolean().default(true).describe('Include display snapshot.'),
+});
+
+export const CaptureGraphicsSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z.string().optional().describe('Optional package name for gfxinfo framestats.'),
+  includeSurfaceFlinger: z.boolean().default(true).describe('Include SurfaceFlinger snapshots.'),
+  includeWindow: z.boolean().default(true).describe('Include window manager snapshot.'),
+  includeComposer: z
+    .boolean()
+    .default(false)
+    .describe('Include SurfaceFlinger display/composer metadata snapshot.'),
+});
+
 // Tool output schemas
 export const TakeScreenshotOutputSchema = z.object({
   data: z.string().describe('Base64 encoded image data'),
@@ -2793,6 +2875,61 @@ export const CaptureCrashSnapshotOutputSchema = z.object({
   anrTraces: z.string().optional().describe('Optional /data/anr/traces.txt tail'),
   tombstones: z.string().optional().describe('Optional tombstone listing'),
   dropboxCrashes: z.string().optional().describe('Optional dumpsys dropbox crash output'),
+});
+
+export const CaptureNotificationSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  packageName: z.string().optional().describe('Optional package name filter used'),
+  notification: z.string().describe('Notification manager snapshot'),
+  packageMatches: z.string().optional().describe('Filtered lines matching packageName'),
+  listeners: z.string().optional().describe('Notification listeners snapshot'),
+  policy: z.string().optional().describe('Notification policy snapshot'),
+  stats: z.string().optional().describe('Notification stats snapshot'),
+});
+
+export const CaptureProcessSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  packageName: z.string().optional().describe('Optional package name used for PID-scoped probes'),
+  pid: z.number().optional().describe('Resolved PID for packageName'),
+  ps: z.string().describe('Process table snapshot'),
+  top: z.string().describe('top snapshot output'),
+  activityProcesses: z.string().describe('dumpsys activity processes snapshot'),
+  procStatus: z.string().optional().describe('Optional /proc/<pid>/status snapshot'),
+  threads: z.string().optional().describe('Optional thread listing for package PID'),
+  openFiles: z.string().optional().describe('Optional open files listing for package PID'),
+});
+
+export const CaptureServicesSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  packageName: z.string().optional().describe('Optional package name used for package dump'),
+  services: z.string().describe('Activity services snapshot'),
+  jobs: z.string().optional().describe('Optional jobscheduler snapshot'),
+  alarms: z.string().optional().describe('Optional alarm manager snapshot'),
+  broadcasts: z.string().optional().describe('Optional activity broadcasts snapshot'),
+  packageDump: z.string().optional().describe('Optional package dump snapshot'),
+});
+
+export const CaptureSensorsSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  sensorService: z.string().describe('Sensor service snapshot'),
+  thermal: z.string().optional().describe('Optional thermalservice snapshot'),
+  power: z.string().optional().describe('Optional power snapshot'),
+  display: z.string().optional().describe('Optional display snapshot'),
+});
+
+export const CaptureGraphicsSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  packageName: z.string().optional().describe('Optional package name used for gfxinfo'),
+  surfaceList: z.string().optional().describe('Optional SurfaceFlinger --list snapshot'),
+  surfaceFlinger: z.string().optional().describe('Optional SurfaceFlinger dump snapshot'),
+  window: z.string().optional().describe('Optional window manager snapshot'),
+  composer: z.string().optional().describe('Optional SurfaceFlinger composer/display metadata'),
+  gfxInfo: z.string().optional().describe('Optional package gfxinfo framestats snapshot'),
 });
 
 export const CreateIssueInputSchema = z.object({
@@ -4927,6 +5064,167 @@ export const CaptureCrashSnapshotToolSchema = {
   required: [] as string[],
 };
 
+export const CaptureNotificationSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: {
+      type: 'string' as const,
+      description: 'Optional package name filter for notification lines.',
+    },
+    includeListeners: {
+      type: 'boolean' as const,
+      description: 'Include notification listeners snapshot.',
+      default: true,
+    },
+    includePolicy: {
+      type: 'boolean' as const,
+      description: 'Include notification policy snapshot.',
+      default: true,
+    },
+    includeStats: {
+      type: 'boolean' as const,
+      description: 'Include notification stats snapshot.',
+      default: true,
+    },
+    maxLines: {
+      type: 'number' as const,
+      description: 'Maximum lines to keep from full notification dump output.',
+      default: 800,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CaptureProcessSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: {
+      type: 'string' as const,
+      description: 'Optional package name for PID-scoped process details.',
+    },
+    topLines: {
+      type: 'number' as const,
+      description: 'Number of lines to keep from top output.',
+      default: 60,
+    },
+    includeProcStatus: {
+      type: 'boolean' as const,
+      description: 'Include /proc/<pid>/status when package PID is available.',
+      default: true,
+    },
+    includeThreads: {
+      type: 'boolean' as const,
+      description: 'Include per-thread process listing when package PID is available.',
+      default: false,
+    },
+    includeOpenFiles: {
+      type: 'boolean' as const,
+      description: 'Include /proc/<pid>/fd listing when package PID is available.',
+      default: false,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CaptureServicesSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: {
+      type: 'string' as const,
+      description: 'Optional package name for package dump section.',
+    },
+    includeJobs: {
+      type: 'boolean' as const,
+      description: 'Include jobscheduler snapshot.',
+      default: true,
+    },
+    includeAlarms: {
+      type: 'boolean' as const,
+      description: 'Include alarm manager snapshot.',
+      default: true,
+    },
+    includeBroadcasts: {
+      type: 'boolean' as const,
+      description: 'Include activity broadcasts snapshot.',
+      default: true,
+    },
+    includePackageServices: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys package snapshot for packageName.',
+      default: true,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CaptureSensorsSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    includeThermal: {
+      type: 'boolean' as const,
+      description: 'Include thermalservice snapshot.',
+      default: true,
+    },
+    includePower: {
+      type: 'boolean' as const,
+      description: 'Include power manager snapshot.',
+      default: true,
+    },
+    includeDisplay: {
+      type: 'boolean' as const,
+      description: 'Include display snapshot.',
+      default: true,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CaptureGraphicsSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: {
+      type: 'string' as const,
+      description: 'Optional package name for gfxinfo framestats.',
+    },
+    includeSurfaceFlinger: {
+      type: 'boolean' as const,
+      description: 'Include SurfaceFlinger snapshots.',
+      default: true,
+    },
+    includeWindow: {
+      type: 'boolean' as const,
+      description: 'Include window manager snapshot.',
+      default: true,
+    },
+    includeComposer: {
+      type: 'boolean' as const,
+      description: 'Include SurfaceFlinger display/composer metadata snapshot.',
+      default: false,
+    },
+  },
+  required: [] as string[],
+};
+
 // Type exports
 export type TakeScreenshotInput = z.infer<typeof TakeScreenshotInputSchema>;
 export type ListDevicesInput = z.infer<typeof ListDevicesInputSchema>;
@@ -5123,5 +5421,15 @@ export type CaptureStorageSnapshotInput = z.infer<typeof CaptureStorageSnapshotI
 export type CaptureStorageSnapshotOutput = z.infer<typeof CaptureStorageSnapshotOutputSchema>;
 export type CaptureCrashSnapshotInput = z.infer<typeof CaptureCrashSnapshotInputSchema>;
 export type CaptureCrashSnapshotOutput = z.infer<typeof CaptureCrashSnapshotOutputSchema>;
+export type CaptureNotificationSnapshotInput = z.infer<typeof CaptureNotificationSnapshotInputSchema>;
+export type CaptureNotificationSnapshotOutput = z.infer<typeof CaptureNotificationSnapshotOutputSchema>;
+export type CaptureProcessSnapshotInput = z.infer<typeof CaptureProcessSnapshotInputSchema>;
+export type CaptureProcessSnapshotOutput = z.infer<typeof CaptureProcessSnapshotOutputSchema>;
+export type CaptureServicesSnapshotInput = z.infer<typeof CaptureServicesSnapshotInputSchema>;
+export type CaptureServicesSnapshotOutput = z.infer<typeof CaptureServicesSnapshotOutputSchema>;
+export type CaptureSensorsSnapshotInput = z.infer<typeof CaptureSensorsSnapshotInputSchema>;
+export type CaptureSensorsSnapshotOutput = z.infer<typeof CaptureSensorsSnapshotOutputSchema>;
+export type CaptureGraphicsSnapshotInput = z.infer<typeof CaptureGraphicsSnapshotInputSchema>;
+export type CaptureGraphicsSnapshotOutput = z.infer<typeof CaptureGraphicsSnapshotOutputSchema>;
 export type CreateIssueInput = z.infer<typeof CreateIssueInputSchema>;
 export type CreateIssueOutput = z.infer<typeof CreateIssueOutputSchema>;

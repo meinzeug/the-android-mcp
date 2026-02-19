@@ -297,6 +297,21 @@ import {
   CaptureCrashSnapshotInputSchema,
   CaptureCrashSnapshotOutputSchema,
   CaptureCrashSnapshotToolSchema,
+  CaptureNotificationSnapshotInputSchema,
+  CaptureNotificationSnapshotOutputSchema,
+  CaptureNotificationSnapshotToolSchema,
+  CaptureProcessSnapshotInputSchema,
+  CaptureProcessSnapshotOutputSchema,
+  CaptureProcessSnapshotToolSchema,
+  CaptureServicesSnapshotInputSchema,
+  CaptureServicesSnapshotOutputSchema,
+  CaptureServicesSnapshotToolSchema,
+  CaptureSensorsSnapshotInputSchema,
+  CaptureSensorsSnapshotOutputSchema,
+  CaptureSensorsSnapshotToolSchema,
+  CaptureGraphicsSnapshotInputSchema,
+  CaptureGraphicsSnapshotOutputSchema,
+  CaptureGraphicsSnapshotToolSchema,
   CreateIssueInputSchema,
   CreateIssueOutputSchema,
   CreateIssueToolSchema,
@@ -324,6 +339,11 @@ import {
   captureAndroidNetworkSnapshot as adbCaptureAndroidNetworkSnapshot,
   captureAndroidStorageSnapshot as adbCaptureAndroidStorageSnapshot,
   captureAndroidCrashSnapshot as adbCaptureAndroidCrashSnapshot,
+  captureAndroidNotificationSnapshot as adbCaptureAndroidNotificationSnapshot,
+  captureAndroidProcessSnapshot as adbCaptureAndroidProcessSnapshot,
+  captureAndroidServicesSnapshot as adbCaptureAndroidServicesSnapshot,
+  captureAndroidSensorsSnapshot as adbCaptureAndroidSensorsSnapshot,
+  captureAndroidGraphicsSnapshot as adbCaptureAndroidGraphicsSnapshot,
   listPackageActivities as adbListPackageActivities,
   batchInputActions as adbBatchInputActions,
   reversePort as adbReversePort,
@@ -904,6 +924,31 @@ class AndroidMcpServer {
           name: 'capture_android_crash_snapshot',
           description: 'Capture crash buffers, activity crashes, ANR/tombstone snapshots',
           inputSchema: CaptureCrashSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_notification_snapshot',
+          description: 'Capture notification manager snapshots with optional package filtering',
+          inputSchema: CaptureNotificationSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_process_snapshot',
+          description: 'Capture process/top/activity snapshots with optional package PID probes',
+          inputSchema: CaptureProcessSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_services_snapshot',
+          description: 'Capture services/jobs/alarms/broadcast snapshots',
+          inputSchema: CaptureServicesSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_sensors_snapshot',
+          description: 'Capture sensor, thermal, power, and display snapshots',
+          inputSchema: CaptureSensorsSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_graphics_snapshot',
+          description: 'Capture SurfaceFlinger/window/gfx rendering snapshots',
+          inputSchema: CaptureGraphicsSnapshotToolSchema,
         },
         {
           name: 'create_github_issue',
@@ -2249,6 +2294,71 @@ class AndroidMcpServer {
           case 'capture_android_crash_snapshot': {
             const input = CaptureCrashSnapshotInputSchema.parse(args);
             const result = await this.captureAndroidCrashSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_notification_snapshot': {
+            const input = CaptureNotificationSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidNotificationSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_process_snapshot': {
+            const input = CaptureProcessSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidProcessSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_services_snapshot': {
+            const input = CaptureServicesSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidServicesSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_sensors_snapshot': {
+            const input = CaptureSensorsSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidSensorsSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_graphics_snapshot': {
+            const input = CaptureGraphicsSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidGraphicsSnapshot(input);
             return {
               content: [
                 {
@@ -3659,6 +3769,73 @@ class AndroidMcpServer {
       includeDropBox: input.includeDropBox,
     });
     return CaptureCrashSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidNotificationSnapshot(
+    input: z.infer<typeof CaptureNotificationSnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureNotificationSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidNotificationSnapshot({
+      deviceId: input.deviceId,
+      packageName: input.packageName,
+      includeListeners: input.includeListeners,
+      includePolicy: input.includePolicy,
+      includeStats: input.includeStats,
+      maxLines: input.maxLines,
+    });
+    return CaptureNotificationSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidProcessSnapshot(
+    input: z.infer<typeof CaptureProcessSnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureProcessSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidProcessSnapshot({
+      deviceId: input.deviceId,
+      packageName: input.packageName,
+      topLines: input.topLines,
+      includeProcStatus: input.includeProcStatus,
+      includeThreads: input.includeThreads,
+      includeOpenFiles: input.includeOpenFiles,
+    });
+    return CaptureProcessSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidServicesSnapshot(
+    input: z.infer<typeof CaptureServicesSnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureServicesSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidServicesSnapshot({
+      deviceId: input.deviceId,
+      packageName: input.packageName,
+      includeJobs: input.includeJobs,
+      includeAlarms: input.includeAlarms,
+      includeBroadcasts: input.includeBroadcasts,
+      includePackageServices: input.includePackageServices,
+    });
+    return CaptureServicesSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidSensorsSnapshot(
+    input: z.infer<typeof CaptureSensorsSnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureSensorsSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidSensorsSnapshot({
+      deviceId: input.deviceId,
+      includeThermal: input.includeThermal,
+      includePower: input.includePower,
+      includeDisplay: input.includeDisplay,
+    });
+    return CaptureSensorsSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidGraphicsSnapshot(
+    input: z.infer<typeof CaptureGraphicsSnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureGraphicsSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidGraphicsSnapshot({
+      deviceId: input.deviceId,
+      packageName: input.packageName,
+      includeSurfaceFlinger: input.includeSurfaceFlinger,
+      includeWindow: input.includeWindow,
+      includeComposer: input.includeComposer,
+    });
+    return CaptureGraphicsSnapshotOutputSchema.parse(result);
   }
 
   private async createGitHubIssue(

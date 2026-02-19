@@ -4803,3 +4803,324 @@ export function captureAndroidCrashSnapshot(options: {
     dropboxCrashes,
   };
 }
+
+function trimOutputLines(output: string, maxLines?: number): string {
+  if (!maxLines || maxLines <= 0) {
+    return output;
+  }
+  const lines = output.split('\n');
+  if (lines.length <= maxLines) {
+    return output;
+  }
+  return lines.slice(0, maxLines).join('\n');
+}
+
+export function captureAndroidNotificationSnapshot(options: {
+  deviceId?: string;
+  packageName?: string;
+  includeListeners?: boolean;
+  includePolicy?: boolean;
+  includeStats?: boolean;
+  maxLines?: number;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  packageName?: string;
+  notification: string;
+  packageMatches?: string;
+  listeners?: string;
+  policy?: string;
+  stats?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const packageName = options.packageName?.trim() || undefined;
+  const maxLines = options.maxLines ?? 800;
+  const notificationRaw = safeDeviceCommand(targetDeviceId, 'shell dumpsys notification', 120000);
+  const notification = trimOutputLines(notificationRaw, maxLines);
+
+  const packageMatches = packageName
+    ? notification
+        .split('\n')
+        .filter(line => line.includes(packageName))
+        .slice(0, 300)
+        .join('\n')
+    : undefined;
+
+  const listeners =
+    options.includeListeners === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys notification listeners', 45000),
+          400
+        );
+  const policy =
+    options.includePolicy === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys notification policy', 45000),
+          300
+        );
+  const stats =
+    options.includeStats === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell cmd notification stats', 30000),
+          300
+        );
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    packageName,
+    notification,
+    packageMatches,
+    listeners,
+    policy,
+    stats,
+  };
+}
+
+export function captureAndroidProcessSnapshot(options: {
+  deviceId?: string;
+  packageName?: string;
+  topLines?: number;
+  includeProcStatus?: boolean;
+  includeThreads?: boolean;
+  includeOpenFiles?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  packageName?: string;
+  pid?: number;
+  ps: string;
+  top: string;
+  activityProcesses: string;
+  procStatus?: string;
+  threads?: string;
+  openFiles?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const packageName = options.packageName?.trim() || undefined;
+  const topLines = Math.max(10, Math.min(200, Math.trunc(options.topLines ?? 60)));
+
+  const ps = safeDeviceCommand(targetDeviceId, 'shell ps -A', 45000);
+  const top = safeDeviceCommand(targetDeviceId, `shell top -b -n 1 | head -n ${topLines}`, 60000);
+  const activityProcesses = trimOutputLines(
+    safeDeviceCommand(targetDeviceId, 'shell dumpsys activity processes', 120000),
+    1000
+  );
+
+  let pid: number | undefined;
+  if (packageName) {
+    const pidRaw = safeDeviceCommand(targetDeviceId, `shell pidof ${escapeShellArg(packageName)}`);
+    const first = pidRaw.split(/\s+/).find(Boolean);
+    if (first && /^\d+$/.test(first)) {
+      pid = Number(first);
+    }
+  }
+
+  const procStatus =
+    options.includeProcStatus === false || !pid
+      ? undefined
+      : safeDeviceCommand(targetDeviceId, `shell cat /proc/${pid}/status`, 20000);
+  const threads =
+    options.includeThreads !== true || !pid
+      ? undefined
+      : safeDeviceCommand(targetDeviceId, `shell ps -T -p ${pid}`, 20000);
+  const openFiles =
+    options.includeOpenFiles !== true || !pid
+      ? undefined
+      : safeDeviceCommand(
+          targetDeviceId,
+          `shell ls -l /proc/${pid}/fd | head -n 200`,
+          20000
+        );
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    packageName,
+    pid,
+    ps,
+    top,
+    activityProcesses,
+    procStatus,
+    threads,
+    openFiles,
+  };
+}
+
+export function captureAndroidServicesSnapshot(options: {
+  deviceId?: string;
+  packageName?: string;
+  includeJobs?: boolean;
+  includeAlarms?: boolean;
+  includeBroadcasts?: boolean;
+  includePackageServices?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  packageName?: string;
+  services: string;
+  jobs?: string;
+  alarms?: string;
+  broadcasts?: string;
+  packageDump?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const packageName = options.packageName?.trim() || undefined;
+  const services = trimOutputLines(
+    safeDeviceCommand(targetDeviceId, 'shell dumpsys activity services', 120000),
+    1200
+  );
+  const jobs =
+    options.includeJobs === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys jobscheduler', 120000),
+          900
+        );
+  const alarms =
+    options.includeAlarms === false
+      ? undefined
+      : trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell dumpsys alarm', 120000), 900);
+  const broadcasts =
+    options.includeBroadcasts === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys activity broadcasts', 120000),
+          900
+        );
+  const packageDump =
+    options.includePackageServices === false || !packageName
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(
+            targetDeviceId,
+            `shell dumpsys package ${escapeShellArg(packageName)}`,
+            120000
+          ),
+          900
+        );
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    packageName,
+    services,
+    jobs,
+    alarms,
+    broadcasts,
+    packageDump,
+  };
+}
+
+export function captureAndroidSensorsSnapshot(options: {
+  deviceId?: string;
+  includeThermal?: boolean;
+  includePower?: boolean;
+  includeDisplay?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  sensorService: string;
+  thermal?: string;
+  power?: string;
+  display?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const sensorService = trimOutputLines(
+    safeDeviceCommand(targetDeviceId, 'shell dumpsys sensorservice', 120000),
+    1200
+  );
+  const thermal =
+    options.includeThermal === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys thermalservice', 60000),
+          700
+        );
+  const power =
+    options.includePower === false
+      ? undefined
+      : trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell dumpsys power', 60000), 700);
+  const display =
+    options.includeDisplay === false
+      ? undefined
+      : trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell dumpsys display', 120000), 700);
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    sensorService,
+    thermal,
+    power,
+    display,
+  };
+}
+
+export function captureAndroidGraphicsSnapshot(options: {
+  deviceId?: string;
+  packageName?: string;
+  includeSurfaceFlinger?: boolean;
+  includeWindow?: boolean;
+  includeComposer?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  packageName?: string;
+  surfaceList?: string;
+  surfaceFlinger?: string;
+  window?: string;
+  composer?: string;
+  gfxInfo?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const packageName = options.packageName?.trim() || undefined;
+  const includeSurfaceFlinger = options.includeSurfaceFlinger !== false;
+
+  const surfaceList = includeSurfaceFlinger
+    ? trimOutputLines(
+        safeDeviceCommand(targetDeviceId, 'shell dumpsys SurfaceFlinger --list', 90000),
+        700
+      )
+    : undefined;
+  const surfaceFlinger = includeSurfaceFlinger
+    ? trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell dumpsys SurfaceFlinger', 120000), 900)
+    : undefined;
+  const window =
+    options.includeWindow === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys window windows', 120000),
+          900
+        );
+  const composer =
+    options.includeComposer !== true
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys SurfaceFlinger --display-id', 30000),
+          400
+        );
+  const gfxInfo = packageName
+    ? trimOutputLines(
+        safeDeviceCommand(
+          targetDeviceId,
+          `shell dumpsys gfxinfo ${escapeShellArg(packageName)} framestats`,
+          120000
+        ),
+        900
+      )
+    : undefined;
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    packageName,
+    surfaceList,
+    surfaceFlinger,
+    window,
+    composer,
+    gfxInfo,
+  };
+}

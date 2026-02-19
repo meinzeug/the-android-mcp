@@ -24,6 +24,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [2.4.0] - 2026-02-19
+### Added
+- `capture_android_notification_snapshot`: notification manager snapshot with optional listeners/policy/stats views.
+- `capture_android_process_snapshot`: process table + top + activity process dump with optional per-app PID details.
+- `capture_android_services_snapshot`: activity services plus optional jobs/alarms/broadcast/package dumps.
+- `capture_android_sensors_snapshot`: sensorservice plus optional thermal/power/display snapshots.
+- `capture_android_graphics_snapshot`: SurfaceFlinger/window/gfxinfo snapshots for rendering diagnostics.
+
+### Improved
+- Tool responses continue to include update reminder text for global npm upgrades.
+
 ## [2.3.0] - 2026-02-19
 ### Added
 - `capture_android_performance_snapshot`: top/load/mem/gfx/cpu snapshots for runtime performance analysis.
