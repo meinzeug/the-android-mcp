@@ -1,6 +1,6 @@
 {
   "name": "the-android-mcp",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "ADB-powered MCP server for Android app install, control, hot reload, screenshots, and test automation",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -52,7 +52,11 @@
   "homepage": "https://github.com/meinzeug/the-android-mcp",
   "files": [
     "dist",
-    "apps/gui",
+    "apps/gui/main.js",
+    "apps/gui/preload.js",
+    "apps/gui/renderer",
+    "apps/gui/package.json",
+    "apps/gui/scripts",
     "bin"
   ],
   "dependencies": {

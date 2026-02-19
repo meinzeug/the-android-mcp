@@ -24,6 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.1.0] - 2026-02-19
+### Added
+- Upgraded Web UI backend on `http://127.0.0.1:50000` with:
+- state endpoint (`/api/state`)
+- history endpoint (`/api/history`)
+- live event stream via SSE (`/api/events`)
+- full snapshot suite endpoint (`/api/snapshot-suite`)
+- stress scenario endpoint (`/api/stress-run`) for multi-URL loop testing
+- Upgraded operator UI with live event timeline, stress-run controls, and one-click suite execution.
+
+### Improved
+- Snapshot endpoints now return compact summaries by default with optional raw payloads.
+- Web UI now exposes uptime/version/device status and keeps update hints visible.
+- npm package payload reduced by excluding `apps/gui/node_modules` from publish artifacts.
+
 ## [3.0.0] - 2026-02-19
 ### Added
 - `capture_android_radio_snapshot`: radio state + wifi/telephony/bluetooth/IP/connectivity diagnostics in one call.
