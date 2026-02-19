@@ -24,6 +24,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.7.0] - 2026-02-19
+### Added
+- New recorder APIs for queue capture + replay:
+- `POST /api/recorder/start`
+- `POST /api/recorder/stop`
+- `GET /api/recorder/sessions`
+- `POST /api/recorder/replay`
+- New queue preset APIs with persistent storage:
+- `GET /api/queue-presets`
+- `POST /api/queue-presets`
+- `POST /api/queue-presets/run`
+- New lane heatmap API:
+- `GET /api/lanes/heatmap`
+- New wallboard API for multi-device health snapshots:
+- `POST /api/device/wallboard`
+- New timeline chart and advanced operator controls in Web UI for recorder, presets, heatmap, and wallboard.
+
+### Improved
+- Job creation now supports recorder capture for exact replayable queue sessions.
+- Dashboard/state/session payloads include richer orchestration metadata (presets, recorder, timeline).
+- Web UI now renders timeline telemetry as a live chart with backend-backed refresh.
+
 ## [3.6.0] - 2026-02-19
 ### Added
 - New autopilot orchestration API:

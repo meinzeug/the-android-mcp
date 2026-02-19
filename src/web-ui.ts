@@ -29,6 +29,8 @@ const MAX_TIMELINE_POINTS = 480;
 const APP_STATE_DIR = path.join(os.homedir(), '.the-android-mcp');
 const WORKFLOW_FILE = path.join(APP_STATE_DIR, 'web-ui-workflows.json');
 const SESSION_EVENTS_FILE = path.join(APP_STATE_DIR, 'web-ui-session-events.ndjson');
+const QUEUE_PRESETS_FILE = path.join(APP_STATE_DIR, 'web-ui-queue-presets.json');
+const RECORDER_SESSIONS_FILE = path.join(APP_STATE_DIR, 'web-ui-recorder-sessions.json');
 
 const SNAPSHOT_KINDS = [
   'radio',
@@ -120,6 +122,26 @@ interface TimelinePoint {
   cancelled: number;
 }
 
+interface QueuePreset {
+  name: string;
+  description?: string;
+  updatedAt: string;
+  jobs: Array<{ type: JobType; input: JsonObject }>;
+}
+
+interface RecorderEntry {
+  at: string;
+  type: JobType;
+  input: JsonObject;
+}
+
+interface RecorderSession {
+  name: string;
+  startedAt: string;
+  stoppedAt?: string;
+  entries: RecorderEntry[];
+}
+
 const serverStartedAt = Date.now();
 let eventSeq = 1;
 let jobSeq = 1;
@@ -133,6 +155,9 @@ const metrics: Record<string, MetricEntry> = {};
 const snapshotCache: Partial<Record<SnapshotKind, unknown>> = {};
 
 let workflows: Record<string, WorkflowDefinition> = loadWorkflows();
+let queuePresets: Record<string, QueuePreset> = loadQueuePresets();
+let recorderSessions: Record<string, RecorderSession> = loadRecorderSessions();
+let activeRecorder: RecorderSession | null = null;
 const jobs: JobRecord[] = [];
 const lanes: Record<string, LaneState> = {};
 
@@ -471,6 +496,182 @@ function saveWorkflows(): void {
   fs.writeFileSync(WORKFLOW_FILE, JSON.stringify(workflows, null, 2), 'utf8');
 }
 
+function defaultQueuePresets(): Record<string, QueuePreset> {
+  const createdAt = nowIso();
+  return {
+    'smoke-burst': {
+      name: 'smoke-burst',
+      description: 'Fast URL + profile queue bundle.',
+      updatedAt: createdAt,
+      jobs: [
+        { type: 'open_url', input: { url: 'https://www.wikipedia.org', waitForReadyMs: 800 } },
+        { type: 'open_url', input: { url: 'https://news.ycombinator.com', waitForReadyMs: 800 } },
+        { type: 'device_profile', input: { packageName: 'com.android.chrome' } },
+      ],
+    },
+    'diagnostic-heavy': {
+      name: 'diagnostic-heavy',
+      description: 'Heavy suite with stress + snapshot suite.',
+      updatedAt: createdAt,
+      jobs: [
+        {
+          type: 'stress_run',
+          input: {
+            urls: ['https://www.wikipedia.org', 'https://developer.android.com'],
+            loops: 2,
+            waitForReadyMs: 900,
+            includeSnapshotAfterEach: true,
+          },
+        },
+        { type: 'snapshot_suite', input: { packageName: 'com.android.chrome' } },
+      ],
+    },
+  };
+}
+
+function normalizePresetJobs(input: unknown): Array<{ type: JobType; input: JsonObject }> {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const jobs: Array<{ type: JobType; input: JsonObject }> = [];
+  for (const itemRaw of input) {
+    if (!itemRaw || typeof itemRaw !== 'object') {
+      continue;
+    }
+    const item = itemRaw as Record<string, unknown>;
+    const typeValue = typeof item.type === 'string' ? item.type : '';
+    if (!isJobType(typeValue)) {
+      continue;
+    }
+    const normalizedInput = item.input && typeof item.input === 'object' && !Array.isArray(item.input)
+      ? (item.input as JsonObject)
+      : {};
+    jobs.push({ type: typeValue, input: normalizedInput });
+  }
+  return jobs;
+}
+
+function loadQueuePresets(): Record<string, QueuePreset> {
+  try {
+    ensureAppStateDir();
+    if (!fs.existsSync(QUEUE_PRESETS_FILE)) {
+      const defaults = defaultQueuePresets();
+      fs.writeFileSync(QUEUE_PRESETS_FILE, JSON.stringify(defaults, null, 2), 'utf8');
+      return defaults;
+    }
+
+    const raw = fs.readFileSync(QUEUE_PRESETS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return defaultQueuePresets();
+    }
+
+    const result: Record<string, QueuePreset> = {};
+    for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!value || typeof value !== 'object') {
+        continue;
+      }
+      const item = value as Record<string, unknown>;
+      const presetName = typeof item.name === 'string' && item.name.trim().length > 0 ? item.name.trim() : name;
+      if (!presetName) {
+        continue;
+      }
+      const jobs = normalizePresetJobs(item.jobs);
+      if (jobs.length === 0) {
+        continue;
+      }
+      result[presetName] = {
+        name: presetName,
+        description: typeof item.description === 'string' ? item.description : undefined,
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : nowIso(),
+        jobs,
+      };
+    }
+    return Object.keys(result).length > 0 ? result : defaultQueuePresets();
+  } catch {
+    return defaultQueuePresets();
+  }
+}
+
+function saveQueuePresets(): void {
+  ensureAppStateDir();
+  fs.writeFileSync(QUEUE_PRESETS_FILE, JSON.stringify(queuePresets, null, 2), 'utf8');
+}
+
+function queuePresetsList(): QueuePreset[] {
+  return Object.values(queuePresets).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function loadRecorderSessions(): Record<string, RecorderSession> {
+  try {
+    ensureAppStateDir();
+    if (!fs.existsSync(RECORDER_SESSIONS_FILE)) {
+      fs.writeFileSync(RECORDER_SESSIONS_FILE, JSON.stringify({}, null, 2), 'utf8');
+      return {};
+    }
+    const raw = fs.readFileSync(RECORDER_SESSIONS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const result: Record<string, RecorderSession> = {};
+    for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!value || typeof value !== 'object') {
+        continue;
+      }
+      const item = value as Record<string, unknown>;
+      const sessionName = typeof item.name === 'string' && item.name.trim().length > 0 ? item.name.trim() : name;
+      const entriesRaw = Array.isArray(item.entries) ? item.entries : [];
+      const entries: RecorderEntry[] = [];
+      for (const entryRaw of entriesRaw) {
+        if (!entryRaw || typeof entryRaw !== 'object') {
+          continue;
+        }
+        const entry = entryRaw as Record<string, unknown>;
+        const typeValue = typeof entry.type === 'string' ? entry.type : '';
+        if (!isJobType(typeValue)) {
+          continue;
+        }
+        const entryInput = entry.input && typeof entry.input === 'object' && !Array.isArray(entry.input)
+          ? (entry.input as JsonObject)
+          : {};
+        entries.push({
+          at: typeof entry.at === 'string' ? entry.at : nowIso(),
+          type: typeValue,
+          input: entryInput,
+        });
+      }
+      if (!sessionName || entries.length === 0) {
+        continue;
+      }
+      result[sessionName] = {
+        name: sessionName,
+        startedAt: typeof item.startedAt === 'string' ? item.startedAt : nowIso(),
+        stoppedAt: typeof item.stoppedAt === 'string' ? item.stoppedAt : undefined,
+        entries,
+      };
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+function saveRecorderSessions(): void {
+  ensureAppStateDir();
+  fs.writeFileSync(RECORDER_SESSIONS_FILE, JSON.stringify(recorderSessions, null, 2), 'utf8');
+}
+
+function recorderSessionsList(): RecorderSession[] {
+  const sessions = Object.values(recorderSessions).sort((a, b) => (b.stoppedAt || b.startedAt).localeCompare(a.stoppedAt || a.startedAt));
+  const current = activeRecorder;
+  if (current) {
+    return [current, ...sessions.filter(item => item.name !== current.name)];
+  }
+  return sessions;
+}
+
 function workflowsList(): WorkflowDefinition[] {
   return Object.values(workflows).sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -735,6 +936,98 @@ function buildProfilesForDevices(deviceIds: string[], packageName?: string): Jso
   };
 }
 
+function buildDeviceWallboard(body: JsonObject): JsonObject {
+  const packageName = typeof body.packageName === 'string' ? body.packageName : 'com.android.chrome';
+  const requestedIds = Array.isArray(body.deviceIds)
+    ? body.deviceIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : [];
+  const discovered = getConnectedDevices().map(device => device.id);
+  const deviceIds = requestedIds.length > 0 ? requestedIds : discovered;
+  const matrix = buildProfilesForDevices(deviceIds, packageName);
+  const profiles = Array.isArray(matrix.profiles) ? matrix.profiles : [];
+
+  const healthScores = profiles
+    .map(item => {
+      if (!item || typeof item !== 'object') {
+        return undefined;
+      }
+      const obj = item as Record<string, unknown>;
+      if (obj.ok !== true || !obj.profile || typeof obj.profile !== 'object') {
+        return undefined;
+      }
+      const profile = obj.profile as Record<string, unknown>;
+      return typeof profile.healthScore === 'number' ? profile.healthScore : undefined;
+    })
+    .filter((value): value is number => typeof value === 'number');
+
+  const avgHealthScore = healthScores.length > 0
+    ? Math.round((healthScores.reduce((sum, value) => sum + value, 0) / healthScores.length) * 100) / 100
+    : 0;
+
+  return {
+    ok: true,
+    generatedAt: nowIso(),
+    packageName,
+    deviceCount: deviceIds.length,
+    avgHealthScore,
+    profiles: matrix.profiles,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function buildLaneHeatmap(): JsonObject {
+  const lanesData = Object.values(lanes).map(lane => {
+    const terminal = lane.completed + lane.failed + lane.cancelled;
+    const successRate = terminal > 0 ? Math.round((lane.completed / terminal) * 10000) / 100 : 0;
+    const loadScore = Math.max(0, Math.min(100, lane.queue.length * 8 + (lane.active ? 18 : 0) + (lane.paused ? 20 : 0)));
+    return {
+      id: lane.id,
+      deviceId: lane.deviceId,
+      paused: lane.paused,
+      active: lane.active,
+      queueDepth: lane.queue.length,
+      completed: lane.completed,
+      failed: lane.failed,
+      cancelled: lane.cancelled,
+      successRate,
+      loadScore,
+      updatedAt: lane.updatedAt,
+    };
+  });
+
+  const hottest = lanesData.slice().sort((a, b) => b.loadScore - a.loadScore).slice(0, 6);
+
+  return {
+    ok: true,
+    generatedAt: nowIso(),
+    laneCount: lanesData.length,
+    lanes: lanesData,
+    hottest,
+  };
+}
+
+function runQueuePreset(nameRaw: string, options: { deviceId?: string }): JobRecord[] {
+  const name = nameRaw.trim();
+  const preset = queuePresets[name];
+  if (!preset) {
+    throw new Error(`Queue preset '${name}' not found`);
+  }
+  const created: JobRecord[] = [];
+  for (const entry of preset.jobs) {
+    const input = JSON.parse(JSON.stringify(entry.input)) as JsonObject;
+    if (options.deviceId) {
+      input.deviceId = options.deviceId;
+    }
+    created.push(createJob(entry.type, input));
+  }
+  pushEvent('queue-preset-run', 'Queue preset queued', {
+    name,
+    createdCount: created.length,
+    deviceIdOverride: options.deviceId || null,
+  });
+  return created;
+}
+
 function runStressScenario(body: JsonObject): JsonObject {
   const deviceId = extractDeviceId(body);
   const urlsValue = body.urls;
@@ -982,6 +1275,87 @@ function resolveLaneForDevice(deviceId?: string): LaneState {
   return lanes[laneId];
 }
 
+function startRecorder(nameRaw: string): RecorderSession {
+  const name = nameRaw.trim();
+  if (!name) {
+    throw new Error('Recorder name is required');
+  }
+  if (activeRecorder && activeRecorder.name !== name) {
+    throw new Error(`Recorder '${activeRecorder.name}' is already active`);
+  }
+  if (!activeRecorder) {
+    activeRecorder = {
+      name,
+      startedAt: nowIso(),
+      entries: [],
+    };
+    pushEvent('recorder-started', 'Recorder started', { name });
+  }
+  const recorder = activeRecorder;
+  if (!recorder) {
+    throw new Error('Failed to initialize recorder');
+  }
+  return recorder;
+}
+
+function stopRecorder(): RecorderSession {
+  if (!activeRecorder) {
+    throw new Error('No active recorder');
+  }
+  const finished: RecorderSession = {
+    ...activeRecorder,
+    stoppedAt: nowIso(),
+  };
+  recorderSessions[finished.name] = finished;
+  saveRecorderSessions();
+  activeRecorder = null;
+  pushEvent('recorder-stopped', 'Recorder stopped', {
+    name: finished.name,
+    entries: finished.entries.length,
+  });
+  return finished;
+}
+
+function captureRecorderEntry(type: JobType, input: JsonObject): void {
+  if (!activeRecorder) {
+    return;
+  }
+  const clone = JSON.parse(JSON.stringify(input)) as JsonObject;
+  activeRecorder.entries.push({
+    at: nowIso(),
+    type,
+    input: clone,
+  });
+}
+
+function replayRecorderSession(nameRaw: string, options: {
+  deviceId?: string;
+  limit?: number;
+}): JobRecord[] {
+  const name = nameRaw.trim();
+  const session = recorderSessions[name];
+  if (!session) {
+    throw new Error(`Recorder session '${name}' not found`);
+  }
+  const limit = clampInt(options.limit, 200, 1, 1200);
+  const entries = session.entries.slice(0, limit);
+  const created: JobRecord[] = [];
+  for (const entry of entries) {
+    const input = JSON.parse(JSON.stringify(entry.input)) as JsonObject;
+    if (options.deviceId) {
+      input.deviceId = options.deviceId;
+    }
+    created.push(createJob(entry.type, input));
+  }
+  pushEvent('recorder-replay', 'Recorder session replay queued', {
+    name,
+    requested: entries.length,
+    created: created.length,
+    deviceIdOverride: options.deviceId || null,
+  });
+  return created;
+}
+
 function createJob(type: JobType, input: JsonObject): JobRecord {
   const rawDeviceId = typeof input.deviceId === 'string' ? input.deviceId : undefined;
   const lane = resolveLaneForDevice(rawDeviceId);
@@ -1003,6 +1377,7 @@ function createJob(type: JobType, input: JsonObject): JobRecord {
 
   lane.queue.push(job.id);
   lane.updatedAt = nowIso();
+  captureRecorderEntry(type, input);
 
   pushEvent('job-queued', 'Job queued', {
     id: job.id,
@@ -1557,6 +1932,7 @@ function lanesSummary(): JsonObject[] {
 function resetSession(options: { keepWorkflows?: boolean }): void {
   eventHistory.splice(0, eventHistory.length);
   dashboardTimeline.splice(0, dashboardTimeline.length);
+  activeRecorder = null;
   for (const key of Object.keys(metrics)) {
     delete metrics[key];
   }
@@ -1674,6 +2050,8 @@ function buildStatePayload(host: string, port: number): JsonObject {
     connectedDeviceCount: devices.length,
     eventCount: eventHistory.length,
     workflowCount: Object.keys(workflows).length,
+    queuePresetCount: Object.keys(queuePresets).length,
+    recorderSessionCount: Object.keys(recorderSessions).length + (activeRecorder ? 1 : 0),
     laneCount: totals.laneCount,
     pausedLaneCount: totals.pausedLaneCount,
     activeLaneCount: totals.activeLaneCount,
@@ -1690,6 +2068,15 @@ function buildDashboardPayload(host: string, port: number): JsonObject {
     state: buildStatePayload(host, port),
     devices: getConnectedDevices(),
     workflows: workflowsList(),
+    queuePresets: queuePresetsList(),
+    recorder: {
+      active: activeRecorder ? {
+        name: activeRecorder.name,
+        startedAt: activeRecorder.startedAt,
+        entries: activeRecorder.entries.length,
+      } : null,
+      sessions: recorderSessionsList(),
+    },
     lanes: lanesSummary(),
     jobs: listJobSummaries(),
     metrics: buildMetricsPayload(),
@@ -1728,6 +2115,11 @@ function buildSessionExport(): JsonObject {
       eventCount: eventHistory.length,
     },
     workflows,
+    queuePresets,
+    recorder: {
+      activeRecorder,
+      sessions: recorderSessions,
+    },
     lanes: lanesSummary(),
     jobs,
     metrics: buildMetricsPayload(),
@@ -1809,12 +2201,166 @@ async function handleApi(
     return;
   }
 
+  if (method === 'GET' && pathname === '/api/queue-presets') {
+    await withMetric('queue-presets-list', () => {
+      sendJson(response, 200, {
+        count: Object.keys(queuePresets).length,
+        presets: queuePresetsList(),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/queue-presets') {
+    await withMetric('queue-presets-save', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name.trim() : '';
+      if (!name) {
+        sendJson(response, 400, { error: 'name is required' });
+        return;
+      }
+      const jobs = normalizePresetJobs(body.jobs);
+      if (jobs.length === 0) {
+        sendJson(response, 400, { error: 'jobs must be non-empty array of valid job specs' });
+        return;
+      }
+      const preset: QueuePreset = {
+        name,
+        description: typeof body.description === 'string' ? body.description : undefined,
+        updatedAt: nowIso(),
+        jobs,
+      };
+      queuePresets[name] = preset;
+      saveQueuePresets();
+      pushEvent('queue-preset-saved', 'Queue preset saved', { name, jobs: jobs.length });
+      sendJson(response, 200, { ok: true, preset });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/queue-presets/run') {
+    await withMetric('queue-presets-run', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name.trim() : '';
+      if (!name) {
+        sendJson(response, 400, { error: 'name is required' });
+        return;
+      }
+      let created: JobRecord[];
+      try {
+        created = runQueuePreset(name, {
+          deviceId: extractDeviceId(body),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+        return;
+      }
+      sendJson(response, 200, {
+        ok: true,
+        name,
+        createdCount: created.length,
+        jobs: created,
+      });
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/recorder/sessions') {
+    await withMetric('recorder-sessions', () => {
+      sendJson(response, 200, {
+        active: activeRecorder ? {
+          name: activeRecorder.name,
+          startedAt: activeRecorder.startedAt,
+          entries: activeRecorder.entries.length,
+        } : null,
+        sessions: recorderSessionsList(),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/recorder/start') {
+    await withMetric('recorder-start', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name : '';
+      let recorder: RecorderSession;
+      try {
+        recorder = startRecorder(name);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+        return;
+      }
+      sendJson(response, 200, {
+        ok: true,
+        recorder: {
+          name: recorder.name,
+          startedAt: recorder.startedAt,
+          entries: recorder.entries.length,
+        },
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/recorder/stop') {
+    await withMetric('recorder-stop', () => {
+      if (!activeRecorder) {
+        sendJson(response, 400, { error: 'no active recorder' });
+        return;
+      }
+      const recorder = stopRecorder();
+      sendJson(response, 200, {
+        ok: true,
+        session: recorder,
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/recorder/replay') {
+    await withMetric('recorder-replay', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name : '';
+      if (!name.trim()) {
+        sendJson(response, 400, { error: 'name is required' });
+        return;
+      }
+      let created: JobRecord[];
+      try {
+        created = replayRecorderSession(name, {
+          deviceId: extractDeviceId(body),
+          limit: typeof body.limit === 'number' ? body.limit : undefined,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+        return;
+      }
+      sendJson(response, 200, {
+        ok: true,
+        name: name.trim(),
+        createdCount: created.length,
+        jobs: created,
+      });
+    });
+    return;
+  }
+
   if (method === 'GET' && pathname === '/api/lanes') {
     await withMetric('lanes-list', () => {
       sendJson(response, 200, {
         lanes: lanesSummary(),
         count: Object.keys(lanes).length,
       });
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/lanes/heatmap') {
+    await withMetric('lanes-heatmap', () => {
+      sendJson(response, 200, buildLaneHeatmap());
     });
     return;
   }
@@ -2302,6 +2848,19 @@ async function handleApi(
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/device/wallboard') {
+    await withMetric('device-wallboard', async () => {
+      const body = await readJsonBody(request);
+      const wallboard = buildDeviceWallboard(body);
+      pushEvent('device-wallboard', 'Device wallboard generated', {
+        deviceCount: wallboard.deviceCount,
+        avgHealthScore: wallboard.avgHealthScore,
+      });
+      sendJson(response, 200, wallboard);
+    });
+    return;
+  }
+
   if (method === 'POST' && pathname === '/api/snapshot-suite') {
     await withMetric('snapshot-suite', async () => {
       const body = await readJsonBody(request);
@@ -2743,7 +3302,32 @@ https://developer.android.com</textarea>
             <button class="s" id="timeline-btn">Load timeline</button>
             <button class="w" id="timeline-reset-btn">Reset timeline</button>
           </div>
+          <canvas id="timeline-chart" width="640" height="140" style="width:100%;height:140px;border:1px solid #2f4a61;border-radius:10px;background:#0b141d;"></canvas>
           <div id="timeline" class="metrics"></div>
+          <hr style="border:0;border-top:1px solid #2f4a61;" />
+          <input id="recorder-name" placeholder="recorder session name" value="ops-session" />
+          <div class="split">
+            <button class="s" id="recorder-start-btn">Start recorder</button>
+            <button class="w" id="recorder-stop-btn">Stop recorder</button>
+          </div>
+          <div class="split">
+            <button class="p" id="recorder-replay-btn">Replay recorder</button>
+            <button class="s" id="recorder-list-btn">List recorders</button>
+          </div>
+          <div id="recorder-sessions" class="metrics"></div>
+          <hr style="border:0;border-top:1px solid #2f4a61;" />
+          <input id="preset-name" placeholder="queue preset name" value="ops-preset" />
+          <textarea id="preset-jobs">[
+  {"type":"open_url","input":{"url":"https://www.wikipedia.org","waitForReadyMs":800}},
+  {"type":"device_profile","input":{"packageName":"com.android.chrome"}}
+]</textarea>
+          <div class="split">
+            <button class="s" id="preset-save-btn">Save preset</button>
+            <button class="p" id="preset-run-btn">Run preset</button>
+          </div>
+          <button class="s" id="heatmap-btn">Load lane heatmap</button>
+          <button class="s" id="wallboard-btn">Generate wallboard</button>
+          <div id="heatmap" class="metrics"></div>
         </article>
 
         <article class="card stack">
@@ -2772,6 +3356,7 @@ https://developer.android.com</textarea>
       const state = {
         deviceId: undefined,
         workflows: [],
+        timelinePoints: [],
       };
 
       const $status = document.getElementById('status');
@@ -2804,6 +3389,12 @@ https://developer.android.com</textarea>
       const $autopilotLoops = document.getElementById('autopilot-loops');
       const $smokeUrl = document.getElementById('smoke-url');
       const $timeline = document.getElementById('timeline');
+      const $timelineChart = document.getElementById('timeline-chart');
+      const $recorderName = document.getElementById('recorder-name');
+      const $recorderSessions = document.getElementById('recorder-sessions');
+      const $presetName = document.getElementById('preset-name');
+      const $presetJobs = document.getElementById('preset-jobs');
+      const $heatmap = document.getElementById('heatmap');
 
       function setMessage(text, isError) {
         $message.textContent = text;
@@ -2850,6 +3441,7 @@ https://developer.android.com</textarea>
 
       function renderTimeline(payload) {
         const points = Array.isArray(payload.points) ? payload.points : [];
+        state.timelinePoints = points;
         $timeline.innerHTML = '';
         for (const point of points.slice(-60).reverse()) {
           const item = document.createElement('div');
@@ -2862,6 +3454,103 @@ https://developer.android.com</textarea>
         }
         if (!points.length) {
           $timeline.textContent = 'No timeline points yet.';
+        }
+        renderTimelineChart(points);
+      }
+
+      function renderTimelineChart(points) {
+        if (!$timelineChart || typeof $timelineChart.getContext !== 'function') {
+          return;
+        }
+        const ctx = $timelineChart.getContext('2d');
+        if (!ctx) {
+          return;
+        }
+        const width = $timelineChart.width;
+        const height = $timelineChart.height;
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = '#0b141d';
+        ctx.fillRect(0, 0, width, height);
+        ctx.strokeStyle = '#2f4a61';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 5; i += 1) {
+          const y = Math.round((height / 4) * i);
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(width, y);
+          ctx.stroke();
+        }
+        if (!Array.isArray(points) || points.length < 2) {
+          return;
+        }
+
+        const sampled = points.slice(-80);
+        const maxQueue = Math.max(1, ...sampled.map(item => Number(item.queueDepth || 0)));
+        const maxFailed = Math.max(1, ...sampled.map(item => Number(item.failed || 0)));
+
+        const drawLine = function (extractor, color, maxValue) {
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          sampled.forEach(function (item, index) {
+            const x = Math.round((index / (sampled.length - 1)) * (width - 1));
+            const value = Number(extractor(item) || 0);
+            const normalized = Math.max(0, Math.min(1, value / maxValue));
+            const y = Math.round(height - normalized * (height - 8) - 4);
+            if (index === 0) {
+              ctx.beginPath();
+              ctx.moveTo(x, y);
+            } else {
+              ctx.lineTo(x, y);
+            }
+          });
+          ctx.stroke();
+        };
+
+        drawLine(function (item) { return item.queueDepth; }, '#14a7ff', maxQueue);
+        drawLine(function (item) { return item.failed; }, '#ff7676', maxFailed);
+      }
+
+      function renderRecorderSessions(payload) {
+        const sessions = Array.isArray(payload.sessions) ? payload.sessions : [];
+        const active = payload.active;
+        $recorderSessions.innerHTML = '';
+        if (active) {
+          const activeItem = document.createElement('div');
+          activeItem.className = 'item';
+          activeItem.innerHTML =
+            '<div class="meta">active: ' + active.name + '</div>' +
+            '<div>startedAt=' + active.startedAt + ' entries=' + active.entries + '</div>';
+          $recorderSessions.appendChild(activeItem);
+        }
+        for (const session of sessions.slice(0, 20)) {
+          const item = document.createElement('div');
+          item.className = 'item';
+          item.innerHTML =
+            '<div class="meta">' + session.name + '</div>' +
+            '<div>entries=' + ((session.entries && session.entries.length) || 0) + '</div>' +
+            '<div>started=' + session.startedAt + '</div>' +
+            '<div>stopped=' + (session.stoppedAt || '-') + '</div>';
+          $recorderSessions.appendChild(item);
+        }
+        if (!sessions.length && !active) {
+          $recorderSessions.textContent = 'No recorder sessions.';
+        }
+      }
+
+      function renderHeatmap(payload) {
+        const lanes = Array.isArray(payload.lanes) ? payload.lanes : [];
+        $heatmap.innerHTML = '';
+        for (const lane of lanes.slice(0, 20)) {
+          const item = document.createElement('div');
+          item.className = 'item';
+          item.innerHTML =
+            '<div class="meta">' + lane.id + '</div>' +
+            '<div>load=' + lane.loadScore + ' queue=' + lane.queueDepth + ' success=' + lane.successRate + '%</div>' +
+            '<div>completed=' + lane.completed + ' failed=' + lane.failed + ' cancelled=' + lane.cancelled + '</div>';
+          $heatmap.appendChild(item);
+        }
+        if (!lanes.length) {
+          $heatmap.textContent = 'No lanes available for heatmap.';
         }
       }
 
@@ -3047,6 +3736,8 @@ https://developer.android.com</textarea>
         const workflowsPayload = await api('/api/workflows');
         const workflows = Array.isArray(workflowsPayload.workflows) ? workflowsPayload.workflows : [];
         state.workflows = workflows;
+        const presetsPayload = await api('/api/queue-presets');
+        const presets = Array.isArray(presetsPayload.presets) ? presetsPayload.presets : [];
 
         const fillWorkflowSelect = function (selectElement) {
           const prev = (selectElement.value || '').trim();
@@ -3076,8 +3767,15 @@ https://developer.android.com</textarea>
           }
         }
 
+        if (presets.length > 0) {
+          const selectedPreset = presets[0];
+          $presetName.value = selectedPreset.name || 'ops-preset';
+          $presetJobs.value = JSON.stringify(selectedPreset.jobs || [], null, 2);
+        }
+
         const metricsPayload = await api('/api/metrics');
         renderMetrics(metricsPayload);
+        await listRecorderSessionsUi();
 
         await refreshJobsAndLanes();
       }
@@ -3413,6 +4111,92 @@ https://developer.android.com</textarea>
         await loadTimeline();
       }
 
+      async function startRecorderUi() {
+        const name = ($recorderName.value || '').trim();
+        if (!name) {
+          throw new Error('recorder name required');
+        }
+        const result = await api('/api/recorder/start', 'POST', { name });
+        renderOutput(result);
+        setMessage('Recorder started', false);
+        await listRecorderSessionsUi();
+      }
+
+      async function stopRecorderUi() {
+        const result = await api('/api/recorder/stop', 'POST', {});
+        renderOutput(result);
+        setMessage('Recorder stopped', false);
+        await listRecorderSessionsUi();
+      }
+
+      async function listRecorderSessionsUi() {
+        const result = await api('/api/recorder/sessions');
+        renderRecorderSessions(result);
+      }
+
+      async function replayRecorderUi() {
+        const name = ($recorderName.value || '').trim();
+        if (!name) {
+          throw new Error('recorder name required');
+        }
+        const result = await api('/api/recorder/replay', 'POST', {
+          name,
+          deviceId: selectedDeviceId(),
+          limit: 200,
+        });
+        renderOutput(result);
+        setMessage('Recorder replay queued', false);
+        await refreshJobsAndLanes();
+      }
+
+      async function saveQueuePresetUi() {
+        const name = ($presetName.value || '').trim();
+        if (!name) {
+          throw new Error('preset name required');
+        }
+        let jobs;
+        try {
+          jobs = JSON.parse($presetJobs.value || '[]');
+        } catch (error) {
+          throw new Error('preset jobs must be valid JSON');
+        }
+        const result = await api('/api/queue-presets', 'POST', {
+          name,
+          jobs,
+        });
+        renderOutput(result);
+        setMessage('Queue preset saved', false);
+      }
+
+      async function runQueuePresetUi() {
+        const name = ($presetName.value || '').trim();
+        if (!name) {
+          throw new Error('preset name required');
+        }
+        const result = await api('/api/queue-presets/run', 'POST', {
+          name,
+          deviceId: selectedDeviceId(),
+        });
+        renderOutput(result);
+        setMessage('Queue preset queued', false);
+        await refreshJobsAndLanes();
+      }
+
+      async function loadHeatmapUi() {
+        const result = await api('/api/lanes/heatmap');
+        renderHeatmap(result);
+        renderOutput(result);
+        setMessage('Lane heatmap loaded', false);
+      }
+
+      async function loadWallboardUi() {
+        const result = await api('/api/device/wallboard', 'POST', {
+          packageName: 'com.android.chrome',
+        });
+        renderOutput(result);
+        setMessage('Device wallboard generated', false);
+      }
+
       document.getElementById('open-url-btn').addEventListener('click', async function () {
         try { await openUrl($urlInput.value); } catch (error) { setMessage(String(error), true); }
       });
@@ -3500,6 +4284,30 @@ https://developer.android.com</textarea>
       document.getElementById('timeline-reset-btn').addEventListener('click', async function () {
         try { await resetTimeline(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('recorder-start-btn').addEventListener('click', async function () {
+        try { await startRecorderUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('recorder-stop-btn').addEventListener('click', async function () {
+        try { await stopRecorderUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('recorder-list-btn').addEventListener('click', async function () {
+        try { await listRecorderSessionsUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('recorder-replay-btn').addEventListener('click', async function () {
+        try { await replayRecorderUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('preset-save-btn').addEventListener('click', async function () {
+        try { await saveQueuePresetUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('preset-run-btn').addEventListener('click', async function () {
+        try { await runQueuePresetUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('heatmap-btn').addEventListener('click', async function () {
+        try { await loadHeatmapUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('wallboard-btn').addEventListener('click', async function () {
+        try { await loadWallboardUi(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('clear-output-btn').addEventListener('click', function () {
         renderOutput({});
       });
@@ -3541,6 +4349,7 @@ https://developer.android.com</textarea>
           }
           connectEvents();
           await loadTimeline();
+          await loadHeatmapUi();
           renderOutput({ ok: true, message: 'UI ready', updateHint: '${UPDATE_HINT}' });
           setMessage('Ready.', false);
 
@@ -3551,6 +4360,8 @@ https://developer.android.com</textarea>
               await refreshJobsAndLanes();
               const timelinePayload = await api('/api/dashboard/timeline?limit=120');
               renderTimeline(timelinePayload);
+              const recorderPayload = await api('/api/recorder/sessions');
+              renderRecorderSessions(recorderPayload);
             } catch (error) {
               setMessage('Background refresh failed', true);
             }
