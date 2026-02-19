@@ -96,6 +96,7 @@ interface JobRecord {
 interface LaneState {
   id: string;
   deviceId?: string;
+  paused: boolean;
   active: boolean;
   queue: number[];
   completed: number;
@@ -748,6 +749,84 @@ function runStressScenario(body: JsonObject): JsonObject {
   };
 }
 
+function enqueueBurstScenario(body: JsonObject): JsonObject {
+  const deviceId = extractDeviceId(body);
+  const urlsValue = body.urls;
+  const urls = Array.isArray(urlsValue)
+    ? urlsValue.filter((entry): entry is string => typeof entry === 'string' && /^https?:\/\//i.test(entry))
+    : [];
+  const normalizedUrls =
+    urls.length > 0
+      ? urls
+      : ['https://www.wikipedia.org', 'https://news.ycombinator.com', 'https://developer.android.com'];
+
+  const loops = clampInt(body.loops, 2, 1, 12);
+  const waitForReadyMs = clampInt(body.waitForReadyMs, 900, 200, 10000);
+  const workflowNameRaw = typeof body.workflowName === 'string' ? body.workflowName.trim() : '';
+  const workflowName = workflowNameRaw && workflows[workflowNameRaw] ? workflowNameRaw : undefined;
+  const packageName = typeof body.packageName === 'string' ? body.packageName : 'com.android.chrome';
+
+  const created: JobRecord[] = [];
+
+  for (let loop = 1; loop <= loops; loop += 1) {
+    for (const url of normalizedUrls) {
+      created.push(
+        createJob('open_url', {
+          deviceId,
+          url,
+          waitForReadyMs,
+          loop,
+        })
+      );
+    }
+    created.push(
+      createJob('device_profile', {
+        deviceId,
+        packageName,
+        loop,
+      })
+    );
+    if (loop % 2 === 0) {
+      created.push(
+        createJob('snapshot_suite', {
+          deviceId,
+          packageName,
+          loop,
+        })
+      );
+    }
+    if (workflowName) {
+      created.push(
+        createJob('workflow_run', {
+          deviceId,
+          name: workflowName,
+          packageName,
+          includeRaw: false,
+          loop,
+        })
+      );
+    }
+  }
+
+  pushEvent('scenario-burst-queued', 'Burst scenario queued into lanes', {
+    createdCount: created.length,
+    loops,
+    urlCount: normalizedUrls.length,
+    workflowName,
+  });
+
+  return {
+    ok: true,
+    scenario: 'burst',
+    loops,
+    urls: normalizedUrls,
+    workflowName: workflowName ?? null,
+    createdCount: created.length,
+    jobIds: created.map(job => job.id),
+    updateHint: UPDATE_HINT,
+  };
+}
+
 async function runWorkflow(name: string, options: {
   deviceId?: string;
   packageName?: string;
@@ -829,6 +908,7 @@ function resolveLaneForDevice(deviceId?: string): LaneState {
     lanes[laneId] = {
       id: laneId,
       deviceId,
+      paused: false,
       active: false,
       queue: [],
       completed: 0,
@@ -920,6 +1000,123 @@ function cancelQueuedJob(id: number): boolean {
   return true;
 }
 
+function cancelQueuedJobs(input: { ids?: number[]; laneId?: string }): {
+  cancelled: number;
+  requested: number;
+  ids: number[];
+} {
+  const laneFilter = typeof input.laneId === 'string' && input.laneId.length > 0 ? input.laneId : undefined;
+  const requestedIds = Array.isArray(input.ids)
+    ? input.ids.filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+    : undefined;
+
+  const queueIds =
+    requestedIds && requestedIds.length > 0
+      ? requestedIds.map(id => Math.trunc(id))
+      : Object.values(lanes)
+          .filter(lane => !laneFilter || lane.id === laneFilter)
+          .flatMap(lane => lane.queue.slice());
+
+  let cancelled = 0;
+  const cancelledIds: number[] = [];
+
+  for (const id of queueIds) {
+    if (cancelQueuedJob(id)) {
+      cancelled += 1;
+      cancelledIds.push(id);
+    }
+  }
+
+  pushEvent('jobs-cancel-queued', 'Queued jobs cancelled', {
+    cancelled,
+    requested: queueIds.length,
+    laneId: laneFilter,
+  });
+
+  return {
+    cancelled,
+    requested: queueIds.length,
+    ids: cancelledIds,
+  };
+}
+
+function promoteQueuedJob(id: number): { ok: boolean; reason?: string; laneId?: string; queueDepth?: number } {
+  const job = getJobById(id);
+  if (!job) {
+    return { ok: false, reason: 'job not found' };
+  }
+  if (job.status !== 'queued') {
+    return { ok: false, reason: 'job is not queued' };
+  }
+  const lane = lanes[job.laneId];
+  if (!lane) {
+    return { ok: false, reason: 'lane not found' };
+  }
+  const index = lane.queue.indexOf(id);
+  if (index < 0) {
+    return { ok: false, reason: 'job not in lane queue' };
+  }
+
+  if (index > 0) {
+    lane.queue.splice(index, 1);
+    lane.queue.unshift(id);
+  }
+  lane.updatedAt = nowIso();
+
+  pushEvent('job-promoted', 'Queued job promoted to lane front', {
+    id,
+    laneId: lane.id,
+    queueDepth: lane.queue.length,
+  });
+
+  void scheduleLanes();
+  return { ok: true, laneId: lane.id, queueDepth: lane.queue.length };
+}
+
+function setLanePaused(laneId: string, paused: boolean): LaneState | undefined {
+  const lane = lanes[laneId];
+  if (!lane) {
+    return undefined;
+  }
+  if (lane.paused === paused) {
+    return lane;
+  }
+
+  lane.paused = paused;
+  lane.updatedAt = nowIso();
+
+  pushEvent(paused ? 'lane-paused' : 'lane-resumed', paused ? 'Lane paused' : 'Lane resumed', {
+    laneId: lane.id,
+    queueDepth: lane.queue.length,
+  });
+
+  if (!paused) {
+    void scheduleLanes();
+  }
+  return lane;
+}
+
+function setAllLanesPaused(paused: boolean): number {
+  let changed = 0;
+  for (const lane of Object.values(lanes)) {
+    if (lane.paused !== paused) {
+      lane.paused = paused;
+      lane.updatedAt = nowIso();
+      changed += 1;
+    }
+  }
+
+  pushEvent(paused ? 'lanes-paused' : 'lanes-resumed', paused ? 'All lanes paused' : 'All lanes resumed', {
+    changed,
+    laneCount: Object.keys(lanes).length,
+  });
+
+  if (!paused) {
+    void scheduleLanes();
+  }
+  return changed;
+}
+
 function retryJob(id: number): JobRecord | undefined {
   const previous = getJobById(id);
   if (!previous) {
@@ -980,13 +1177,17 @@ async function executeJob(job: JobRecord): Promise<unknown> {
 }
 
 async function processLane(lane: LaneState): Promise<void> {
-  if (lane.active) {
+  if (lane.active || lane.paused) {
     return;
   }
   lane.active = true;
   lane.updatedAt = nowIso();
 
   while (lane.queue.length > 0) {
+    if (lane.paused) {
+      break;
+    }
+
     const jobId = lane.queue.shift();
     if (!jobId) {
       continue;
@@ -1054,7 +1255,7 @@ async function scheduleLanes(): Promise<void> {
 
   const promises: Promise<void>[] = [];
   for (const lane of Object.values(lanes)) {
-    if (lane.queue.length > 0 && !lane.active) {
+    if (lane.queue.length > 0 && !lane.active && !lane.paused) {
       promises.push(processLane(lane));
     }
   }
@@ -1062,7 +1263,7 @@ async function scheduleLanes(): Promise<void> {
 
   laneSchedulerRunning = false;
 
-  const hasPending = Object.values(lanes).some(lane => lane.queue.length > 0 && !lane.active);
+  const hasPending = Object.values(lanes).some(lane => lane.queue.length > 0 && !lane.active && !lane.paused);
   if (hasPending) {
     void scheduleLanes();
   }
@@ -1074,6 +1275,7 @@ function lanesSummary(): JsonObject[] {
     .map(lane => ({
       id: lane.id,
       deviceId: lane.deviceId,
+      paused: lane.paused,
       active: lane.active,
       queueDepth: lane.queue.length,
       completed: lane.completed,
@@ -1202,9 +1404,23 @@ function buildStatePayload(host: string, port: number): JsonObject {
     eventCount: eventHistory.length,
     workflowCount: Object.keys(workflows).length,
     laneCount: Object.keys(lanes).length,
+    pausedLaneCount: Object.values(lanes).filter(lane => lane.paused).length,
     queueDepth: Object.values(lanes).reduce((sum, lane) => sum + lane.queue.length, 0),
     jobCount: jobs.length,
     snapshotKinds: SNAPSHOT_KINDS,
+  };
+}
+
+function buildDashboardPayload(host: string, port: number): JsonObject {
+  return {
+    generatedAt: nowIso(),
+    state: buildStatePayload(host, port),
+    devices: getConnectedDevices(),
+    workflows: workflowsList(),
+    lanes: lanesSummary(),
+    jobs: listJobSummaries(),
+    metrics: buildMetricsPayload(),
+    recentEvents: eventHistory.slice(-50),
   };
 }
 
@@ -1273,6 +1489,13 @@ async function handleApi(
     return;
   }
 
+  if (method === 'GET' && pathname === '/api/dashboard') {
+    await withMetric('dashboard', () => {
+      sendJson(response, 200, buildDashboardPayload(context.host, context.port));
+    });
+    return;
+  }
+
   if (method === 'GET' && pathname === '/api/devices') {
     await withMetric('devices', () => {
       const devices = getConnectedDevices();
@@ -1291,6 +1514,56 @@ async function handleApi(
         lanes: lanesSummary(),
         count: Object.keys(lanes).length,
       });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/lanes/pause-all') {
+    await withMetric('lanes-pause-all', () => {
+      const changed = setAllLanesPaused(true);
+      sendJson(response, 200, { ok: true, changed, lanes: lanesSummary() });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/lanes/resume-all') {
+    await withMetric('lanes-resume-all', () => {
+      const changed = setAllLanesPaused(false);
+      sendJson(response, 200, { ok: true, changed, lanes: lanesSummary() });
+    });
+    return;
+  }
+
+  if (method === 'POST' && /^\/api\/lanes\/[^/]+\/pause$/.test(pathname)) {
+    await withMetric('lanes-pause', () => {
+      const laneId = decodeURIComponent(pathname.split('/')[3] || '');
+      if (!laneId) {
+        sendJson(response, 400, { error: 'lane id is required' });
+        return;
+      }
+      const lane = setLanePaused(laneId, true);
+      if (!lane) {
+        sendJson(response, 404, { error: `lane '${laneId}' not found` });
+        return;
+      }
+      sendJson(response, 200, { ok: true, lane });
+    });
+    return;
+  }
+
+  if (method === 'POST' && /^\/api\/lanes\/[^/]+\/resume$/.test(pathname)) {
+    await withMetric('lanes-resume', () => {
+      const laneId = decodeURIComponent(pathname.split('/')[3] || '');
+      if (!laneId) {
+        sendJson(response, 400, { error: 'lane id is required' });
+        return;
+      }
+      const lane = setLanePaused(laneId, false);
+      if (!lane) {
+        sendJson(response, 404, { error: `lane '${laneId}' not found` });
+        return;
+      }
+      sendJson(response, 200, { ok: true, lane });
     });
     return;
   }
@@ -1399,6 +1672,40 @@ async function handleApi(
         ok: true,
         previousJobId: id,
         newJob: retried,
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && /^\/api\/jobs\/\d+\/promote$/.test(pathname)) {
+    await withMetric('jobs-promote', () => {
+      const id = Number(pathname.split('/')[3]);
+      const promoted = promoteQueuedJob(id);
+      if (!promoted.ok) {
+        sendJson(response, 400, { error: promoted.reason || `job ${id} cannot be promoted` });
+        return;
+      }
+      sendJson(response, 200, {
+        ok: true,
+        id,
+        laneId: promoted.laneId,
+        queueDepth: promoted.queueDepth,
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/jobs/cancel-queued') {
+    await withMetric('jobs-cancel-queued', async () => {
+      const body = await readJsonBody(request);
+      const ids = Array.isArray(body.ids)
+        ? body.ids.map(value => Number(value)).filter(value => Number.isFinite(value))
+        : undefined;
+      const laneId = typeof body.laneId === 'string' ? body.laneId : undefined;
+      const result = cancelQueuedJobs({ ids, laneId });
+      sendJson(response, 200, {
+        ok: true,
+        ...result,
       });
     });
     return;
@@ -1753,6 +2060,15 @@ async function handleApi(
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/scenario/burst') {
+    await withMetric('scenario-burst', async () => {
+      const body = await readJsonBody(request);
+      const result = enqueueBurstScenario(body);
+      sendJson(response, 200, result);
+    });
+    return;
+  }
+
   if (method === 'GET' && pathname === '/api/history') {
     await withMetric('history', () => {
       const limitRaw = Number(url.searchParams.get('limit') ?? '120');
@@ -1807,7 +2123,7 @@ const INDEX_HTML = String.raw`<!doctype html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>the-android-mcp web ui v3.4</title>
+    <title>the-android-mcp web ui v${pkg.version}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -1952,8 +2268,8 @@ const INDEX_HTML = String.raw`<!doctype html>
           <span class="pill" id="queue-pill">queue: 0</span>
           <span class="pill">port: 50000</span>
         </div>
-        <h1 style="margin:0;font-size:1.45rem;">the-android-mcp v3.4 command center</h1>
-        <p class="muted">Multi-lane backend orchestration, workflow import/export, profile matrix, snapshot diff, and live job controls.</p>
+        <h1 style="margin:0;font-size:1.45rem;">the-android-mcp v${pkg.version} command center</h1>
+        <p class="muted">Multi-lane orchestration, lane pause/resume, queue promotion/cancel controls, burst scenarios, and live backend telemetry.</p>
       </section>
 
       <section class="grid">
@@ -2052,6 +2368,19 @@ https://developer.android.com</textarea>
         </article>
 
         <article class="card stack">
+          <h2>Queue control + burst</h2>
+          <div class="split">
+            <button class="w" id="pause-all-lanes-btn">Pause all lanes</button>
+            <button class="p" id="resume-all-lanes-btn">Resume all lanes</button>
+          </div>
+          <button class="w" id="cancel-queued-btn">Cancel queued jobs</button>
+          <input id="burst-loops" type="number" min="1" max="12" value="2" />
+          <select id="burst-workflow"></select>
+          <button class="p" id="burst-enqueue-btn">Enqueue burst scenario</button>
+          <button class="s" id="dashboard-btn">Load dashboard payload</button>
+        </article>
+
+        <article class="card stack">
           <h2>Metrics + session</h2>
           <div id="metrics" class="metrics"></div>
           <div class="split">
@@ -2104,6 +2433,8 @@ https://developer.android.com</textarea>
       const $jobUrl = document.getElementById('job-url');
       const $jobWorkflow = document.getElementById('job-workflow');
       const $bulkJobs = document.getElementById('bulk-jobs');
+      const $burstLoops = document.getElementById('burst-loops');
+      const $burstWorkflow = document.getElementById('burst-workflow');
 
       function setMessage(text, isError) {
         $message.textContent = text;
@@ -2155,9 +2486,26 @@ https://developer.android.com</textarea>
           const item = document.createElement('div');
           item.className = 'item';
           item.innerHTML =
-            '<div class="meta">' + lane.id + (lane.active ? ' [active]' : '') + '</div>' +
+            '<div class="meta">' + lane.id + (lane.active ? ' [active]' : '') + (lane.paused ? ' [paused]' : '') + '</div>' +
             '<div>queue=' + lane.queueDepth + ' completed=' + lane.completed + ' failed=' + lane.failed + ' cancelled=' + lane.cancelled + '</div>' +
             '<div>device=' + (lane.deviceId || 'default') + '</div>';
+
+          const laneToggleBtn = document.createElement('button');
+          laneToggleBtn.className = lane.paused ? 'p' : 'w';
+          laneToggleBtn.textContent = lane.paused ? 'Resume lane' : 'Pause lane';
+          laneToggleBtn.style.marginTop = '6px';
+          laneToggleBtn.addEventListener('click', async function () {
+            try {
+              const route = '/api/lanes/' + encodeURIComponent(lane.id) + '/' + (lane.paused ? 'resume' : 'pause');
+              const result = await api(route, 'POST', {});
+              renderOutput(result);
+              await refreshJobsAndLanes();
+              setMessage('Lane updated', false);
+            } catch (error) {
+              setMessage(String(error), true);
+            }
+          });
+          item.appendChild(laneToggleBtn);
           $lanes.appendChild(item);
         }
         if (!lanes.length) {
@@ -2177,6 +2525,22 @@ https://developer.android.com</textarea>
             (job.error ? '<div style="color:#ff8f8f;">' + job.error + '</div>' : '');
 
           if (job.status === 'queued') {
+            const promoteBtn = document.createElement('button');
+            promoteBtn.className = 's';
+            promoteBtn.textContent = 'Promote';
+            promoteBtn.style.marginTop = '6px';
+            promoteBtn.addEventListener('click', async function () {
+              try {
+                const result = await api('/api/jobs/' + job.id + '/promote', 'POST', {});
+                renderOutput(result);
+                await refreshJobsAndLanes();
+                setMessage('Job promoted', false);
+              } catch (error) {
+                setMessage(String(error), true);
+              }
+            });
+            item.appendChild(promoteBtn);
+
             const cancelBtn = document.createElement('button');
             cancelBtn.className = 'w';
             cancelBtn.textContent = 'Cancel';
@@ -2316,6 +2680,7 @@ https://developer.android.com</textarea>
 
         fillWorkflowSelect($workflowSelect);
         fillWorkflowSelect($jobWorkflow);
+        fillWorkflowSelect($burstWorkflow);
 
         if ($workflowSelect.value) {
           const selected = workflows.find(function (w) { return w.name === $workflowSelect.value; });
@@ -2558,6 +2923,51 @@ https://developer.android.com</textarea>
         await refreshCore();
       }
 
+      async function pauseAllLanes() {
+        const result = await api('/api/lanes/pause-all', 'POST', {});
+        renderOutput(result);
+        setMessage('All lanes paused', false);
+        await refreshJobsAndLanes();
+      }
+
+      async function resumeAllLanes() {
+        const result = await api('/api/lanes/resume-all', 'POST', {});
+        renderOutput(result);
+        setMessage('All lanes resumed', false);
+        await refreshJobsAndLanes();
+      }
+
+      async function cancelQueued() {
+        const result = await api('/api/jobs/cancel-queued', 'POST', {
+          laneId: selectedDeviceId() ? 'device:' + selectedDeviceId() : undefined,
+        });
+        renderOutput(result);
+        setMessage('Queued jobs cancelled', false);
+        await refreshJobsAndLanes();
+      }
+
+      async function enqueueBurstScenario() {
+        const workflowName = ($burstWorkflow.value || '').trim();
+        const cfg = stressConfig();
+        const result = await api('/api/scenario/burst', 'POST', {
+          deviceId: selectedDeviceId(),
+          loops: Number($burstLoops.value || '2'),
+          waitForReadyMs: cfg.waitForReadyMs,
+          urls: cfg.urls,
+          workflowName: workflowName || undefined,
+          packageName: 'com.android.chrome',
+        });
+        renderOutput(result);
+        setMessage('Burst scenario enqueued', false);
+        await refreshJobsAndLanes();
+      }
+
+      async function loadDashboardPayload() {
+        const result = await api('/api/dashboard');
+        renderOutput(result);
+        setMessage('Dashboard payload loaded', false);
+      }
+
       document.getElementById('open-url-btn').addEventListener('click', async function () {
         try { await openUrl($urlInput.value); } catch (error) { setMessage(String(error), true); }
       });
@@ -2612,6 +3022,21 @@ https://developer.android.com</textarea>
       document.getElementById('reset-session-btn').addEventListener('click', async function () {
         try { await resetSession(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('pause-all-lanes-btn').addEventListener('click', async function () {
+        try { await pauseAllLanes(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('resume-all-lanes-btn').addEventListener('click', async function () {
+        try { await resumeAllLanes(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('cancel-queued-btn').addEventListener('click', async function () {
+        try { await cancelQueued(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('burst-enqueue-btn').addEventListener('click', async function () {
+        try { await enqueueBurstScenario(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('dashboard-btn').addEventListener('click', async function () {
+        try { await loadDashboardPayload(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('clear-output-btn').addEventListener('click', function () {
         renderOutput({});
       });
@@ -2642,87 +3067,6 @@ https://developer.android.com</textarea>
           $workflowSteps.value = JSON.stringify(selected.steps || [], null, 2);
         }
       });
-
-      function connectEvents() {
-        const es = new EventSource('/api/events');
-        es.onmessage = function (event) {
-          try {
-            addEvent(JSON.parse(event.data));
-          } catch {
-            // ignore
-          }
-        };
-      }
-
-      async function refreshCore() {
-        const statePayload = await api('/api/state');
-        $status.textContent = statePayload.connectedDeviceCount > 0 ? 'online' : 'no-device';
-        $versionPill.textContent = 'v' + statePayload.version;
-        $workflowPill.textContent = 'workflows: ' + statePayload.workflowCount;
-        $lanePill.textContent = 'lanes: ' + statePayload.laneCount;
-        $queuePill.textContent = 'queue: ' + statePayload.queueDepth;
-
-        const devicesPayload = await api('/api/devices');
-        const devices = Array.isArray(devicesPayload.devices) ? devicesPayload.devices : [];
-        const previousDevice = state.deviceId;
-
-        $deviceSelect.innerHTML = '';
-        for (const device of devices) {
-          const option = document.createElement('option');
-          option.value = device.id;
-          option.textContent = device.id + ' (' + (device.model || 'unknown') + ')';
-          $deviceSelect.appendChild(option);
-        }
-
-        if (previousDevice && devices.some(function (d) { return d.id === previousDevice; })) {
-          state.deviceId = previousDevice;
-        } else {
-          state.deviceId = devices[0] ? devices[0].id : undefined;
-        }
-
-        if (state.deviceId) {
-          $deviceSelect.value = state.deviceId;
-          $devicePill.textContent = 'device: ' + state.deviceId;
-        } else {
-          $devicePill.textContent = 'device: none';
-        }
-
-        const workflowsPayload = await api('/api/workflows');
-        const workflows = Array.isArray(workflowsPayload.workflows) ? workflowsPayload.workflows : [];
-        state.workflows = workflows;
-
-        const fillSelect = function (selectElement) {
-          const prev = (selectElement.value || '').trim();
-          selectElement.innerHTML = '';
-          for (const workflow of workflows) {
-            const option = document.createElement('option');
-            option.value = workflow.name;
-            option.textContent = workflow.name;
-            selectElement.appendChild(option);
-          }
-          if (prev && workflows.some(function (w) { return w.name === prev; })) {
-            selectElement.value = prev;
-          } else if (workflows[0]) {
-            selectElement.value = workflows[0].name;
-          }
-        };
-
-        fillSelect($workflowSelect);
-        fillSelect($jobWorkflow);
-
-        if ($workflowSelect.value) {
-          const selected = workflows.find(function (w) { return w.name === $workflowSelect.value; });
-          if (selected) {
-            $workflowName.value = selected.name;
-            $workflowSteps.value = JSON.stringify(selected.steps || [], null, 2);
-          }
-        }
-
-        const metricsPayload = await api('/api/metrics');
-        renderMetrics(metricsPayload);
-
-        await refreshJobsAndLanes();
-      }
 
       async function init() {
         try {

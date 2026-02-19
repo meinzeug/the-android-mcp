@@ -24,6 +24,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.5.0] - 2026-02-19
+### Added
+- New Web UI/backend dashboard payload endpoint:
+- `GET /api/dashboard`
+- New lane control APIs for operations at scale:
+- `POST /api/lanes/pause-all`
+- `POST /api/lanes/resume-all`
+- `POST /api/lanes/:laneId/pause`
+- `POST /api/lanes/:laneId/resume`
+- New queue control APIs:
+- `POST /api/jobs/:id/promote`
+- `POST /api/jobs/cancel-queued`
+- New burst scenario API for high-throughput orchestration:
+- `POST /api/scenario/burst`
+- New queue control panel in Web UI (pause/resume all lanes, cancel queued jobs, burst enqueue, dashboard load).
+
+### Improved
+- Lane scheduler now supports paused lanes and reports paused lane state in API payloads.
+- Web UI lane cards now support per-lane pause/resume and queued-job promote actions.
+- Command center version display now reflects runtime package version dynamically.
+- Removed duplicated client-side `connectEvents`/`refreshCore` blocks in Web UI script for cleaner and more predictable behavior.
+
 ## [3.4.0] - 2026-02-19
 ### Added
 - Multi-lane job orchestration backend for device-scoped queues with new APIs:
