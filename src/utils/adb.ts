@@ -4510,3 +4510,296 @@ export function collectAndroidDiagnostics(options: {
     packageVersion,
   };
 }
+
+function safeDeviceCommand(
+  targetDeviceId: string,
+  command: string,
+  timeout = DEFAULT_TIMEOUT
+): string {
+  try {
+    const { output } = executeADBCommandOnDevice(command, targetDeviceId, {
+      timeout,
+      maxBuffer: DEFAULT_BINARY_MAX_BUFFER,
+    });
+    return output.trim();
+  } catch (error) {
+    return `ERROR: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+export function captureAndroidPerformanceSnapshot(options: {
+  deviceId?: string;
+  packageName?: string;
+  topLines?: number;
+  includeMeminfo?: boolean;
+  includeGfxInfo?: boolean;
+  includeCpuInfo?: boolean;
+  includeCpuFreq?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  packageName?: string;
+  top: string;
+  loadAverage: string;
+  meminfo?: string;
+  gfxinfo?: string;
+  cpuinfo?: string;
+  cpuFrequency?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const topLines = Math.max(10, Math.min(200, Math.trunc(options.topLines ?? 60)));
+  const packageName = options.packageName?.trim() || undefined;
+  const packageArg = packageName ? ` ${escapeShellArg(packageName)}` : '';
+
+  const top = safeDeviceCommand(targetDeviceId, `shell top -b -n 1 | head -n ${topLines}`, 45000);
+  const loadAverage = safeDeviceCommand(targetDeviceId, 'shell cat /proc/loadavg');
+  const meminfo =
+    options.includeMeminfo === false
+      ? undefined
+      : safeDeviceCommand(targetDeviceId, `shell dumpsys meminfo${packageArg}`, 90000);
+  const gfxinfo =
+    options.includeGfxInfo === false || !packageName
+      ? undefined
+      : safeDeviceCommand(
+          targetDeviceId,
+          `shell dumpsys gfxinfo ${escapeShellArg(packageName)} framestats`,
+          90000
+        );
+  const cpuinfo =
+    options.includeCpuInfo === true
+      ? safeDeviceCommand(targetDeviceId, 'shell cat /proc/cpuinfo', 30000)
+      : undefined;
+  const cpuFrequency =
+    options.includeCpuFreq === false
+      ? undefined
+      : safeDeviceCommand(
+          targetDeviceId,
+          "shell for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq; do [ -f \"$f\" ] && echo \"$f:$(cat $f)\"; done",
+          20000
+        );
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    packageName,
+    top,
+    loadAverage,
+    meminfo,
+    gfxinfo,
+    cpuinfo,
+    cpuFrequency,
+  };
+}
+
+export function captureAndroidBatterySnapshot(options: {
+  deviceId?: string;
+  includeHistory?: boolean;
+  historyLines?: number;
+  resetStats?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  battery: string;
+  batteryStats: string;
+  batteryProperties: string;
+  history?: string;
+  resetOutput?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const includeHistory = options.includeHistory === true;
+  const historyLines = Math.max(50, Math.min(2000, Math.trunc(options.historyLines ?? 300)));
+
+  const battery = safeDeviceCommand(targetDeviceId, 'shell dumpsys battery', 30000);
+  const batteryStats = safeDeviceCommand(targetDeviceId, 'shell dumpsys batterystats', 120000);
+  const batteryProperties = safeDeviceCommand(
+    targetDeviceId,
+    'shell getprop | grep -E "battery|power_supply"'
+  );
+  const history = includeHistory
+    ? safeDeviceCommand(
+        targetDeviceId,
+        `shell dumpsys batterystats --history | tail -n ${historyLines}`,
+        120000
+      )
+    : undefined;
+  const resetOutput =
+    options.resetStats === true
+      ? safeDeviceCommand(targetDeviceId, 'shell dumpsys batterystats --reset', 30000)
+      : undefined;
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    battery,
+    batteryStats,
+    batteryProperties,
+    history,
+    resetOutput,
+  };
+}
+
+export function captureAndroidNetworkSnapshot(options: {
+  deviceId?: string;
+  includeWifi?: boolean;
+  includeConnectivity?: boolean;
+  includeNetstats?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  ipAddress: string;
+  ipRoute: string;
+  dnsProperties: string;
+  wifi?: string;
+  connectivity?: string;
+  netstats?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const ipAddress = safeDeviceCommand(targetDeviceId, 'shell ip addr show', 30000);
+  const ipRoute = safeDeviceCommand(targetDeviceId, 'shell ip route show', 30000);
+  const dnsProperties = safeDeviceCommand(
+    targetDeviceId,
+    'shell getprop | grep -E "\\[net\\.dns|\\[dhcp\\."'
+  );
+  const wifi =
+    options.includeWifi === false
+      ? undefined
+      : safeDeviceCommand(targetDeviceId, 'shell dumpsys wifi | head -n 400', 120000);
+  const connectivity =
+    options.includeConnectivity === false
+      ? undefined
+      : safeDeviceCommand(
+          targetDeviceId,
+          'shell dumpsys connectivity | head -n 300',
+          120000
+        );
+  const netstats =
+    options.includeNetstats === false
+      ? undefined
+      : safeDeviceCommand(targetDeviceId, 'shell dumpsys netstats --summary', 120000);
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    ipAddress,
+    ipRoute,
+    dnsProperties,
+    wifi,
+    connectivity,
+    netstats,
+  };
+}
+
+export function captureAndroidStorageSnapshot(options: {
+  deviceId?: string;
+  packageName?: string;
+  includePackageUsage?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  packageName?: string;
+  df: string;
+  diskstats: string;
+  packagePaths?: string;
+  packageDataUsage?: string;
+  packageMediaUsage?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const packageName = options.packageName?.trim() || undefined;
+  const df = safeDeviceCommand(targetDeviceId, 'shell df -h', 45000);
+  const diskstats = safeDeviceCommand(targetDeviceId, 'shell dumpsys diskstats', 120000);
+  const packagePaths = packageName
+    ? safeDeviceCommand(targetDeviceId, `shell pm path ${escapeShellArg(packageName)}`)
+    : undefined;
+  const packageUsageEnabled = options.includePackageUsage !== false && !!packageName;
+  const packageDataUsage = packageUsageEnabled
+    ? safeDeviceCommand(targetDeviceId, `shell du -sh /data/data/${packageName}`)
+    : undefined;
+  const packageMediaUsage = packageUsageEnabled
+    ? safeDeviceCommand(targetDeviceId, `shell du -sh /sdcard/Android/data/${packageName}`)
+    : undefined;
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    packageName,
+    df,
+    diskstats,
+    packagePaths,
+    packageDataUsage,
+    packageMediaUsage,
+  };
+}
+
+export function captureAndroidCrashSnapshot(options: {
+  deviceId?: string;
+  packageName?: string;
+  logcatLines?: number;
+  includeAnrTraces?: boolean;
+  includeTombstones?: boolean;
+  includeDropBox?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  packageName?: string;
+  crashBuffer: string;
+  activityCrashes: string;
+  packageCrashLog?: ReturnType<typeof getLogcat>;
+  anrTraces?: string;
+  tombstones?: string;
+  dropboxCrashes?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const packageName = options.packageName?.trim() || undefined;
+  const logcatLines = Math.max(50, Math.min(5000, Math.trunc(options.logcatLines ?? 500)));
+
+  const crashBuffer = safeDeviceCommand(
+    targetDeviceId,
+    `shell logcat -d -b crash -t ${logcatLines}`,
+    90000
+  );
+  const activityCrashes = safeDeviceCommand(
+    targetDeviceId,
+    'shell dumpsys activity crashes',
+    45000
+  );
+  const packageCrashLog = packageName
+    ? getLogcat({
+        deviceId: targetDeviceId,
+        lines: logcatLines,
+        packageName,
+        format: 'threadtime',
+      })
+    : undefined;
+  const anrTraces =
+    options.includeAnrTraces === false
+      ? undefined
+      : safeDeviceCommand(
+          targetDeviceId,
+          `shell cat /data/anr/traces.txt | tail -n ${logcatLines}`,
+          90000
+        );
+  const tombstones =
+    options.includeTombstones === false
+      ? undefined
+      : safeDeviceCommand(targetDeviceId, 'shell ls -lt /data/tombstones', 30000);
+  const dropboxCrashes =
+    options.includeDropBox === true
+      ? safeDeviceCommand(
+          targetDeviceId,
+          'shell dumpsys dropbox --print system_app_crash data_app_crash',
+          120000
+        )
+      : undefined;
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    packageName,
+    crashBuffer,
+    activityCrashes,
+    packageCrashLog,
+    anrTraces,
+    tombstones,
+    dropboxCrashes,
+  };
+}

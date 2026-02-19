@@ -648,6 +648,96 @@ export const CollectDiagnosticsInputSchema = z.object({
     .describe('Optional maximum cache age for UI dump in milliseconds.'),
 });
 
+export const CapturePerformanceSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z.string().optional().describe('Optional package name for app-scoped perf stats.'),
+  topLines: z
+    .number()
+    .int()
+    .positive()
+    .default(60)
+    .describe('Number of lines to keep from top output.'),
+  includeMeminfo: z.boolean().default(true).describe('Include dumpsys meminfo output.'),
+  includeGfxInfo: z
+    .boolean()
+    .default(true)
+    .describe('Include dumpsys gfxinfo framestats (requires packageName).'),
+  includeCpuInfo: z.boolean().default(false).describe('Include /proc/cpuinfo output.'),
+  includeCpuFreq: z
+    .boolean()
+    .default(true)
+    .describe('Include current CPU frequency snapshot for all cores.'),
+});
+
+export const CaptureBatterySnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  includeHistory: z.boolean().default(false).describe('Include batterystats history tail.'),
+  historyLines: z
+    .number()
+    .int()
+    .positive()
+    .default(300)
+    .describe('Lines to keep when includeHistory is true.'),
+  resetStats: z
+    .boolean()
+    .default(false)
+    .describe('Reset batterystats after capture (dumpsys batterystats --reset).'),
+});
+
+export const CaptureNetworkSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  includeWifi: z.boolean().default(true).describe('Include dumpsys wifi snapshot.'),
+  includeConnectivity: z
+    .boolean()
+    .default(true)
+    .describe('Include dumpsys connectivity snapshot.'),
+  includeNetstats: z.boolean().default(true).describe('Include dumpsys netstats summary.'),
+});
+
+export const CaptureStorageSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z
+    .string()
+    .optional()
+    .describe('Optional package name for package-specific storage usage probes.'),
+  includePackageUsage: z
+    .boolean()
+    .default(true)
+    .describe('Attempt to include app data/media usage for packageName.'),
+});
+
+export const CaptureCrashSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z.string().optional().describe('Optional package name for filtered crash logs.'),
+  logcatLines: z
+    .number()
+    .int()
+    .positive()
+    .default(500)
+    .describe('Lines to capture from crash buffers/logcat.'),
+  includeAnrTraces: z.boolean().default(true).describe('Include /data/anr/traces.txt tail.'),
+  includeTombstones: z.boolean().default(true).describe('Include tombstone file listing.'),
+  includeDropBox: z
+    .boolean()
+    .default(false)
+    .describe('Include dumpsys dropbox crash entries (can be large).'),
+});
+
 // Tool output schemas
 export const TakeScreenshotOutputSchema = z.object({
   data: z.string().describe('Base64 encoded image data'),
@@ -2649,6 +2739,62 @@ export const CollectDiagnosticsOutputSchema = z.object({
   packageVersion: GetAppVersionOutputSchema.optional().describe('Optional package version details'),
 });
 
+export const CapturePerformanceSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  packageName: z.string().optional().describe('Package name used for app-scoped probes'),
+  top: z.string().describe('top snapshot output'),
+  loadAverage: z.string().describe('Current /proc/loadavg'),
+  meminfo: z.string().optional().describe('dumpsys meminfo output'),
+  gfxinfo: z.string().optional().describe('dumpsys gfxinfo framestats output'),
+  cpuinfo: z.string().optional().describe('/proc/cpuinfo output'),
+  cpuFrequency: z.string().optional().describe('Per-core current frequency snapshot'),
+});
+
+export const CaptureBatterySnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  battery: z.string().describe('dumpsys battery output'),
+  batteryStats: z.string().describe('dumpsys batterystats output'),
+  batteryProperties: z.string().describe('Battery-related getprop snapshot'),
+  history: z.string().optional().describe('Optional batterystats history tail'),
+  resetOutput: z.string().optional().describe('Optional output from batterystats reset'),
+});
+
+export const CaptureNetworkSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  ipAddress: z.string().describe('ip addr output'),
+  ipRoute: z.string().describe('ip route output'),
+  dnsProperties: z.string().describe('DNS/dhcp properties snapshot'),
+  wifi: z.string().optional().describe('Optional dumpsys wifi output'),
+  connectivity: z.string().optional().describe('Optional dumpsys connectivity output'),
+  netstats: z.string().optional().describe('Optional dumpsys netstats summary'),
+});
+
+export const CaptureStorageSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  packageName: z.string().optional().describe('Package name used for package-specific probes'),
+  df: z.string().describe('df -h output'),
+  diskstats: z.string().describe('dumpsys diskstats output'),
+  packagePaths: z.string().optional().describe('pm path output for packageName'),
+  packageDataUsage: z.string().optional().describe('du output for /data/data/<package>'),
+  packageMediaUsage: z.string().optional().describe('du output for /sdcard/Android/data/<package>'),
+});
+
+export const CaptureCrashSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  packageName: z.string().optional().describe('Package name used for filtered crash logs'),
+  crashBuffer: z.string().describe('logcat crash buffer output'),
+  activityCrashes: z.string().describe('dumpsys activity crashes output'),
+  packageCrashLog: GetLogcatOutputSchema.optional().describe('Optional package-filtered logcat snapshot'),
+  anrTraces: z.string().optional().describe('Optional /data/anr/traces.txt tail'),
+  tombstones: z.string().optional().describe('Optional tombstone listing'),
+  dropboxCrashes: z.string().optional().describe('Optional dumpsys dropbox crash output'),
+});
+
 export const CreateIssueInputSchema = z.object({
   repo: z.string().optional().describe('GitHub repo in owner/name format.'),
   title: z.string().min(1).describe('Issue title.'),
@@ -4634,6 +4780,153 @@ export const CollectDiagnosticsToolSchema = {
   required: [] as string[],
 };
 
+export const CapturePerformanceSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: {
+      type: 'string' as const,
+      description: 'Optional package name for app-scoped perf stats.',
+    },
+    topLines: {
+      type: 'number' as const,
+      description: 'Number of lines to keep from top output.',
+      default: 60,
+    },
+    includeMeminfo: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys meminfo output.',
+      default: true,
+    },
+    includeGfxInfo: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys gfxinfo framestats (requires packageName).',
+      default: true,
+    },
+    includeCpuInfo: {
+      type: 'boolean' as const,
+      description: 'Include /proc/cpuinfo output.',
+      default: false,
+    },
+    includeCpuFreq: {
+      type: 'boolean' as const,
+      description: 'Include current CPU frequency snapshot for all cores.',
+      default: true,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CaptureBatterySnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    includeHistory: {
+      type: 'boolean' as const,
+      description: 'Include batterystats history tail.',
+      default: false,
+    },
+    historyLines: {
+      type: 'number' as const,
+      description: 'Lines to keep when includeHistory is true.',
+      default: 300,
+    },
+    resetStats: {
+      type: 'boolean' as const,
+      description: 'Reset batterystats after capture.',
+      default: false,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CaptureNetworkSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    includeWifi: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys wifi snapshot.',
+      default: true,
+    },
+    includeConnectivity: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys connectivity snapshot.',
+      default: true,
+    },
+    includeNetstats: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys netstats summary.',
+      default: true,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CaptureStorageSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: {
+      type: 'string' as const,
+      description: 'Optional package name for package-specific storage usage probes.',
+    },
+    includePackageUsage: {
+      type: 'boolean' as const,
+      description: 'Attempt to include app data/media usage for packageName.',
+      default: true,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CaptureCrashSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: {
+      type: 'string' as const,
+      description: 'Optional package name for filtered crash logs.',
+    },
+    logcatLines: {
+      type: 'number' as const,
+      description: 'Lines to capture from crash buffers/logcat.',
+      default: 500,
+    },
+    includeAnrTraces: {
+      type: 'boolean' as const,
+      description: 'Include /data/anr/traces.txt tail.',
+      default: true,
+    },
+    includeTombstones: {
+      type: 'boolean' as const,
+      description: 'Include tombstone file listing.',
+      default: true,
+    },
+    includeDropBox: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys dropbox crash entries (can be large).',
+      default: false,
+    },
+  },
+  required: [] as string[],
+};
+
 // Type exports
 export type TakeScreenshotInput = z.infer<typeof TakeScreenshotInputSchema>;
 export type ListDevicesInput = z.infer<typeof ListDevicesInputSchema>;
@@ -4820,5 +5113,15 @@ export type CaptureBugreportInput = z.infer<typeof CaptureBugreportInputSchema>;
 export type CaptureBugreportOutput = z.infer<typeof CaptureBugreportOutputSchema>;
 export type CollectDiagnosticsInput = z.infer<typeof CollectDiagnosticsInputSchema>;
 export type CollectDiagnosticsOutput = z.infer<typeof CollectDiagnosticsOutputSchema>;
+export type CapturePerformanceSnapshotInput = z.infer<typeof CapturePerformanceSnapshotInputSchema>;
+export type CapturePerformanceSnapshotOutput = z.infer<typeof CapturePerformanceSnapshotOutputSchema>;
+export type CaptureBatterySnapshotInput = z.infer<typeof CaptureBatterySnapshotInputSchema>;
+export type CaptureBatterySnapshotOutput = z.infer<typeof CaptureBatterySnapshotOutputSchema>;
+export type CaptureNetworkSnapshotInput = z.infer<typeof CaptureNetworkSnapshotInputSchema>;
+export type CaptureNetworkSnapshotOutput = z.infer<typeof CaptureNetworkSnapshotOutputSchema>;
+export type CaptureStorageSnapshotInput = z.infer<typeof CaptureStorageSnapshotInputSchema>;
+export type CaptureStorageSnapshotOutput = z.infer<typeof CaptureStorageSnapshotOutputSchema>;
+export type CaptureCrashSnapshotInput = z.infer<typeof CaptureCrashSnapshotInputSchema>;
+export type CaptureCrashSnapshotOutput = z.infer<typeof CaptureCrashSnapshotOutputSchema>;
 export type CreateIssueInput = z.infer<typeof CreateIssueInputSchema>;
 export type CreateIssueOutput = z.infer<typeof CreateIssueOutputSchema>;

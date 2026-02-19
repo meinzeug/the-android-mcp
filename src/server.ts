@@ -282,6 +282,21 @@ import {
   CollectDiagnosticsInputSchema,
   CollectDiagnosticsOutputSchema,
   CollectDiagnosticsToolSchema,
+  CapturePerformanceSnapshotInputSchema,
+  CapturePerformanceSnapshotOutputSchema,
+  CapturePerformanceSnapshotToolSchema,
+  CaptureBatterySnapshotInputSchema,
+  CaptureBatterySnapshotOutputSchema,
+  CaptureBatterySnapshotToolSchema,
+  CaptureNetworkSnapshotInputSchema,
+  CaptureNetworkSnapshotOutputSchema,
+  CaptureNetworkSnapshotToolSchema,
+  CaptureStorageSnapshotInputSchema,
+  CaptureStorageSnapshotOutputSchema,
+  CaptureStorageSnapshotToolSchema,
+  CaptureCrashSnapshotInputSchema,
+  CaptureCrashSnapshotOutputSchema,
+  CaptureCrashSnapshotToolSchema,
   CreateIssueInputSchema,
   CreateIssueOutputSchema,
   CreateIssueToolSchema,
@@ -304,6 +319,11 @@ import {
   recordAndroidScreen as adbRecordAndroidScreen,
   captureAndroidBugreport as adbCaptureAndroidBugreport,
   collectAndroidDiagnostics as adbCollectAndroidDiagnostics,
+  captureAndroidPerformanceSnapshot as adbCaptureAndroidPerformanceSnapshot,
+  captureAndroidBatterySnapshot as adbCaptureAndroidBatterySnapshot,
+  captureAndroidNetworkSnapshot as adbCaptureAndroidNetworkSnapshot,
+  captureAndroidStorageSnapshot as adbCaptureAndroidStorageSnapshot,
+  captureAndroidCrashSnapshot as adbCaptureAndroidCrashSnapshot,
   listPackageActivities as adbListPackageActivities,
   batchInputActions as adbBatchInputActions,
   reversePort as adbReversePort,
@@ -861,6 +881,31 @@ class AndroidMcpServer {
           inputSchema: CollectDiagnosticsToolSchema,
         },
         {
+          name: 'capture_android_performance_snapshot',
+          description: 'Capture top/mem/gfx/cpu performance snapshots from the device',
+          inputSchema: CapturePerformanceSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_battery_snapshot',
+          description: 'Capture battery, batterystats, and optional battery history snapshots',
+          inputSchema: CaptureBatterySnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_network_snapshot',
+          description: 'Capture IP, route, DNS, wifi, connectivity, and netstats snapshots',
+          inputSchema: CaptureNetworkSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_storage_snapshot',
+          description: 'Capture filesystem/diskstats and optional package storage usage snapshots',
+          inputSchema: CaptureStorageSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_crash_snapshot',
+          description: 'Capture crash buffers, activity crashes, ANR/tombstone snapshots',
+          inputSchema: CaptureCrashSnapshotToolSchema,
+        },
+        {
           name: 'create_github_issue',
           description: 'Create a GitHub issue in meinzeug/the-android-mcp (or any repo)',
           inputSchema: CreateIssueToolSchema,
@@ -889,6 +934,10 @@ class AndroidMcpServer {
                   type: 'text',
                   text: `Android screenshot captured from ${result.deviceId}: ${result.width}x${result.height} pixels`,
                 },
+                {
+                  type: 'text',
+                  text: `Update hint: run npm install -g the-android-mcp@latest`,
+                },
               ],
             };
           }
@@ -900,7 +949,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -913,7 +962,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -926,7 +975,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -939,7 +988,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -952,7 +1001,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -965,7 +1014,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -978,7 +1027,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -991,7 +1040,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1004,7 +1053,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1017,7 +1066,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1030,7 +1079,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1043,7 +1092,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1056,7 +1105,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1069,7 +1118,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1082,7 +1131,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1095,7 +1144,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1108,7 +1157,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1121,7 +1170,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1134,7 +1183,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1147,7 +1196,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1160,7 +1209,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1173,7 +1222,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1186,7 +1235,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1199,7 +1248,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1212,7 +1261,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1225,7 +1274,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1238,7 +1287,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1251,7 +1300,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1264,7 +1313,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1277,7 +1326,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1290,7 +1339,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1303,7 +1352,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1316,7 +1365,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1329,7 +1378,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1342,7 +1391,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1355,7 +1404,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1368,7 +1417,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1381,7 +1430,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1394,7 +1443,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1406,7 +1455,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1418,7 +1467,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1431,7 +1480,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1444,7 +1493,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1508,7 +1557,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1521,7 +1570,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1534,7 +1583,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1607,7 +1656,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1620,7 +1669,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1633,7 +1682,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1646,7 +1695,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1659,7 +1708,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1672,7 +1721,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1685,7 +1734,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1698,7 +1747,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1711,7 +1760,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1724,7 +1773,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1737,7 +1786,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1750,7 +1799,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1763,7 +1812,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1776,7 +1825,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1789,7 +1838,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1802,7 +1851,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1814,7 +1863,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1827,7 +1876,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1840,7 +1889,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1853,7 +1902,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1866,7 +1915,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1879,7 +1928,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1892,7 +1941,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1905,7 +1954,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1918,7 +1967,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1931,7 +1980,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1944,7 +1993,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1957,7 +2006,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1970,7 +2019,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1983,7 +2032,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -1996,7 +2045,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -2009,7 +2058,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -2022,7 +2071,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -2035,7 +2084,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -2048,7 +2097,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -2061,7 +2110,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -2074,7 +2123,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -2087,7 +2136,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -2100,7 +2149,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -2113,7 +2162,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -2126,7 +2175,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -2139,7 +2188,72 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_performance_snapshot': {
+            const input = CapturePerformanceSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidPerformanceSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_battery_snapshot': {
+            const input = CaptureBatterySnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidBatterySnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_network_snapshot': {
+            const input = CaptureNetworkSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidNetworkSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_storage_snapshot': {
+            const input = CaptureStorageSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidStorageSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_crash_snapshot': {
+            const input = CaptureCrashSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidCrashSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -2152,7 +2266,7 @@ class AndroidMcpServer {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(result),
+                  text: this.withUpdateReminder(result),
                 },
               ],
             };
@@ -3483,6 +3597,70 @@ class AndroidMcpServer {
     return CollectDiagnosticsOutputSchema.parse(result);
   }
 
+  private async captureAndroidPerformanceSnapshot(
+    input: z.infer<typeof CapturePerformanceSnapshotInputSchema>
+  ): Promise<z.infer<typeof CapturePerformanceSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidPerformanceSnapshot({
+      deviceId: input.deviceId,
+      packageName: input.packageName,
+      topLines: input.topLines,
+      includeMeminfo: input.includeMeminfo,
+      includeGfxInfo: input.includeGfxInfo,
+      includeCpuInfo: input.includeCpuInfo,
+      includeCpuFreq: input.includeCpuFreq,
+    });
+    return CapturePerformanceSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidBatterySnapshot(
+    input: z.infer<typeof CaptureBatterySnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureBatterySnapshotOutputSchema>> {
+    const result = adbCaptureAndroidBatterySnapshot({
+      deviceId: input.deviceId,
+      includeHistory: input.includeHistory,
+      historyLines: input.historyLines,
+      resetStats: input.resetStats,
+    });
+    return CaptureBatterySnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidNetworkSnapshot(
+    input: z.infer<typeof CaptureNetworkSnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureNetworkSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidNetworkSnapshot({
+      deviceId: input.deviceId,
+      includeWifi: input.includeWifi,
+      includeConnectivity: input.includeConnectivity,
+      includeNetstats: input.includeNetstats,
+    });
+    return CaptureNetworkSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidStorageSnapshot(
+    input: z.infer<typeof CaptureStorageSnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureStorageSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidStorageSnapshot({
+      deviceId: input.deviceId,
+      packageName: input.packageName,
+      includePackageUsage: input.includePackageUsage,
+    });
+    return CaptureStorageSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidCrashSnapshot(
+    input: z.infer<typeof CaptureCrashSnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureCrashSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidCrashSnapshot({
+      deviceId: input.deviceId,
+      packageName: input.packageName,
+      logcatLines: input.logcatLines,
+      includeAnrTraces: input.includeAnrTraces,
+      includeTombstones: input.includeTombstones,
+      includeDropBox: input.includeDropBox,
+    });
+    return CaptureCrashSnapshotOutputSchema.parse(result);
+  }
+
   private async createGitHubIssue(
     input: z.infer<typeof CreateIssueInputSchema>
   ): Promise<z.infer<typeof CreateIssueOutputSchema>> {
@@ -3495,6 +3673,11 @@ class AndroidMcpServer {
       dryRun: input.dryRun,
     });
     return CreateIssueOutputSchema.parse(result);
+  }
+
+  private withUpdateReminder(result: unknown): string {
+    const reminder = '\n\nUpdate hint: npm install -g the-android-mcp@latest';
+    return `${JSON.stringify(result)}${reminder}`;
   }
 
   async run(): Promise<void> {
