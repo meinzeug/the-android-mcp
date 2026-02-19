@@ -24,6 +24,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.12.0] - 2026-02-19
+### Added
+- New audit and diagnostics backend workflows:
+- `GET /api/audit/export`
+- `GET /api/diagnostics/report`
+- New runbook automation workflows:
+- `POST /api/runbook/batch`
+- Audited runbook execution tracking in session and ops payloads.
+- New queue orchestration workflow:
+- `POST /api/jobs/clone-lane`
+- New schedule execution control:
+- `POST /api/schedules/:id/run-now`
+- New alert lifecycle workflow:
+- `POST /api/alerts/incidents/prune`
+- New Web UI controls for audit export, diagnostics report, runbook batch execution, lane clone, schedule run-now, and incident prune.
+
+### Improved
+- Runbook execution telemetry is now persisted in exported session context and surfaced in the ops board.
+- Baseline and alert workflows are now integrated deeper into realtime operator feedback paths.
+
 ## [3.11.0] - 2026-02-19
 ### Added
 - New device baseline workflows:

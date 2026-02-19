@@ -199,6 +199,16 @@ interface DeviceBaseline {
   profile: JsonObject;
 }
 
+interface RunbookExecution {
+  id: number;
+  name: string;
+  at: string;
+  deviceId?: string;
+  ok: boolean;
+  durationMs: number;
+  error?: string;
+}
+
 const serverStartedAt = Date.now();
 let eventSeq = 1;
 let jobSeq = 1;
@@ -206,6 +216,7 @@ let timelineSeq = 1;
 let scheduleSeq = 1;
 let alertRuleSeq = 1;
 let alertIncidentSeq = 1;
+let runbookExecutionSeq = 1;
 
 const eventHistory: UiEvent[] = [];
 const dashboardTimeline: TimelinePoint[] = [];
@@ -234,6 +245,7 @@ let alertRules: Record<number, AlertRule> = loadAlertRules();
 const alertIncidents: AlertIncident[] = [];
 let schedulesInitialized = false;
 let deviceBaselines: Record<string, DeviceBaseline> = loadDeviceBaselines();
+const runbookExecutions: RunbookExecution[] = [];
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -2429,6 +2441,241 @@ function runOpsRunbook(body: JsonObject): JsonObject {
   throw new Error(`Unknown runbook '${name}'`);
 }
 
+function appendRunbookExecution(entry: {
+  name: string;
+  deviceId?: string;
+  ok: boolean;
+  durationMs: number;
+  error?: string;
+}): RunbookExecution {
+  const item: RunbookExecution = {
+    id: runbookExecutionSeq++,
+    name: entry.name,
+    at: nowIso(),
+    deviceId: entry.deviceId,
+    ok: entry.ok,
+    durationMs: entry.durationMs,
+    error: entry.error,
+  };
+  runbookExecutions.push(item);
+  if (runbookExecutions.length > 600) {
+    runbookExecutions.splice(0, runbookExecutions.length - 600);
+  }
+  return item;
+}
+
+function executeRunbookAudited(body: JsonObject): JsonObject {
+  const startedAt = Date.now();
+  const runbookName = typeof body.name === 'string' ? body.name : 'unknown';
+  const deviceId = extractDeviceId(body);
+  try {
+    const result = runOpsRunbook(body);
+    appendRunbookExecution({
+      name: runbookName,
+      deviceId,
+      ok: true,
+      durationMs: Date.now() - startedAt,
+    });
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendRunbookExecution({
+      name: runbookName,
+      deviceId,
+      ok: false,
+      durationMs: Date.now() - startedAt,
+      error: message,
+    });
+    throw error;
+  }
+}
+
+function runRunbookBatch(body: JsonObject): JsonObject {
+  const items = Array.isArray(body.items) ? body.items : [];
+  if (items.length === 0) {
+    throw new Error('items must be a non-empty array');
+  }
+  const continueOnError = body.continueOnError === true;
+  const deviceId = extractDeviceId(body);
+  const packageName = typeof body.packageName === 'string' ? body.packageName : 'com.android.chrome';
+  const results: JsonObject[] = [];
+  const errors: JsonObject[] = [];
+
+  for (let index = 0; index < items.length; index += 1) {
+    const itemRaw = items[index];
+    if (!itemRaw || typeof itemRaw !== 'object') {
+      errors.push({ index, error: 'item must be object' });
+      if (!continueOnError) {
+        break;
+      }
+      continue;
+    }
+    const item = itemRaw as Record<string, unknown>;
+    const runbookName = typeof item.name === 'string' ? item.name.trim() : '';
+    if (!runbookName) {
+      errors.push({ index, error: 'name is required' });
+      if (!continueOnError) {
+        break;
+      }
+      continue;
+    }
+    const payload: JsonObject = {
+      ...(item as JsonObject),
+      name: runbookName,
+      deviceId: typeof item.deviceId === 'string' ? item.deviceId : deviceId,
+      packageName: typeof item.packageName === 'string' ? item.packageName : packageName,
+    };
+    try {
+      const result = executeRunbookAudited(payload);
+      results.push({
+        index,
+        name: runbookName,
+        ok: true,
+        result,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push({
+        index,
+        name: runbookName,
+        error: message,
+      });
+      if (!continueOnError) {
+        break;
+      }
+    }
+  }
+
+  pushEvent('runbook-batch', 'Runbook batch executed', {
+    total: items.length,
+    success: results.length,
+    errors: errors.length,
+    continueOnError,
+  });
+
+  return {
+    ok: errors.length === 0,
+    continueOnError,
+    total: items.length,
+    success: results.length,
+    errors: errors.length,
+    results,
+    failures: errors,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function pruneAlertIncidents(body: JsonObject): JsonObject {
+  const before = alertIncidents.length;
+  const keepLatest = clampInt(body.keepLatest, 120, 0, 3000);
+  const olderThanMs = clampInt(body.olderThanMs, 0, 0, 365 * 24 * 60 * 60 * 1000);
+  const now = Date.now();
+
+  const keepIds = new Set(
+    keepLatest > 0 ? alertIncidents.slice(-keepLatest).map(item => item.id) : []
+  );
+
+  const next = alertIncidents.filter(item => {
+    if (keepIds.has(item.id)) {
+      return true;
+    }
+    if (olderThanMs <= 0) {
+      return false;
+    }
+    const atMs = Date.parse(item.at);
+    if (!Number.isFinite(atMs)) {
+      return false;
+    }
+    return now - atMs <= olderThanMs;
+  });
+
+  alertIncidents.splice(0, alertIncidents.length, ...next);
+  const removed = before - alertIncidents.length;
+  pushEvent('alert-incidents-pruned', 'Alert incidents pruned', {
+    removed,
+    keepLatest,
+    olderThanMs,
+  });
+  return {
+    ok: true,
+    before,
+    after: alertIncidents.length,
+    removed,
+    keepLatest,
+    olderThanMs,
+  };
+}
+
+function cloneLaneQueue(body: JsonObject): JsonObject {
+  const sourceLaneId = typeof body.sourceLaneId === 'string' ? body.sourceLaneId.trim() : '';
+  if (!sourceLaneId) {
+    throw new Error('sourceLaneId is required');
+  }
+  const sourceLane = lanes[sourceLaneId];
+  if (!sourceLane) {
+    throw new Error(`source lane '${sourceLaneId}' not found`);
+  }
+  const targetDeviceId = typeof body.targetDeviceId === 'string' && body.targetDeviceId.trim().length > 0
+    ? body.targetDeviceId.trim()
+    : undefined;
+  const targetLaneId = typeof body.targetLaneId === 'string' && body.targetLaneId.trim().length > 0
+    ? body.targetLaneId.trim()
+    : undefined;
+
+  let targetLane: LaneState;
+  if (targetLaneId) {
+    targetLane = lanes[targetLaneId] || (targetLaneId.startsWith('device:')
+      ? resolveLaneForDevice(targetLaneId.slice('device:'.length))
+      : (() => {
+          throw new Error(`target lane '${targetLaneId}' not found`);
+        })());
+  } else {
+    targetLane = resolveLaneForDevice(targetDeviceId);
+  }
+
+  const sourceJobs = sourceLane.queue
+    .map(id => getJobById(id))
+    .filter((job): job is JobRecord => Boolean(job && job.status === 'queued'));
+
+  const created: JobRecord[] = [];
+  for (const item of sourceJobs) {
+    const input = JSON.parse(JSON.stringify(item.input)) as JsonObject;
+    if (targetLane.deviceId && !input.deviceId) {
+      input.deviceId = targetLane.deviceId;
+    }
+    created.push(createJob(item.type, input));
+  }
+
+  pushEvent('lane-queue-cloned', 'Queued jobs cloned to target lane', {
+    sourceLaneId: sourceLane.id,
+    targetLaneId: targetLane.id,
+    created: created.length,
+  });
+
+  return {
+    ok: true,
+    sourceLaneId: sourceLane.id,
+    targetLaneId: targetLane.id,
+    clonedCount: created.length,
+    jobs: created,
+  };
+}
+
+function buildAuditExport(host: string, port: number): JsonObject {
+  return {
+    ok: true,
+    exportedAt: nowIso(),
+    endpoint: `http://${host}:${port}`,
+    state: buildStatePayload(host, port),
+    policy: getPolicyPayload(),
+    runbookExecutions: runbookExecutions.slice(-300),
+    alertIncidents: listAlertIncidents(300),
+    schedules: schedulesList(),
+    timeline: dashboardTimeline.slice(-300),
+    updateHint: UPDATE_HINT,
+  };
+}
+
 function saveDeviceBaseline(nameRaw: string, body: JsonObject): DeviceBaseline {
   const name = nameRaw.trim();
   if (!name) {
@@ -2755,13 +3002,13 @@ function stopSchedule(id: number): ScheduleTask | undefined {
   return task;
 }
 
-async function executeSchedule(task: ScheduleTask): Promise<void> {
+async function executeSchedule(task: ScheduleTask, trigger: 'timer' | 'manual' = 'timer'): Promise<void> {
   if (scheduleRunning[task.id]) {
     return;
   }
   scheduleRunning[task.id] = true;
   try {
-    runOpsRunbook({
+    executeRunbookAudited({
       name: task.runbook,
       deviceId: task.deviceId,
       packageName: 'com.android.chrome',
@@ -2778,6 +3025,7 @@ async function executeSchedule(task: ScheduleTask): Promise<void> {
       name: task.name,
       runbook: task.runbook,
       runs: task.runs,
+      trigger,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -3206,6 +3454,7 @@ function buildQueueBoard(): JsonObject {
 function resetSession(options: { keepWorkflows?: boolean }): void {
   eventHistory.splice(0, eventHistory.length);
   dashboardTimeline.splice(0, dashboardTimeline.length);
+  runbookExecutions.splice(0, runbookExecutions.length);
   activeRecorder = null;
   for (const id of Object.keys(scheduleTimers)) {
     clearInterval(scheduleTimers[Number(id)]);
@@ -3338,6 +3587,8 @@ function buildStatePayload(host: string, port: number): JsonObject {
     queuePresetCount: Object.keys(queuePresets).length,
     recorderSessionCount: Object.keys(recorderSessions).length + (activeRecorder ? 1 : 0),
     scheduleCount: Object.keys(schedules).length,
+    baselineCount: Object.keys(deviceBaselines).length,
+    runbookExecutionCount: runbookExecutions.length,
     laneCount: totals.laneCount,
     pausedLaneCount: totals.pausedLaneCount,
     activeLaneCount: totals.activeLaneCount,
@@ -3405,6 +3656,7 @@ function buildOpsBoard(host: string, port: number): JsonObject {
       incidents: listAlertIncidents(40),
     },
     schedules: schedulesList(),
+    runbookExecutions: runbookExecutions.slice(-40),
     updateHint: UPDATE_HINT,
   };
 }
@@ -3448,6 +3700,8 @@ function buildSessionExport(): JsonObject {
       rules: alertRules,
       incidents: alertIncidents,
     },
+    runbookExecutions,
+    deviceBaselines,
     lanes: lanesSummary(),
     jobs,
     metrics: buildMetricsPayload(),
@@ -3620,6 +3874,14 @@ async function handleApi(
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/alerts/incidents/prune') {
+    await withMetric('alerts-incidents-prune', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, pruneAlertIncidents(body));
+    });
+    return;
+  }
+
   if (method === 'GET' && pathname === '/api/dashboard') {
     await withMetric('dashboard', () => {
       sendJson(response, 200, buildDashboardPayload(context.host, context.port));
@@ -3637,6 +3899,13 @@ async function handleApi(
   if (method === 'GET' && pathname === '/api/diagnostics/report') {
     await withMetric('diagnostics-report', () => {
       sendJson(response, 200, buildDiagnosticsReport(context.host, context.port));
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/audit/export') {
+    await withMetric('audit-export', () => {
+      sendJson(response, 200, buildAuditExport(context.host, context.port));
     });
     return;
   }
@@ -4126,6 +4395,20 @@ async function handleApi(
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/jobs/clone-lane') {
+    await withMetric('jobs-clone-lane', async () => {
+      const body = await readJsonBody(request);
+      try {
+        const result = cloneLaneQueue(body);
+        sendJson(response, 200, result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
   if (method === 'POST' && pathname === '/api/jobs/retry-failed') {
     await withMetric('jobs-retry-failed', async () => {
       const body = await readJsonBody(request);
@@ -4583,7 +4866,21 @@ async function handleApi(
     await withMetric('runbook-run', async () => {
       const body = await readJsonBody(request);
       try {
-        const result = runOpsRunbook(body);
+        const result = executeRunbookAudited(body);
+        sendJson(response, 200, result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/runbook/batch') {
+    await withMetric('runbook-batch', async () => {
+      const body = await readJsonBody(request);
+      try {
+        const result = runRunbookBatch(body);
         sendJson(response, 200, result);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -4652,6 +4949,20 @@ async function handleApi(
         sendJson(response, 404, { error: `schedule ${id} not found` });
         return;
       }
+      sendJson(response, 200, { ok: true, schedule: task });
+    });
+    return;
+  }
+
+  if (method === 'POST' && /^\/api\/schedules\/\d+\/run-now$/.test(pathname)) {
+    await withMetric('schedules-run-now', async () => {
+      const id = Number(pathname.split('/')[3]);
+      const task = schedules[id];
+      if (!task) {
+        sendJson(response, 404, { error: `schedule ${id} not found` });
+        return;
+      }
+      await executeSchedule(task, 'manual');
       sendJson(response, 200, { ok: true, schedule: task });
     });
     return;
@@ -5150,6 +5461,25 @@ https://developer.android.com</textarea>
             <button class="w" id="alerts-ack-all-btn">Ack all incidents</button>
             <button class="s" id="diagnostics-report-btn">Load diagnostics report</button>
           </div>
+          <textarea id="runbook-batch-items">[
+  {"name":"smoke-now"},
+  {"name":"recover-lane"}
+]</textarea>
+          <button class="p" id="runbook-batch-btn">Run runbook batch</button>
+          <div class="split">
+            <input id="clone-source-lane" placeholder="source lane id" />
+            <input id="clone-target-device" placeholder="target device id" />
+          </div>
+          <button class="s" id="clone-lane-btn">Clone lane queue</button>
+          <div class="split">
+            <input id="incidents-keep-latest" type="number" min="0" value="120" />
+            <input id="incidents-older-than" type="number" min="0" value="0" />
+          </div>
+          <button class="w" id="incidents-prune-btn">Prune incidents</button>
+          <div class="split">
+            <button class="p" id="schedule-run-now-btn">Run schedule now</button>
+            <button class="s" id="audit-export-btn">Export audit</button>
+          </div>
         </article>
 
         <article class="card stack">
@@ -5240,6 +5570,11 @@ https://developer.android.com</textarea>
       const $alerts = document.getElementById('alerts');
       const $queueImportExport = document.getElementById('queue-import-export');
       const $baselineName = document.getElementById('baseline-name');
+      const $runbookBatchItems = document.getElementById('runbook-batch-items');
+      const $cloneSourceLane = document.getElementById('clone-source-lane');
+      const $cloneTargetDevice = document.getElementById('clone-target-device');
+      const $incidentsKeepLatest = document.getElementById('incidents-keep-latest');
+      const $incidentsOlderThan = document.getElementById('incidents-older-than');
 
       function setMessage(text, isError) {
         $message.textContent = text;
@@ -5656,6 +5991,9 @@ https://developer.android.com</textarea>
         if (state.deviceId) {
           $deviceSelect.value = state.deviceId;
           $devicePill.textContent = 'device: ' + state.deviceId;
+          if (!$cloneSourceLane.value || !$cloneSourceLane.value.trim()) {
+            $cloneSourceLane.value = 'device:' + state.deviceId;
+          }
         } else {
           $devicePill.textContent = 'device: none';
         }
@@ -6440,6 +6778,65 @@ https://developer.android.com</textarea>
         setMessage('Diagnostics report loaded', false);
       }
 
+      async function runRunbookBatchUi() {
+        let items;
+        try {
+          items = JSON.parse($runbookBatchItems.value || '[]');
+        } catch (error) {
+          throw new Error('runbook batch items must be valid JSON array');
+        }
+        const result = await api('/api/runbook/batch', 'POST', {
+          items: Array.isArray(items) ? items : [],
+          continueOnError: true,
+          deviceId: selectedDeviceId(),
+          packageName: 'com.android.chrome',
+        });
+        renderOutput(result);
+        setMessage('Runbook batch executed', false);
+        await refreshJobsAndLanes();
+      }
+
+      async function cloneLaneQueueUi() {
+        const sourceLaneId = ($cloneSourceLane.value || '').trim() || (selectedDeviceId() ? 'device:' + selectedDeviceId() : '');
+        if (!sourceLaneId) {
+          throw new Error('source lane id required');
+        }
+        const result = await api('/api/jobs/clone-lane', 'POST', {
+          sourceLaneId,
+          targetDeviceId: ($cloneTargetDevice.value || '').trim() || undefined,
+        });
+        renderOutput(result);
+        setMessage('Lane queue cloned', false);
+        await refreshJobsAndLanes();
+      }
+
+      async function pruneIncidentsUi() {
+        const result = await api('/api/alerts/incidents/prune', 'POST', {
+          keepLatest: Number($incidentsKeepLatest.value || '120'),
+          olderThanMs: Number($incidentsOlderThan.value || '0'),
+        });
+        renderOutput(result);
+        setMessage('Incidents pruned', false);
+        await loadAlertsUi();
+      }
+
+      async function runScheduleNowUi() {
+        const id = Number($scheduleId.value || '0');
+        if (!id) {
+          throw new Error('schedule id required');
+        }
+        const result = await api('/api/schedules/' + id + '/run-now', 'POST', {});
+        renderOutput(result);
+        setMessage('Schedule executed now', false);
+        await listSchedulesUi();
+      }
+
+      async function exportAuditUi() {
+        const result = await api('/api/audit/export');
+        renderOutput(result);
+        setMessage('Audit exported', false);
+      }
+
       document.getElementById('open-url-btn').addEventListener('click', async function () {
         try { await openUrl($urlInput.value); } catch (error) { setMessage(String(error), true); }
       });
@@ -6628,6 +7025,21 @@ https://developer.android.com</textarea>
       });
       document.getElementById('diagnostics-report-btn').addEventListener('click', async function () {
         try { await loadDiagnosticsReportUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('runbook-batch-btn').addEventListener('click', async function () {
+        try { await runRunbookBatchUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('clone-lane-btn').addEventListener('click', async function () {
+        try { await cloneLaneQueueUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('incidents-prune-btn').addEventListener('click', async function () {
+        try { await pruneIncidentsUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('schedule-run-now-btn').addEventListener('click', async function () {
+        try { await runScheduleNowUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('audit-export-btn').addEventListener('click', async function () {
+        try { await exportAuditUi(); } catch (error) { setMessage(String(error), true); }
       });
       document.getElementById('clear-output-btn').addEventListener('click', function () {
         renderOutput({});
