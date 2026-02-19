@@ -24,6 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.0.0] - 2026-02-19
+### Added
+- `capture_android_radio_snapshot`: radio state + wifi/telephony/bluetooth/IP/connectivity diagnostics in one call.
+- `capture_android_display_snapshot`: display/window/SurfaceFlinger + brightness/rotation/timeout state snapshot.
+- `capture_android_location_snapshot`: location mode/providers/mock-location + optional package app-ops diagnostics.
+- `capture_android_power_idle_snapshot`: battery/power/deviceidle/thermal + batterystats snapshot for doze/power debugging.
+- `capture_android_package_inventory_snapshot`: package inventory counts/lists with optional paths and device feature snapshot.
+- New local Web UI server on `http://127.0.0.1:50000` with live device list, URL launcher, and one-click v3 snapshot actions.
+- New npm binary `the-android-mcp-web-ui` for manual Web UI startup.
+- New `ROADMAP_V3.md` with structured milestones toward the full v3 platform rollout.
+
+### Improved
+- New snapshot tools return the same update reminder (`npm install -g the-android-mcp@latest`) in tool output.
+- `postinstall` now auto-starts the Web UI on npm install (skip with `THE_ANDROID_MCP_NO_WEB_UI_AUTOSTART=1`).
+
 ## [2.5.0] - 2026-02-19
 ### Added
 - `capture_android_security_snapshot`: SELinux/developer options/package verifier posture + optional policy/user/app-ops data.

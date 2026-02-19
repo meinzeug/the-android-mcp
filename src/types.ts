@@ -889,6 +889,79 @@ export const CaptureInputSnapshotInputSchema = z.object({
   includeImeList: z.boolean().default(true).describe('Include IME list and current IME snapshots.'),
 });
 
+export const CaptureRadioSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  includeWifiDump: z.boolean().default(true).describe('Include dumpsys wifi snapshot.'),
+  includeTelephonyDump: z.boolean().default(true).describe('Include telephony registry snapshot.'),
+  includeBluetoothDump: z.boolean().default(true).describe('Include bluetooth manager snapshot.'),
+  includeIpState: z.boolean().default(true).describe('Include IP address and route snapshots.'),
+  includeConnectivityDump: z.boolean().default(true).describe('Include connectivity manager snapshot.'),
+});
+
+export const CaptureDisplaySnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  includeDisplayDump: z.boolean().default(true).describe('Include dumpsys display snapshot.'),
+  includeWindowDump: z.boolean().default(true).describe('Include dumpsys window snapshot.'),
+  includeSurfaceFlinger: z
+    .boolean()
+    .default(true)
+    .describe('Include SurfaceFlinger display metadata snapshot.'),
+});
+
+export const CaptureLocationSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  packageName: z.string().optional().describe('Optional package name for location app-ops snapshot.'),
+  includeLocationDump: z.boolean().default(true).describe('Include dumpsys location snapshot.'),
+  includeLocationAppOps: z
+    .boolean()
+    .default(true)
+    .describe('Include app-ops snapshot for packageName.'),
+});
+
+export const CapturePowerIdleSnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  includePowerDump: z.boolean().default(true).describe('Include dumpsys power snapshot.'),
+  includeDeviceIdle: z.boolean().default(true).describe('Include dumpsys deviceidle snapshot.'),
+  includeBatteryStats: z.boolean().default(true).describe('Include dumpsys batterystats snapshot.'),
+  includeThermal: z.boolean().default(true).describe('Include dumpsys thermalservice snapshot.'),
+  batteryStatsLines: z
+    .number()
+    .int()
+    .positive()
+    .default(600)
+    .describe('Maximum lines for batterystats snapshot.'),
+});
+
+export const CapturePackageInventorySnapshotInputSchema = z.object({
+  deviceId: z
+    .string()
+    .optional()
+    .describe('Optional device ID. If not provided, uses the first available device.'),
+  includeThirdParty: z.boolean().default(true).describe('Include third-party package list.'),
+  includeSystem: z.boolean().default(true).describe('Include system package list.'),
+  includeDisabled: z.boolean().default(true).describe('Include disabled package list.'),
+  includePackagePaths: z.boolean().default(false).describe('Include package paths list (pm -f).'),
+  includeFeatures: z.boolean().default(true).describe('Include device feature list.'),
+  packageListLines: z
+    .number()
+    .int()
+    .positive()
+    .default(1500)
+    .describe('Maximum lines for package list snapshots.'),
+});
+
 // Tool output schemas
 export const TakeScreenshotOutputSchema = z.object({
   data: z.string().describe('Base64 encoded image data'),
@@ -3058,6 +3131,72 @@ export const CaptureInputSnapshotOutputSchema = z.object({
   imeList: z.string().optional().describe('Optional IME list snapshot'),
   currentIme: z.string().optional().describe('Optional current default IME snapshot'),
   windowPolicy: z.string().optional().describe('Optional window policy snapshot'),
+});
+
+export const CaptureRadioSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  wifiEnabled: z.string().describe('Global wifi_on setting snapshot'),
+  mobileDataEnabled: z.string().describe('Global mobile_data setting snapshot'),
+  airplaneMode: z.string().describe('Global airplane_mode_on setting snapshot'),
+  bluetoothEnabled: z.string().describe('Global bluetooth_on setting snapshot'),
+  wifiDump: z.string().optional().describe('Optional dumpsys wifi snapshot'),
+  telephony: z.string().optional().describe('Optional telephony registry snapshot'),
+  bluetooth: z.string().optional().describe('Optional bluetooth manager snapshot'),
+  ipAddress: z.string().optional().describe('Optional IP address snapshot'),
+  ipRoute: z.string().optional().describe('Optional IP route snapshot'),
+  connectivity: z.string().optional().describe('Optional connectivity manager snapshot'),
+});
+
+export const CaptureDisplaySnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  wmSize: z.string().describe('Window manager size snapshot'),
+  wmDensity: z.string().describe('Window manager density snapshot'),
+  userRotation: z.string().describe('Current user rotation setting'),
+  accelerometerRotation: z.string().describe('Accelerometer rotation setting'),
+  screenBrightness: z.string().describe('Screen brightness setting'),
+  screenOffTimeout: z.string().describe('Screen-off timeout setting'),
+  display: z.string().optional().describe('Optional display manager snapshot'),
+  window: z.string().optional().describe('Optional window manager snapshot'),
+  surfaceFlinger: z.string().optional().describe('Optional SurfaceFlinger display metadata snapshot'),
+});
+
+export const CaptureLocationSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  packageName: z.string().optional().describe('Optional package name used for app-ops'),
+  locationMode: z.string().describe('Secure location_mode setting snapshot'),
+  providersAllowed: z.string().describe('Secure location_providers_allowed setting snapshot'),
+  mockLocation: z.string().describe('Secure mock_location setting snapshot'),
+  location: z.string().optional().describe('Optional dumpsys location snapshot'),
+  locationAppOps: z.string().optional().describe('Optional location app-ops snapshot'),
+});
+
+export const CapturePowerIdleSnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  battery: z.string().describe('Battery service snapshot'),
+  power: z.string().optional().describe('Optional dumpsys power snapshot'),
+  deviceIdle: z.string().optional().describe('Optional dumpsys deviceidle snapshot'),
+  deviceIdleWhitelist: z.string().optional().describe('Optional deviceidle whitelist snapshot'),
+  batteryStats: z.string().optional().describe('Optional dumpsys batterystats snapshot'),
+  thermal: z.string().optional().describe('Optional thermalservice snapshot'),
+});
+
+export const CapturePackageInventorySnapshotOutputSchema = z.object({
+  deviceId: z.string().describe('Target device ID'),
+  capturedAt: z.string().describe('ISO timestamp when snapshot was captured'),
+  packageCount: z.number().describe('Total listed packages count'),
+  thirdPartyCount: z.number().optional().describe('Third-party packages count'),
+  systemCount: z.number().optional().describe('System packages count'),
+  disabledCount: z.number().optional().describe('Disabled packages count'),
+  allPackages: z.string().describe('All package list snapshot'),
+  thirdPartyPackages: z.string().optional().describe('Optional third-party package list snapshot'),
+  systemPackages: z.string().optional().describe('Optional system package list snapshot'),
+  disabledPackages: z.string().optional().describe('Optional disabled package list snapshot'),
+  packagePaths: z.string().optional().describe('Optional package path list snapshot'),
+  features: z.string().optional().describe('Optional device features snapshot'),
 });
 
 export const CreateIssueInputSchema = z.object({
@@ -5521,6 +5660,170 @@ export const CaptureInputSnapshotToolSchema = {
   required: [] as string[],
 };
 
+export const CaptureRadioSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    includeWifiDump: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys wifi snapshot.',
+      default: true,
+    },
+    includeTelephonyDump: {
+      type: 'boolean' as const,
+      description: 'Include telephony registry snapshot.',
+      default: true,
+    },
+    includeBluetoothDump: {
+      type: 'boolean' as const,
+      description: 'Include bluetooth manager snapshot.',
+      default: true,
+    },
+    includeIpState: {
+      type: 'boolean' as const,
+      description: 'Include IP address and route snapshots.',
+      default: true,
+    },
+    includeConnectivityDump: {
+      type: 'boolean' as const,
+      description: 'Include connectivity manager snapshot.',
+      default: true,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CaptureDisplaySnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    includeDisplayDump: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys display snapshot.',
+      default: true,
+    },
+    includeWindowDump: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys window snapshot.',
+      default: true,
+    },
+    includeSurfaceFlinger: {
+      type: 'boolean' as const,
+      description: 'Include SurfaceFlinger display metadata snapshot.',
+      default: true,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CaptureLocationSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    packageName: {
+      type: 'string' as const,
+      description: 'Optional package name for location app-ops snapshot.',
+    },
+    includeLocationDump: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys location snapshot.',
+      default: true,
+    },
+    includeLocationAppOps: {
+      type: 'boolean' as const,
+      description: 'Include app-ops snapshot for packageName.',
+      default: true,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CapturePowerIdleSnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    includePowerDump: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys power snapshot.',
+      default: true,
+    },
+    includeDeviceIdle: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys deviceidle snapshot.',
+      default: true,
+    },
+    includeBatteryStats: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys batterystats snapshot.',
+      default: true,
+    },
+    includeThermal: {
+      type: 'boolean' as const,
+      description: 'Include dumpsys thermalservice snapshot.',
+      default: true,
+    },
+    batteryStatsLines: {
+      type: 'number' as const,
+      description: 'Maximum lines for batterystats snapshot.',
+      default: 600,
+    },
+  },
+  required: [] as string[],
+};
+
+export const CapturePackageInventorySnapshotToolSchema = {
+  type: 'object' as const,
+  properties: {
+    deviceId: {
+      type: 'string' as const,
+      description: 'Optional device ID. If not provided, uses the first available device.',
+    },
+    includeThirdParty: {
+      type: 'boolean' as const,
+      description: 'Include third-party package list.',
+      default: true,
+    },
+    includeSystem: {
+      type: 'boolean' as const,
+      description: 'Include system package list.',
+      default: true,
+    },
+    includeDisabled: {
+      type: 'boolean' as const,
+      description: 'Include disabled package list.',
+      default: true,
+    },
+    includePackagePaths: {
+      type: 'boolean' as const,
+      description: 'Include package paths list (pm -f).',
+      default: false,
+    },
+    includeFeatures: {
+      type: 'boolean' as const,
+      description: 'Include device feature list.',
+      default: true,
+    },
+    packageListLines: {
+      type: 'number' as const,
+      description: 'Maximum lines for package list snapshots.',
+      default: 1500,
+    },
+  },
+  required: [] as string[],
+};
+
 // Type exports
 export type TakeScreenshotInput = z.infer<typeof TakeScreenshotInputSchema>;
 export type ListDevicesInput = z.infer<typeof ListDevicesInputSchema>;
@@ -5737,5 +6040,19 @@ export type CaptureAudioMediaSnapshotInput = z.infer<typeof CaptureAudioMediaSna
 export type CaptureAudioMediaSnapshotOutput = z.infer<typeof CaptureAudioMediaSnapshotOutputSchema>;
 export type CaptureInputSnapshotInput = z.infer<typeof CaptureInputSnapshotInputSchema>;
 export type CaptureInputSnapshotOutput = z.infer<typeof CaptureInputSnapshotOutputSchema>;
+export type CaptureRadioSnapshotInput = z.infer<typeof CaptureRadioSnapshotInputSchema>;
+export type CaptureRadioSnapshotOutput = z.infer<typeof CaptureRadioSnapshotOutputSchema>;
+export type CaptureDisplaySnapshotInput = z.infer<typeof CaptureDisplaySnapshotInputSchema>;
+export type CaptureDisplaySnapshotOutput = z.infer<typeof CaptureDisplaySnapshotOutputSchema>;
+export type CaptureLocationSnapshotInput = z.infer<typeof CaptureLocationSnapshotInputSchema>;
+export type CaptureLocationSnapshotOutput = z.infer<typeof CaptureLocationSnapshotOutputSchema>;
+export type CapturePowerIdleSnapshotInput = z.infer<typeof CapturePowerIdleSnapshotInputSchema>;
+export type CapturePowerIdleSnapshotOutput = z.infer<typeof CapturePowerIdleSnapshotOutputSchema>;
+export type CapturePackageInventorySnapshotInput = z.infer<
+  typeof CapturePackageInventorySnapshotInputSchema
+>;
+export type CapturePackageInventorySnapshotOutput = z.infer<
+  typeof CapturePackageInventorySnapshotOutputSchema
+>;
 export type CreateIssueInput = z.infer<typeof CreateIssueInputSchema>;
 export type CreateIssueOutput = z.infer<typeof CreateIssueOutputSchema>;

@@ -1,12 +1,13 @@
 {
   "name": "the-android-mcp",
-  "version": "2.5.0",
+  "version": "3.0.0",
   "description": "ADB-powered MCP server for Android app install, control, hot reload, screenshots, and test automation",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
     "the-android-mcp": "dist/index.js",
-    "the-android-mcp-gui": "bin/the-android-mcp-gui.js"
+    "the-android-mcp-gui": "bin/the-android-mcp-gui.js",
+    "the-android-mcp-web-ui": "dist/web-ui.js"
   },
   "scripts": {
     "build": "tsc",

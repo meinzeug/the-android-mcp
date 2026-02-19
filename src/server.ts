@@ -327,6 +327,21 @@ import {
   CaptureInputSnapshotInputSchema,
   CaptureInputSnapshotOutputSchema,
   CaptureInputSnapshotToolSchema,
+  CaptureRadioSnapshotInputSchema,
+  CaptureRadioSnapshotOutputSchema,
+  CaptureRadioSnapshotToolSchema,
+  CaptureDisplaySnapshotInputSchema,
+  CaptureDisplaySnapshotOutputSchema,
+  CaptureDisplaySnapshotToolSchema,
+  CaptureLocationSnapshotInputSchema,
+  CaptureLocationSnapshotOutputSchema,
+  CaptureLocationSnapshotToolSchema,
+  CapturePowerIdleSnapshotInputSchema,
+  CapturePowerIdleSnapshotOutputSchema,
+  CapturePowerIdleSnapshotToolSchema,
+  CapturePackageInventorySnapshotInputSchema,
+  CapturePackageInventorySnapshotOutputSchema,
+  CapturePackageInventorySnapshotToolSchema,
   CreateIssueInputSchema,
   CreateIssueOutputSchema,
   CreateIssueToolSchema,
@@ -364,6 +379,11 @@ import {
   captureAndroidSystemHealthSnapshot as adbCaptureAndroidSystemHealthSnapshot,
   captureAndroidAudioMediaSnapshot as adbCaptureAndroidAudioMediaSnapshot,
   captureAndroidInputSnapshot as adbCaptureAndroidInputSnapshot,
+  captureAndroidRadioSnapshot as adbCaptureAndroidRadioSnapshot,
+  captureAndroidDisplaySnapshot as adbCaptureAndroidDisplaySnapshot,
+  captureAndroidLocationSnapshot as adbCaptureAndroidLocationSnapshot,
+  captureAndroidPowerIdleSnapshot as adbCaptureAndroidPowerIdleSnapshot,
+  captureAndroidPackageInventorySnapshot as adbCaptureAndroidPackageInventorySnapshot,
   listPackageActivities as adbListPackageActivities,
   batchInputActions as adbBatchInputActions,
   reversePort as adbReversePort,
@@ -994,6 +1014,31 @@ class AndroidMcpServer {
           name: 'capture_android_input_snapshot',
           description: 'Capture input/input_method/window-policy/IME state snapshots',
           inputSchema: CaptureInputSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_radio_snapshot',
+          description: 'Capture radio connectivity state with wifi/telephony/bluetooth/IP snapshots',
+          inputSchema: CaptureRadioSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_display_snapshot',
+          description: 'Capture display/window/SurfaceFlinger and screen setting snapshots',
+          inputSchema: CaptureDisplaySnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_location_snapshot',
+          description: 'Capture location mode/providers plus dumpsys and optional app-ops snapshots',
+          inputSchema: CaptureLocationSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_power_idle_snapshot',
+          description: 'Capture battery/power/deviceidle/thermal and batterystats snapshots',
+          inputSchema: CapturePowerIdleSnapshotToolSchema,
+        },
+        {
+          name: 'capture_android_package_inventory_snapshot',
+          description: 'Capture package inventory counts/lists with optional paths and features snapshots',
+          inputSchema: CapturePackageInventorySnapshotToolSchema,
         },
         {
           name: 'create_github_issue',
@@ -2469,6 +2514,71 @@ class AndroidMcpServer {
           case 'capture_android_input_snapshot': {
             const input = CaptureInputSnapshotInputSchema.parse(args);
             const result = await this.captureAndroidInputSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_radio_snapshot': {
+            const input = CaptureRadioSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidRadioSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_display_snapshot': {
+            const input = CaptureDisplaySnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidDisplaySnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_location_snapshot': {
+            const input = CaptureLocationSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidLocationSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_power_idle_snapshot': {
+            const input = CapturePowerIdleSnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidPowerIdleSnapshot(input);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: this.withUpdateReminder(result),
+                },
+              ],
+            };
+          }
+
+          case 'capture_android_package_inventory_snapshot': {
+            const input = CapturePackageInventorySnapshotInputSchema.parse(args);
+            const result = await this.captureAndroidPackageInventorySnapshot(input);
             return {
               content: [
                 {
@@ -4014,6 +4124,73 @@ class AndroidMcpServer {
       includeImeList: input.includeImeList,
     });
     return CaptureInputSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidRadioSnapshot(
+    input: z.infer<typeof CaptureRadioSnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureRadioSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidRadioSnapshot({
+      deviceId: input.deviceId,
+      includeWifiDump: input.includeWifiDump,
+      includeTelephonyDump: input.includeTelephonyDump,
+      includeBluetoothDump: input.includeBluetoothDump,
+      includeIpState: input.includeIpState,
+      includeConnectivityDump: input.includeConnectivityDump,
+    });
+    return CaptureRadioSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidDisplaySnapshot(
+    input: z.infer<typeof CaptureDisplaySnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureDisplaySnapshotOutputSchema>> {
+    const result = adbCaptureAndroidDisplaySnapshot({
+      deviceId: input.deviceId,
+      includeDisplayDump: input.includeDisplayDump,
+      includeWindowDump: input.includeWindowDump,
+      includeSurfaceFlinger: input.includeSurfaceFlinger,
+    });
+    return CaptureDisplaySnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidLocationSnapshot(
+    input: z.infer<typeof CaptureLocationSnapshotInputSchema>
+  ): Promise<z.infer<typeof CaptureLocationSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidLocationSnapshot({
+      deviceId: input.deviceId,
+      packageName: input.packageName,
+      includeLocationDump: input.includeLocationDump,
+      includeLocationAppOps: input.includeLocationAppOps,
+    });
+    return CaptureLocationSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidPowerIdleSnapshot(
+    input: z.infer<typeof CapturePowerIdleSnapshotInputSchema>
+  ): Promise<z.infer<typeof CapturePowerIdleSnapshotOutputSchema>> {
+    const result = adbCaptureAndroidPowerIdleSnapshot({
+      deviceId: input.deviceId,
+      includePowerDump: input.includePowerDump,
+      includeDeviceIdle: input.includeDeviceIdle,
+      includeBatteryStats: input.includeBatteryStats,
+      includeThermal: input.includeThermal,
+      batteryStatsLines: input.batteryStatsLines,
+    });
+    return CapturePowerIdleSnapshotOutputSchema.parse(result);
+  }
+
+  private async captureAndroidPackageInventorySnapshot(
+    input: z.infer<typeof CapturePackageInventorySnapshotInputSchema>
+  ): Promise<z.infer<typeof CapturePackageInventorySnapshotOutputSchema>> {
+    const result = adbCaptureAndroidPackageInventorySnapshot({
+      deviceId: input.deviceId,
+      includeThirdParty: input.includeThirdParty,
+      includeSystem: input.includeSystem,
+      includeDisabled: input.includeDisabled,
+      includePackagePaths: input.includePackagePaths,
+      includeFeatures: input.includeFeatures,
+      packageListLines: input.packageListLines,
+    });
+    return CapturePackageInventorySnapshotOutputSchema.parse(result);
   }
 
   private async createGitHubIssue(

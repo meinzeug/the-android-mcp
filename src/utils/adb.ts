@@ -5473,3 +5473,357 @@ export function captureAndroidInputSnapshot(options: {
     windowPolicy,
   };
 }
+
+export function captureAndroidRadioSnapshot(options: {
+  deviceId?: string;
+  includeWifiDump?: boolean;
+  includeTelephonyDump?: boolean;
+  includeBluetoothDump?: boolean;
+  includeIpState?: boolean;
+  includeConnectivityDump?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  wifiEnabled: string;
+  mobileDataEnabled: string;
+  airplaneMode: string;
+  bluetoothEnabled: string;
+  wifiDump?: string;
+  telephony?: string;
+  bluetooth?: string;
+  ipAddress?: string;
+  ipRoute?: string;
+  connectivity?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const wifiEnabled = safeDeviceCommand(targetDeviceId, 'shell settings get global wifi_on');
+  const mobileDataEnabled = safeDeviceCommand(targetDeviceId, 'shell settings get global mobile_data');
+  const airplaneMode = safeDeviceCommand(targetDeviceId, 'shell settings get global airplane_mode_on');
+  const bluetoothEnabled = safeDeviceCommand(targetDeviceId, 'shell settings get global bluetooth_on');
+  const wifiDump =
+    options.includeWifiDump === false
+      ? undefined
+      : trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell dumpsys wifi', 120000), 1200);
+  const telephony =
+    options.includeTelephonyDump === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys telephony.registry', 120000),
+          1000
+        );
+  const bluetooth =
+    options.includeBluetoothDump === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys bluetooth_manager', 120000),
+          900
+        );
+  const ipAddress =
+    options.includeIpState === false
+      ? undefined
+      : trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell ip addr show', 30000), 700);
+  const ipRoute =
+    options.includeIpState === false
+      ? undefined
+      : trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell ip route show', 30000), 300);
+  const connectivity =
+    options.includeConnectivityDump === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys connectivity', 120000),
+          1000
+        );
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    wifiEnabled,
+    mobileDataEnabled,
+    airplaneMode,
+    bluetoothEnabled,
+    wifiDump,
+    telephony,
+    bluetooth,
+    ipAddress,
+    ipRoute,
+    connectivity,
+  };
+}
+
+export function captureAndroidDisplaySnapshot(options: {
+  deviceId?: string;
+  includeDisplayDump?: boolean;
+  includeWindowDump?: boolean;
+  includeSurfaceFlinger?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  wmSize: string;
+  wmDensity: string;
+  userRotation: string;
+  accelerometerRotation: string;
+  screenBrightness: string;
+  screenOffTimeout: string;
+  display?: string;
+  window?: string;
+  surfaceFlinger?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const wmSize = safeDeviceCommand(targetDeviceId, 'shell wm size');
+  const wmDensity = safeDeviceCommand(targetDeviceId, 'shell wm density');
+  const userRotation = safeDeviceCommand(targetDeviceId, 'shell settings get system user_rotation');
+  const accelerometerRotation = safeDeviceCommand(
+    targetDeviceId,
+    'shell settings get system accelerometer_rotation'
+  );
+  const screenBrightness = safeDeviceCommand(
+    targetDeviceId,
+    'shell settings get system screen_brightness'
+  );
+  const screenOffTimeout = safeDeviceCommand(
+    targetDeviceId,
+    'shell settings get system screen_off_timeout'
+  );
+  const display =
+    options.includeDisplayDump === false
+      ? undefined
+      : trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell dumpsys display', 120000), 1000);
+  const window =
+    options.includeWindowDump === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys window windows', 120000),
+          1000
+        );
+  const surfaceFlinger =
+    options.includeSurfaceFlinger === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys SurfaceFlinger --display-id', 30000),
+          500
+        );
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    wmSize,
+    wmDensity,
+    userRotation,
+    accelerometerRotation,
+    screenBrightness,
+    screenOffTimeout,
+    display,
+    window,
+    surfaceFlinger,
+  };
+}
+
+export function captureAndroidLocationSnapshot(options: {
+  deviceId?: string;
+  packageName?: string;
+  includeLocationDump?: boolean;
+  includeLocationAppOps?: boolean;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  packageName?: string;
+  locationMode: string;
+  providersAllowed: string;
+  mockLocation: string;
+  location?: string;
+  locationAppOps?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const packageName = options.packageName?.trim() || undefined;
+  const locationMode = safeDeviceCommand(targetDeviceId, 'shell settings get secure location_mode');
+  const providersAllowed = safeDeviceCommand(
+    targetDeviceId,
+    'shell settings get secure location_providers_allowed'
+  );
+  const mockLocation = safeDeviceCommand(targetDeviceId, 'shell settings get secure mock_location');
+  const location =
+    options.includeLocationDump === false
+      ? undefined
+      : trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell dumpsys location', 120000), 1200);
+  const locationAppOps =
+    options.includeLocationAppOps === false || !packageName
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(
+            targetDeviceId,
+            `shell cmd appops get ${escapeShellArg(packageName)}`,
+            90000
+          ),
+          800
+        );
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    packageName,
+    locationMode,
+    providersAllowed,
+    mockLocation,
+    location,
+    locationAppOps,
+  };
+}
+
+export function captureAndroidPowerIdleSnapshot(options: {
+  deviceId?: string;
+  includePowerDump?: boolean;
+  includeDeviceIdle?: boolean;
+  includeBatteryStats?: boolean;
+  includeThermal?: boolean;
+  batteryStatsLines?: number;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  battery: string;
+  power?: string;
+  deviceIdle?: string;
+  deviceIdleWhitelist?: string;
+  batteryStats?: string;
+  thermal?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const batteryStatsLines = Math.max(
+    100,
+    Math.min(5000, Math.trunc(options.batteryStatsLines ?? 600))
+  );
+  const battery = safeDeviceCommand(targetDeviceId, 'shell dumpsys battery', 30000);
+  const power =
+    options.includePowerDump === false
+      ? undefined
+      : trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell dumpsys power', 120000), 1000);
+  const deviceIdle =
+    options.includeDeviceIdle === false
+      ? undefined
+      : trimOutputLines(safeDeviceCommand(targetDeviceId, 'shell dumpsys deviceidle', 120000), 1000);
+  const deviceIdleWhitelist =
+    options.includeDeviceIdle === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell cmd deviceidle whitelist', 30000),
+          200
+        );
+  const batteryStats =
+    options.includeBatteryStats === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys batterystats --charged', 120000),
+          batteryStatsLines
+        );
+  const thermal =
+    options.includeThermal === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell dumpsys thermalservice', 120000),
+          800
+        );
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    battery,
+    power,
+    deviceIdle,
+    deviceIdleWhitelist,
+    batteryStats,
+    thermal,
+  };
+}
+
+export function captureAndroidPackageInventorySnapshot(options: {
+  deviceId?: string;
+  includeThirdParty?: boolean;
+  includeSystem?: boolean;
+  includeDisabled?: boolean;
+  includePackagePaths?: boolean;
+  includeFeatures?: boolean;
+  packageListLines?: number;
+}): {
+  deviceId: string;
+  capturedAt: string;
+  packageCount: number;
+  thirdPartyCount?: number;
+  systemCount?: number;
+  disabledCount?: number;
+  allPackages: string;
+  thirdPartyPackages?: string;
+  systemPackages?: string;
+  disabledPackages?: string;
+  packagePaths?: string;
+  features?: string;
+} {
+  const targetDeviceId = resolveDeviceId(options.deviceId);
+  const packageListLines = Math.max(
+    200,
+    Math.min(5000, Math.trunc(options.packageListLines ?? 1500))
+  );
+  const countPackages = (value: string | undefined): number | undefined => {
+    if (!value) {
+      return undefined;
+    }
+    return value
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.startsWith('package:')).length;
+  };
+
+  const allPackages = trimOutputLines(
+    safeDeviceCommand(targetDeviceId, 'shell pm list packages', 120000),
+    packageListLines
+  );
+  const packageCount = countPackages(allPackages) ?? 0;
+  const thirdPartyPackages =
+    options.includeThirdParty === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell pm list packages -3', 120000),
+          packageListLines
+        );
+  const systemPackages =
+    options.includeSystem === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell pm list packages -s', 120000),
+          packageListLines
+        );
+  const disabledPackages =
+    options.includeDisabled === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell pm list packages -d', 120000),
+          packageListLines
+        );
+  const packagePaths =
+    options.includePackagePaths !== true
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell pm list packages -f', 120000),
+          packageListLines
+        );
+  const features =
+    options.includeFeatures === false
+      ? undefined
+      : trimOutputLines(
+          safeDeviceCommand(targetDeviceId, 'shell pm list features', 120000),
+          500
+        );
+
+  return {
+    deviceId: targetDeviceId,
+    capturedAt: new Date().toISOString(),
+    packageCount,
+    thirdPartyCount: countPackages(thirdPartyPackages),
+    systemCount: countPackages(systemPackages),
+    disabledCount: countPackages(disabledPackages),
+    allPackages,
+    thirdPartyPackages,
+    systemPackages,
+    disabledPackages,
+    packagePaths,
+    features,
+  };
+}
