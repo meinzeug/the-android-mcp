@@ -24,6 +24,7 @@ const UPDATE_HINT = 'npm install -g the-android-mcp@latest';
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_EVENTS = 600;
 const MAX_JOBS = 300;
+const MAX_TIMELINE_POINTS = 480;
 
 const APP_STATE_DIR = path.join(os.homedir(), '.the-android-mcp');
 const WORKFLOW_FILE = path.join(APP_STATE_DIR, 'web-ui-workflows.json');
@@ -105,11 +106,27 @@ interface LaneState {
   updatedAt: string;
 }
 
+interface TimelinePoint {
+  id: number;
+  at: string;
+  reason: string;
+  laneCount: number;
+  pausedLaneCount: number;
+  activeLaneCount: number;
+  queueDepth: number;
+  jobCount: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+}
+
 const serverStartedAt = Date.now();
 let eventSeq = 1;
 let jobSeq = 1;
+let timelineSeq = 1;
 
 const eventHistory: UiEvent[] = [];
+const dashboardTimeline: TimelinePoint[] = [];
 const sseClients = new Set<ServerResponse>();
 
 const metrics: Record<string, MetricEntry> = {};
@@ -160,6 +177,50 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
   return Math.max(min, Math.min(max, parsed));
 }
 
+function laneTotals(): {
+  laneCount: number;
+  pausedLaneCount: number;
+  activeLaneCount: number;
+  queueDepth: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+} {
+  const laneValues = Object.values(lanes);
+  return {
+    laneCount: laneValues.length,
+    pausedLaneCount: laneValues.filter(lane => lane.paused).length,
+    activeLaneCount: laneValues.filter(lane => lane.active).length,
+    queueDepth: laneValues.reduce((sum, lane) => sum + lane.queue.length, 0),
+    completed: laneValues.reduce((sum, lane) => sum + lane.completed, 0),
+    failed: laneValues.reduce((sum, lane) => sum + lane.failed, 0),
+    cancelled: laneValues.reduce((sum, lane) => sum + lane.cancelled, 0),
+  };
+}
+
+function captureTimelinePoint(reason: string): TimelinePoint {
+  const totals = laneTotals();
+  const point: TimelinePoint = {
+    id: timelineSeq++,
+    at: nowIso(),
+    reason,
+    laneCount: totals.laneCount,
+    pausedLaneCount: totals.pausedLaneCount,
+    activeLaneCount: totals.activeLaneCount,
+    queueDepth: totals.queueDepth,
+    jobCount: jobs.length,
+    completed: totals.completed,
+    failed: totals.failed,
+    cancelled: totals.cancelled,
+  };
+
+  dashboardTimeline.push(point);
+  if (dashboardTimeline.length > MAX_TIMELINE_POINTS) {
+    dashboardTimeline.splice(0, dashboardTimeline.length - MAX_TIMELINE_POINTS);
+  }
+  return point;
+}
+
 function pushEvent(type: string, message: string, data?: unknown): UiEvent {
   const event: UiEvent = {
     id: eventSeq++,
@@ -176,6 +237,7 @@ function pushEvent(type: string, message: string, data?: unknown): UiEvent {
 
   appendSessionEvent(event);
   broadcastEvent(event);
+  captureTimelinePoint(type);
   return event;
 }
 
@@ -1130,6 +1192,213 @@ function retryJob(id: number): JobRecord | undefined {
   return createJob(previous.type, cloneInput);
 }
 
+function retryFailedJobs(options: { laneId?: string; limit?: number }): JobRecord[] {
+  const laneId = typeof options.laneId === 'string' && options.laneId.length > 0 ? options.laneId : undefined;
+  const limit = clampInt(options.limit, 30, 1, 200);
+  const failed = jobs
+    .filter(job => job.status === 'failed')
+    .filter(job => !laneId || job.laneId === laneId)
+    .sort((a, b) => a.id - b.id)
+    .slice(0, limit);
+
+  const created: JobRecord[] = [];
+  for (const item of failed) {
+    const cloneInput = JSON.parse(JSON.stringify(item.input)) as JsonObject;
+    created.push(createJob(item.type, cloneInput));
+  }
+
+  pushEvent('jobs-retry-failed', 'Failed jobs re-queued', {
+    laneId,
+    requested: failed.length,
+    created: created.length,
+  });
+
+  return created;
+}
+
+function pruneJobs(options: { statuses?: string[]; keepLatest?: number }): {
+  removed: number;
+  before: number;
+  after: number;
+  keepLatest: number;
+  statuses: string[];
+} {
+  const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
+  const requested = Array.isArray(options.statuses)
+    ? options.statuses.filter(value => terminalStatuses.has(value))
+    : ['completed', 'failed', 'cancelled'];
+  const selectedStatuses = requested.length > 0 ? requested : ['completed', 'failed', 'cancelled'];
+  const keepLatest = clampInt(options.keepLatest, 140, 0, MAX_JOBS);
+  const before = jobs.length;
+
+  const keepSet = new Set(selectedStatuses);
+  let keptTerminal = 0;
+  const next: JobRecord[] = [];
+
+  for (const job of jobs) {
+    if (job.status === 'queued' || job.status === 'running') {
+      next.push(job);
+      continue;
+    }
+    if (!keepSet.has(job.status)) {
+      next.push(job);
+      continue;
+    }
+    if (keptTerminal < keepLatest) {
+      next.push(job);
+      keptTerminal += 1;
+    }
+  }
+
+  jobs.splice(0, jobs.length, ...next);
+  const removed = before - jobs.length;
+
+  pushEvent('jobs-pruned', 'Terminal jobs pruned from memory', {
+    removed,
+    keepLatest,
+    statuses: selectedStatuses,
+  });
+
+  return {
+    removed,
+    before,
+    after: jobs.length,
+    keepLatest,
+    statuses: selectedStatuses,
+  };
+}
+
+function runDeviceSmokeScenario(body: JsonObject): JsonObject {
+  const deviceId = extractDeviceId(body);
+  const packageName = typeof body.packageName === 'string' ? body.packageName : 'com.android.chrome';
+  const url = typeof body.url === 'string' && /^https?:\/\//i.test(body.url)
+    ? body.url
+    : 'https://www.wikipedia.org';
+  const waitForReadyMs = clampInt(body.waitForReadyMs, 900, 200, 10000);
+  const startedAt = Date.now();
+
+  const openResult = openUrlInChrome(url, deviceId, {
+    waitForReadyMs,
+    fallbackToDefault: true,
+  });
+  const profile = buildDeviceProfile(openResult.deviceId, packageName);
+  const healthScore = typeof profile.healthScore === 'number' ? profile.healthScore : 0;
+
+  const result = {
+    ok: true,
+    scenario: 'device-smoke',
+    deviceId: openResult.deviceId,
+    url,
+    packageName,
+    durationMs: Date.now() - startedAt,
+    healthScore,
+    pass: healthScore >= 45,
+    openResult,
+    profile,
+    updateHint: UPDATE_HINT,
+  };
+
+  pushEvent('device-smoke', 'Device smoke scenario executed', {
+    deviceId: result.deviceId,
+    url: result.url,
+    healthScore: result.healthScore,
+    pass: result.pass,
+    durationMs: result.durationMs,
+  });
+
+  return result;
+}
+
+function runAutopilot(body: JsonObject): JsonObject {
+  const devicesRaw = Array.isArray(body.deviceIds)
+    ? body.deviceIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : [];
+  const fallbackDevices = getConnectedDevices().map(device => device.id);
+  const deviceIds = devicesRaw.length > 0 ? devicesRaw : fallbackDevices;
+
+  if (deviceIds.length === 0) {
+    throw new Error('No connected devices for autopilot');
+  }
+
+  const loops = clampInt(body.loops, 2, 1, 8);
+  const waitForReadyMs = clampInt(body.waitForReadyMs, 900, 200, 10000);
+  const packageName = typeof body.packageName === 'string' ? body.packageName : 'com.android.chrome';
+  const workflowNameRaw = typeof body.workflowName === 'string' ? body.workflowName.trim() : '';
+  const workflowName = workflowNameRaw && workflows[workflowNameRaw] ? workflowNameRaw : undefined;
+  const urlsRaw = Array.isArray(body.urls)
+    ? body.urls.filter((entry): entry is string => typeof entry === 'string' && /^https?:\/\//i.test(entry))
+    : [];
+  const urls = urlsRaw.length > 0
+    ? urlsRaw
+    : ['https://www.wikipedia.org', 'https://news.ycombinator.com', 'https://developer.android.com'];
+
+  const created: JobRecord[] = [];
+
+  for (const deviceId of deviceIds) {
+    for (let loop = 1; loop <= loops; loop += 1) {
+      for (const url of urls) {
+        created.push(
+          createJob('open_url', {
+            deviceId,
+            url,
+            waitForReadyMs,
+            loop,
+          })
+        );
+      }
+
+      created.push(
+        createJob('device_profile', {
+          deviceId,
+          packageName,
+          loop,
+        })
+      );
+
+      if (loop % 2 === 0) {
+        created.push(
+          createJob('snapshot_suite', {
+            deviceId,
+            packageName,
+            loop,
+          })
+        );
+      }
+
+      if (workflowName) {
+        created.push(
+          createJob('workflow_run', {
+            deviceId,
+            name: workflowName,
+            packageName,
+            includeRaw: false,
+            loop,
+          })
+        );
+      }
+    }
+  }
+
+  pushEvent('autopilot-run', 'Autopilot job bundle queued', {
+    deviceCount: deviceIds.length,
+    loops,
+    workflowName: workflowName ?? null,
+    createdCount: created.length,
+  });
+
+  return {
+    ok: true,
+    scenario: 'autopilot',
+    deviceIds,
+    loops,
+    urls,
+    workflowName: workflowName ?? null,
+    createdCount: created.length,
+    jobIds: created.map(job => job.id),
+    updateHint: UPDATE_HINT,
+  };
+}
+
 async function executeJob(job: JobRecord): Promise<unknown> {
   if (job.type === 'open_url') {
     const urlValue = typeof job.input.url === 'string' ? job.input.url : '';
@@ -1287,6 +1556,7 @@ function lanesSummary(): JsonObject[] {
 
 function resetSession(options: { keepWorkflows?: boolean }): void {
   eventHistory.splice(0, eventHistory.length);
+  dashboardTimeline.splice(0, dashboardTimeline.length);
   for (const key of Object.keys(metrics)) {
     delete metrics[key];
   }
@@ -1392,6 +1662,7 @@ function setupSse(request: IncomingMessage, response: ServerResponse): void {
 
 function buildStatePayload(host: string, port: number): JsonObject {
   const devices = getConnectedDevices();
+  const totals = laneTotals();
   return {
     ok: true,
     service: 'the-android-mcp-web-ui',
@@ -1403,15 +1674,17 @@ function buildStatePayload(host: string, port: number): JsonObject {
     connectedDeviceCount: devices.length,
     eventCount: eventHistory.length,
     workflowCount: Object.keys(workflows).length,
-    laneCount: Object.keys(lanes).length,
-    pausedLaneCount: Object.values(lanes).filter(lane => lane.paused).length,
-    queueDepth: Object.values(lanes).reduce((sum, lane) => sum + lane.queue.length, 0),
+    laneCount: totals.laneCount,
+    pausedLaneCount: totals.pausedLaneCount,
+    activeLaneCount: totals.activeLaneCount,
+    queueDepth: totals.queueDepth,
     jobCount: jobs.length,
     snapshotKinds: SNAPSHOT_KINDS,
   };
 }
 
 function buildDashboardPayload(host: string, port: number): JsonObject {
+  const latest = dashboardTimeline[dashboardTimeline.length - 1];
   return {
     generatedAt: nowIso(),
     state: buildStatePayload(host, port),
@@ -1420,6 +1693,8 @@ function buildDashboardPayload(host: string, port: number): JsonObject {
     lanes: lanesSummary(),
     jobs: listJobSummaries(),
     metrics: buildMetricsPayload(),
+    timelineLatest: latest,
+    timelinePointCount: dashboardTimeline.length,
     recentEvents: eventHistory.slice(-50),
   };
 }
@@ -1456,6 +1731,7 @@ function buildSessionExport(): JsonObject {
     lanes: lanesSummary(),
     jobs,
     metrics: buildMetricsPayload(),
+    timeline: dashboardTimeline,
     events: eventHistory,
   };
 }
@@ -1492,6 +1768,31 @@ async function handleApi(
   if (method === 'GET' && pathname === '/api/dashboard') {
     await withMetric('dashboard', () => {
       sendJson(response, 200, buildDashboardPayload(context.host, context.port));
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/dashboard/timeline') {
+    await withMetric('dashboard-timeline', () => {
+      const limitRaw = Number(url.searchParams.get('limit') ?? '180');
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(MAX_TIMELINE_POINTS, Math.trunc(limitRaw))) : 180;
+      sendJson(response, 200, {
+        ok: true,
+        count: Math.min(limit, dashboardTimeline.length),
+        points: dashboardTimeline.slice(-limit),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/dashboard/timeline/reset') {
+    await withMetric('dashboard-timeline-reset', async () => {
+      dashboardTimeline.splice(0, dashboardTimeline.length);
+      const point = captureTimelinePoint('timeline-reset');
+      sendJson(response, 200, {
+        ok: true,
+        point,
+      });
     });
     return;
   }
@@ -1703,6 +2004,40 @@ async function handleApi(
         : undefined;
       const laneId = typeof body.laneId === 'string' ? body.laneId : undefined;
       const result = cancelQueuedJobs({ ids, laneId });
+      sendJson(response, 200, {
+        ok: true,
+        ...result,
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/jobs/retry-failed') {
+    await withMetric('jobs-retry-failed', async () => {
+      const body = await readJsonBody(request);
+      const created = retryFailedJobs({
+        laneId: typeof body.laneId === 'string' ? body.laneId : undefined,
+        limit: typeof body.limit === 'number' ? body.limit : undefined,
+      });
+      sendJson(response, 200, {
+        ok: true,
+        createdCount: created.length,
+        jobs: created,
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/jobs/prune') {
+    await withMetric('jobs-prune', async () => {
+      const body = await readJsonBody(request);
+      const statuses = Array.isArray(body.statuses)
+        ? body.statuses.filter((value): value is string => typeof value === 'string')
+        : undefined;
+      const result = pruneJobs({
+        statuses,
+        keepLatest: typeof body.keepLatest === 'number' ? body.keepLatest : undefined,
+      });
       sendJson(response, 200, {
         ok: true,
         ...result,
@@ -1933,6 +2268,15 @@ async function handleApi(
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/device/smoke') {
+    await withMetric('device-smoke', async () => {
+      const body = await readJsonBody(request);
+      const result = runDeviceSmokeScenario(body);
+      sendJson(response, 200, result);
+    });
+    return;
+  }
+
   if (method === 'POST' && pathname === '/api/device/profiles') {
     await withMetric('device-profiles', async () => {
       const body = await readJsonBody(request);
@@ -2055,6 +2399,15 @@ async function handleApi(
         durationMs: result.durationMs,
       });
 
+      sendJson(response, 200, result);
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/autopilot/run') {
+    await withMetric('autopilot-run', async () => {
+      const body = await readJsonBody(request);
+      const result = runAutopilot(body);
       sendJson(response, 200, result);
     });
     return;
@@ -2269,7 +2622,7 @@ const INDEX_HTML = String.raw`<!doctype html>
           <span class="pill">port: 50000</span>
         </div>
         <h1 style="margin:0;font-size:1.45rem;">the-android-mcp v${pkg.version} command center</h1>
-        <p class="muted">Multi-lane orchestration, lane pause/resume, queue promotion/cancel controls, burst scenarios, and live backend telemetry.</p>
+        <p class="muted">Multi-lane orchestration, queue maintenance, device smoke runs, autopilot bundles, and live timeline telemetry.</p>
       </section>
 
       <section class="grid">
@@ -2368,16 +2721,29 @@ https://developer.android.com</textarea>
         </article>
 
         <article class="card stack">
-          <h2>Queue control + burst</h2>
+          <h2>Queue control + autopilot</h2>
           <div class="split">
             <button class="w" id="pause-all-lanes-btn">Pause all lanes</button>
             <button class="p" id="resume-all-lanes-btn">Resume all lanes</button>
           </div>
-          <button class="w" id="cancel-queued-btn">Cancel queued jobs</button>
+          <div class="split">
+            <button class="w" id="cancel-queued-btn">Cancel queued jobs</button>
+            <button class="s" id="retry-failed-btn">Retry failed jobs</button>
+          </div>
+          <button class="s" id="prune-jobs-btn">Prune terminal jobs</button>
+          <input id="smoke-url" type="url" value="https://www.wikipedia.org" />
+          <button class="p" id="smoke-btn">Run device smoke</button>
           <input id="burst-loops" type="number" min="1" max="12" value="2" />
           <select id="burst-workflow"></select>
           <button class="p" id="burst-enqueue-btn">Enqueue burst scenario</button>
+          <input id="autopilot-loops" type="number" min="1" max="8" value="2" />
+          <button class="p" id="autopilot-btn">Run autopilot multi-lane</button>
           <button class="s" id="dashboard-btn">Load dashboard payload</button>
+          <div class="split">
+            <button class="s" id="timeline-btn">Load timeline</button>
+            <button class="w" id="timeline-reset-btn">Reset timeline</button>
+          </div>
+          <div id="timeline" class="metrics"></div>
         </article>
 
         <article class="card stack">
@@ -2435,6 +2801,9 @@ https://developer.android.com</textarea>
       const $bulkJobs = document.getElementById('bulk-jobs');
       const $burstLoops = document.getElementById('burst-loops');
       const $burstWorkflow = document.getElementById('burst-workflow');
+      const $autopilotLoops = document.getElementById('autopilot-loops');
+      const $smokeUrl = document.getElementById('smoke-url');
+      const $timeline = document.getElementById('timeline');
 
       function setMessage(text, isError) {
         $message.textContent = text;
@@ -2476,6 +2845,23 @@ https://developer.android.com</textarea>
         }
         if (!entries.length) {
           $metrics.textContent = 'No metrics yet.';
+        }
+      }
+
+      function renderTimeline(payload) {
+        const points = Array.isArray(payload.points) ? payload.points : [];
+        $timeline.innerHTML = '';
+        for (const point of points.slice(-60).reverse()) {
+          const item = document.createElement('div');
+          item.className = 'item';
+          item.innerHTML =
+            '<div class="meta">[' + point.at + '] ' + point.reason + '</div>' +
+            '<div>queue=' + point.queueDepth + ' active=' + point.activeLaneCount + ' paused=' + point.pausedLaneCount + '</div>' +
+            '<div>completed=' + point.completed + ' failed=' + point.failed + ' cancelled=' + point.cancelled + '</div>';
+          $timeline.appendChild(item);
+        }
+        if (!points.length) {
+          $timeline.textContent = 'No timeline points yet.';
         }
       }
 
@@ -2968,6 +3354,65 @@ https://developer.android.com</textarea>
         setMessage('Dashboard payload loaded', false);
       }
 
+      async function runDeviceSmoke() {
+        const result = await api('/api/device/smoke', 'POST', {
+          deviceId: selectedDeviceId(),
+          packageName: 'com.android.chrome',
+          url: $smokeUrl.value || 'https://www.wikipedia.org',
+          waitForReadyMs: 900,
+        });
+        renderOutput(result);
+        setMessage(result.pass ? 'Device smoke passed' : 'Device smoke finished with low score', !result.pass);
+      }
+
+      async function retryFailedJobsUi() {
+        const result = await api('/api/jobs/retry-failed', 'POST', {
+          laneId: selectedDeviceId() ? 'device:' + selectedDeviceId() : undefined,
+          limit: 60,
+        });
+        renderOutput(result);
+        setMessage('Failed jobs re-queued', false);
+        await refreshJobsAndLanes();
+      }
+
+      async function pruneJobsUi() {
+        const result = await api('/api/jobs/prune', 'POST', {
+          statuses: ['completed', 'failed', 'cancelled'],
+          keepLatest: 140,
+        });
+        renderOutput(result);
+        setMessage('Terminal jobs pruned', false);
+        await refreshJobsAndLanes();
+      }
+
+      async function runAutopilotUi() {
+        const cfg = stressConfig();
+        const workflowName = selectedWorkflowName();
+        const result = await api('/api/autopilot/run', 'POST', {
+          deviceIds: selectedDeviceId() ? [selectedDeviceId()] : undefined,
+          loops: Number($autopilotLoops.value || '2'),
+          waitForReadyMs: cfg.waitForReadyMs,
+          urls: cfg.urls,
+          workflowName: workflowName || undefined,
+          packageName: 'com.android.chrome',
+        });
+        renderOutput(result);
+        setMessage('Autopilot queued', false);
+        await refreshJobsAndLanes();
+      }
+
+      async function loadTimeline() {
+        const result = await api('/api/dashboard/timeline?limit=120');
+        renderTimeline(result);
+        setMessage('Timeline loaded', false);
+      }
+
+      async function resetTimeline() {
+        const result = await api('/api/dashboard/timeline/reset', 'POST', {});
+        renderOutput(result);
+        await loadTimeline();
+      }
+
       document.getElementById('open-url-btn').addEventListener('click', async function () {
         try { await openUrl($urlInput.value); } catch (error) { setMessage(String(error), true); }
       });
@@ -3037,6 +3482,24 @@ https://developer.android.com</textarea>
       document.getElementById('dashboard-btn').addEventListener('click', async function () {
         try { await loadDashboardPayload(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('smoke-btn').addEventListener('click', async function () {
+        try { await runDeviceSmoke(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('retry-failed-btn').addEventListener('click', async function () {
+        try { await retryFailedJobsUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('prune-jobs-btn').addEventListener('click', async function () {
+        try { await pruneJobsUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('autopilot-btn').addEventListener('click', async function () {
+        try { await runAutopilotUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('timeline-btn').addEventListener('click', async function () {
+        try { await loadTimeline(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('timeline-reset-btn').addEventListener('click', async function () {
+        try { await resetTimeline(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('clear-output-btn').addEventListener('click', function () {
         renderOutput({});
       });
@@ -3077,6 +3540,7 @@ https://developer.android.com</textarea>
             addEvent(events[i]);
           }
           connectEvents();
+          await loadTimeline();
           renderOutput({ ok: true, message: 'UI ready', updateHint: '${UPDATE_HINT}' });
           setMessage('Ready.', false);
 
@@ -3085,6 +3549,8 @@ https://developer.android.com</textarea>
               const metricsPayload = await api('/api/metrics');
               renderMetrics(metricsPayload);
               await refreshJobsAndLanes();
+              const timelinePayload = await api('/api/dashboard/timeline?limit=120');
+              renderTimeline(timelinePayload);
             } catch (error) {
               setMessage('Background refresh failed', true);
             }

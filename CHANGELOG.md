@@ -24,6 +24,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.6.0] - 2026-02-19
+### Added
+- New autopilot orchestration API:
+- `POST /api/autopilot/run` to enqueue multi-loop, multi-device mixed job bundles.
+- New device smoke API:
+- `POST /api/device/smoke` for fast URL-open + profile health run with pass/fail result.
+- New queue maintenance APIs:
+- `POST /api/jobs/retry-failed`
+- `POST /api/jobs/prune`
+- New dashboard timeline telemetry APIs:
+- `GET /api/dashboard/timeline`
+- `POST /api/dashboard/timeline/reset`
+- New Web UI operator controls for smoke tests, failed-job retries, pruning, autopilot, and timeline inspection/reset.
+
+### Improved
+- Live telemetry now records timeline points from backend events for better queue/lane observability.
+- State payload now reports `activeLaneCount` alongside existing queue and lane counters.
+- Session export now includes dashboard timeline data.
+
 ## [3.5.0] - 2026-02-19
 ### Added
 - New Web UI/backend dashboard payload endpoint:
