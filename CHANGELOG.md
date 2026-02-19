@@ -24,6 +24,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.13.0] - 2026-02-19
+### Added
+- New control-room backend and UI orchestration workflows:
+- `GET /api/ops/control-room`
+- `POST /api/ops/auto-heal`
+- New queue snapshot library workflows:
+- `GET /api/queue/snapshots`
+- `POST /api/queue/snapshots/save`
+- `POST /api/queue/snapshots/apply`
+- New runbook fleet orchestration workflow:
+- `POST /api/runbook/campaign`
+- New alert governance workflow:
+- `POST /api/alerts/rules/seed`
+- New Web UI controls for control-room load, auto-heal execution, queue snapshot save/list/apply, runbook campaign execution, and one-click alert pack seeding.
+
+### Improved
+- Ops board/state/session/audit payloads now include queue snapshot awareness for richer recovery handoff context.
+- Web UI now pre-fills campaign target devices automatically and keeps backend-first operator flows in one pane.
+
 ## [3.12.0] - 2026-02-19
 ### Added
 - New audit and diagnostics backend workflows:
