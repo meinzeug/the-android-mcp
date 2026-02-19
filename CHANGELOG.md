@@ -24,6 +24,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.2.0] - 2026-02-19
+### Added
+- Web UI workflow engine with persistent storage in `~/.the-android-mcp/web-ui-workflows.json`.
+- New workflow APIs:
+- `GET /api/workflows`
+- `POST /api/workflows`
+- `DELETE /api/workflows/:name`
+- `POST /api/workflows/run`
+- New Web UI APIs for operational visibility:
+- `GET /api/metrics` (backend counters/latency/success-rate)
+- `POST /api/snapshot/diff` (compare latest snapshot with previous capture)
+- Upgraded UI controls for workflow save/run/delete and snapshot diff actions.
+
+### Improved
+- Event stream + action history now capture workflow and diff operations as first-class events.
+- Backend action handling now tracked with per-endpoint metrics.
+- Web UI keeps update hints visible (`npm install -g the-android-mcp@latest`) across responses and UI.
+
 ## [3.1.0] - 2026-02-19
 ### Added
 - Upgraded Web UI backend on `http://127.0.0.1:50000` with:
