@@ -24,6 +24,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.19.0] - 2026-02-20
+### Added
+- New mission scheduler guardrail policy backend with persistent policy state and cooldown-based suspension controls.
+- New mission policy API workflows:
+- `GET /api/ops/missions/policy`
+- `POST /api/ops/missions/policy`
+- `POST /api/ops/missions/policy/suspend`
+- `POST /api/ops/missions/policy/resume`
+- New mission scheduler forecasting and fleet-control APIs:
+- `GET /api/ops/missions/schedules/forecast`
+- `POST /api/ops/missions/schedules/pause-all`
+- `POST /api/ops/missions/schedules/resume-all`
+- `POST /api/ops/missions/schedules/rebalance`
+- New Web UI sections for:
+- mission policy control (load/save/suspend/resume)
+- scheduler fleet control (pause/resume/rebalance)
+- schedule forecast timeline panel.
+
+### Improved
+- Mission schedule execution now enforces guardrail policy state and tracks consecutive failures for automatic scheduler suspension.
+- Ops state/board/audit/session payloads now include mission policy context for deeper operational visibility and release confidence.
+
 ## [3.18.0] - 2026-02-20
 ### Added
 - New mission scheduler backend for persistent automated mission execution.

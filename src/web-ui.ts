@@ -42,6 +42,7 @@ const OPS_POLICY_PRESETS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-policy-pres
 const WATCHDOG_PROFILES_FILE = path.join(APP_STATE_DIR, 'web-ui-watchdog-profiles.json');
 const OPS_MISSIONS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-missions.json');
 const OPS_MISSION_SCHEDULES_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-mission-schedules.json');
+const OPS_MISSION_POLICY_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-mission-policy.json');
 
 const SNAPSHOT_KINDS = [
   'radio',
@@ -322,6 +323,19 @@ interface OpsMissionSchedule {
   lastError?: string;
 }
 
+interface OpsMissionPolicyState {
+  blockSchedulesOnGateFail: boolean;
+  maxConsecutiveFailures: number;
+  cooldownMs: number;
+  autoResumeAfterCooldown: boolean;
+  suspended: boolean;
+  suspendedAt?: string;
+  suspendedReason?: string;
+  resumeAt?: string;
+  consecutiveFailures: number;
+  updatedAt: string;
+}
+
 const serverStartedAt = Date.now();
 let eventSeq = 1;
 let jobSeq = 1;
@@ -378,6 +392,7 @@ const opsMissionScheduleTimers: Record<number, NodeJS.Timeout> = {};
 const opsMissionScheduleRunning: Record<number, boolean> = {};
 let opsMissionScheduleSeq = 1;
 let opsMissionSchedulesInitialized = false;
+let opsMissionPolicyState: OpsMissionPolicyState = loadOpsMissionPolicyState();
 const runbookExecutions: RunbookExecution[] = [];
 const controlRoomHistory: ControlRoomHistoryPoint[] = [];
 let controlRoomHistorySeq = 1;
@@ -1709,6 +1724,175 @@ function saveOpsMissionSchedules(): void {
 
 function listOpsMissionSchedules(): OpsMissionSchedule[] {
   return Object.values(opsMissionSchedules).sort((a, b) => a.id - b.id);
+}
+
+function defaultOpsMissionPolicyState(): OpsMissionPolicyState {
+  return {
+    blockSchedulesOnGateFail: true,
+    maxConsecutiveFailures: 3,
+    cooldownMs: 180000,
+    autoResumeAfterCooldown: true,
+    suspended: false,
+    consecutiveFailures: 0,
+    updatedAt: nowIso(),
+  };
+}
+
+function loadOpsMissionPolicyState(): OpsMissionPolicyState {
+  try {
+    ensureAppStateDir();
+    if (!fs.existsSync(OPS_MISSION_POLICY_FILE)) {
+      const defaults = defaultOpsMissionPolicyState();
+      fs.writeFileSync(OPS_MISSION_POLICY_FILE, JSON.stringify(defaults, null, 2), 'utf8');
+      return defaults;
+    }
+    const raw = fs.readFileSync(OPS_MISSION_POLICY_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return defaultOpsMissionPolicyState();
+    }
+    const item = parsed as Record<string, unknown>;
+    const result: OpsMissionPolicyState = {
+      blockSchedulesOnGateFail: item.blockSchedulesOnGateFail !== false,
+      maxConsecutiveFailures: clampInt(item.maxConsecutiveFailures, 3, 1, 1000),
+      cooldownMs: clampInt(item.cooldownMs, 180000, 5000, 24 * 60 * 60 * 1000),
+      autoResumeAfterCooldown: item.autoResumeAfterCooldown !== false,
+      suspended: item.suspended === true,
+      suspendedAt: typeof item.suspendedAt === 'string' ? item.suspendedAt : undefined,
+      suspendedReason: typeof item.suspendedReason === 'string' ? item.suspendedReason : undefined,
+      resumeAt: typeof item.resumeAt === 'string' ? item.resumeAt : undefined,
+      consecutiveFailures: clampInt(item.consecutiveFailures, 0, 0, 1000000),
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : nowIso(),
+    };
+    return result;
+  } catch {
+    return defaultOpsMissionPolicyState();
+  }
+}
+
+function saveOpsMissionPolicyState(): void {
+  ensureAppStateDir();
+  fs.writeFileSync(OPS_MISSION_POLICY_FILE, JSON.stringify(opsMissionPolicyState, null, 2), 'utf8');
+}
+
+function maybeResumeOpsMissionPolicyState(): void {
+  if (!opsMissionPolicyState.suspended) {
+    return;
+  }
+  if (!opsMissionPolicyState.autoResumeAfterCooldown) {
+    return;
+  }
+  const resumeAtMs = opsMissionPolicyState.resumeAt ? Date.parse(opsMissionPolicyState.resumeAt) : Number.NaN;
+  if (!Number.isFinite(resumeAtMs)) {
+    return;
+  }
+  if (Date.now() < resumeAtMs) {
+    return;
+  }
+  opsMissionPolicyState.suspended = false;
+  opsMissionPolicyState.suspendedAt = undefined;
+  opsMissionPolicyState.suspendedReason = undefined;
+  opsMissionPolicyState.resumeAt = undefined;
+  opsMissionPolicyState.consecutiveFailures = 0;
+  opsMissionPolicyState.updatedAt = nowIso();
+  saveOpsMissionPolicyState();
+  pushEvent('ops-mission-policy-auto-resume', 'Mission scheduler auto-resumed after cooldown', {});
+}
+
+function currentOpsMissionPolicyState(): OpsMissionPolicyState {
+  maybeResumeOpsMissionPolicyState();
+  return {
+    ...opsMissionPolicyState,
+  };
+}
+
+function suspendOpsMissionPolicyState(reason: string): OpsMissionPolicyState {
+  const state = currentOpsMissionPolicyState();
+  state.suspended = true;
+  state.suspendedAt = nowIso();
+  state.suspendedReason = reason;
+  state.resumeAt = new Date(Date.now() + state.cooldownMs).toISOString();
+  state.updatedAt = nowIso();
+  opsMissionPolicyState = state;
+  saveOpsMissionPolicyState();
+  pushEvent('ops-mission-policy-suspended', 'Mission scheduler suspended', {
+    reason,
+    resumeAt: state.resumeAt,
+  });
+  return currentOpsMissionPolicyState();
+}
+
+function resumeOpsMissionPolicyState(reason = 'manual-resume'): OpsMissionPolicyState {
+  const state = currentOpsMissionPolicyState();
+  state.suspended = false;
+  state.suspendedAt = undefined;
+  state.suspendedReason = undefined;
+  state.resumeAt = undefined;
+  state.consecutiveFailures = 0;
+  state.updatedAt = nowIso();
+  opsMissionPolicyState = state;
+  saveOpsMissionPolicyState();
+  pushEvent('ops-mission-policy-resumed', 'Mission scheduler resumed', { reason });
+  return currentOpsMissionPolicyState();
+}
+
+function updateOpsMissionPolicyState(body: JsonObject): OpsMissionPolicyState {
+  const current = currentOpsMissionPolicyState();
+  opsMissionPolicyState = {
+    ...current,
+    blockSchedulesOnGateFail: body.blockSchedulesOnGateFail === undefined ? current.blockSchedulesOnGateFail : body.blockSchedulesOnGateFail !== false,
+    maxConsecutiveFailures: clampInt(body.maxConsecutiveFailures, current.maxConsecutiveFailures, 1, 1000),
+    cooldownMs: clampInt(body.cooldownMs, current.cooldownMs, 5000, 24 * 60 * 60 * 1000),
+    autoResumeAfterCooldown: body.autoResumeAfterCooldown === undefined ? current.autoResumeAfterCooldown : body.autoResumeAfterCooldown !== false,
+    updatedAt: nowIso(),
+  };
+  saveOpsMissionPolicyState();
+  pushEvent('ops-mission-policy-updated', 'Mission scheduler policy updated', {
+    blockSchedulesOnGateFail: opsMissionPolicyState.blockSchedulesOnGateFail,
+    maxConsecutiveFailures: opsMissionPolicyState.maxConsecutiveFailures,
+    cooldownMs: opsMissionPolicyState.cooldownMs,
+    autoResumeAfterCooldown: opsMissionPolicyState.autoResumeAfterCooldown,
+  });
+  return currentOpsMissionPolicyState();
+}
+
+function missionSchedulePolicyForecast(horizonMsRaw: unknown): JsonObject {
+  const state = currentOpsMissionPolicyState();
+  const horizonMs = clampInt(horizonMsRaw, 20 * 60 * 1000, 60000, 7 * 24 * 60 * 60 * 1000);
+  const now = Date.now();
+  const until = now + horizonMs;
+  const items: JsonObject[] = [];
+
+  for (const schedule of listOpsMissionSchedules()) {
+    if (!schedule.active) {
+      continue;
+    }
+    const everyMs = Math.max(5000, schedule.everyMs);
+    const startMs = schedule.lastRunAt ? Date.parse(schedule.lastRunAt) : now;
+    let pointer = Number.isFinite(startMs) ? startMs + everyMs : now + everyMs;
+    let count = 0;
+    while (pointer <= until && count < 100) {
+      items.push({
+        id: schedule.id,
+        name: schedule.name,
+        mission: schedule.mission,
+        at: new Date(pointer).toISOString(),
+      });
+      pointer += everyMs;
+      count += 1;
+    }
+  }
+
+  items.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  return {
+    ok: true,
+    generatedAt: nowIso(),
+    horizonMs,
+    suspended: state.suspended,
+    resumeAt: state.resumeAt,
+    count: items.length,
+    items: items.slice(0, 400),
+  };
 }
 
 function loadSchedules(): void {
@@ -4300,6 +4484,16 @@ function runOpsMissionScheduleTask(id: number): JsonObject {
   if (!schedule) {
     throw new Error(`mission schedule ${id} not found`);
   }
+  const policyBefore = currentOpsMissionPolicyState();
+  if (policyBefore.suspended) {
+    return {
+      ok: false,
+      id,
+      skipped: true,
+      reason: 'policy-suspended',
+      resumeAt: policyBefore.resumeAt,
+    };
+  }
   if (opsMissionScheduleRunning[id]) {
     return {
       ok: false,
@@ -4325,6 +4519,29 @@ function runOpsMissionScheduleTask(id: number): JsonObject {
     } else {
       schedule.lastError = undefined;
     }
+    let nextPolicy = currentOpsMissionPolicyState();
+    const gateRaw = result.gate && typeof result.gate === 'object' && !Array.isArray(result.gate)
+      ? (result.gate as Record<string, unknown>)
+      : undefined;
+    const gatePass = gateRaw?.pass !== false;
+    if (result.ok === true && gatePass) {
+      if (nextPolicy.consecutiveFailures !== 0) {
+        nextPolicy.consecutiveFailures = 0;
+        nextPolicy.updatedAt = nowIso();
+        opsMissionPolicyState = nextPolicy;
+        saveOpsMissionPolicyState();
+      }
+    } else {
+      nextPolicy.consecutiveFailures += 1;
+      nextPolicy.updatedAt = nowIso();
+      const shouldSuspend = nextPolicy.blockSchedulesOnGateFail &&
+        nextPolicy.consecutiveFailures >= nextPolicy.maxConsecutiveFailures;
+      opsMissionPolicyState = nextPolicy;
+      saveOpsMissionPolicyState();
+      if (shouldSuspend) {
+        nextPolicy = suspendOpsMissionPolicyState(`schedule-failure-threshold(${nextPolicy.consecutiveFailures})`);
+      }
+    }
     saveOpsMissionSchedules();
     pushEvent('ops-mission-schedule-run', 'Ops mission schedule executed', {
       id,
@@ -4336,6 +4553,7 @@ function runOpsMissionScheduleTask(id: number): JsonObject {
       id,
       mission: schedule.mission,
       result,
+      policy: nextPolicy,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -4344,6 +4562,15 @@ function runOpsMissionScheduleTask(id: number): JsonObject {
     schedule.lastRunAt = startedAt;
     schedule.lastError = message;
     schedule.updatedAt = nowIso();
+    const nextPolicy = currentOpsMissionPolicyState();
+    nextPolicy.consecutiveFailures += 1;
+    nextPolicy.updatedAt = nowIso();
+    opsMissionPolicyState = nextPolicy;
+    saveOpsMissionPolicyState();
+    if (nextPolicy.blockSchedulesOnGateFail &&
+      nextPolicy.consecutiveFailures >= nextPolicy.maxConsecutiveFailures) {
+      suspendOpsMissionPolicyState(`schedule-exception-threshold(${nextPolicy.consecutiveFailures})`);
+    }
     saveOpsMissionSchedules();
     pushEvent('ops-mission-schedule-run-failed', 'Ops mission schedule failed', {
       id,
@@ -4355,6 +4582,7 @@ function runOpsMissionScheduleTask(id: number): JsonObject {
       id,
       mission: schedule.mission,
       error: message,
+      policy: currentOpsMissionPolicyState(),
     };
   } finally {
     opsMissionScheduleRunning[id] = false;
@@ -4477,6 +4705,59 @@ function deleteOpsMissionSchedule(id: number): boolean {
   saveOpsMissionSchedules();
   pushEvent('ops-mission-schedule-deleted', 'Ops mission schedule deleted', { id });
   return true;
+}
+
+function setAllOpsMissionSchedulesActive(active: boolean): JsonObject {
+  const changed: number[] = [];
+  for (const schedule of Object.values(opsMissionSchedules)) {
+    if (active) {
+      if (!schedule.active) {
+        startOpsMissionSchedule(schedule.id);
+        changed.push(schedule.id);
+      }
+    } else if (schedule.active) {
+      stopOpsMissionSchedule(schedule.id);
+      changed.push(schedule.id);
+    }
+  }
+  return {
+    ok: true,
+    active,
+    changed,
+    schedules: listOpsMissionSchedules(),
+  };
+}
+
+function rebalanceOpsMissionSchedules(body: JsonObject): JsonObject {
+  const factorRaw = Number(body.factor);
+  const factor = Number.isFinite(factorRaw) ? Math.max(0.1, Math.min(10, factorRaw)) : 1;
+  const minEveryMs = clampInt(body.minEveryMs, 5000, 5000, 24 * 60 * 60 * 1000);
+  const maxEveryMs = clampInt(body.maxEveryMs, 24 * 60 * 60 * 1000, 5000, 24 * 60 * 60 * 1000);
+  const touched: number[] = [];
+
+  for (const schedule of Object.values(opsMissionSchedules)) {
+    const before = schedule.everyMs;
+    const scaled = Math.trunc(before * factor);
+    schedule.everyMs = Math.max(minEveryMs, Math.min(maxEveryMs, scaled));
+    schedule.updatedAt = nowIso();
+    touched.push(schedule.id);
+    if (schedule.active) {
+      startOpsMissionSchedule(schedule.id);
+    }
+  }
+  saveOpsMissionSchedules();
+  pushEvent('ops-mission-schedules-rebalanced', 'Ops mission schedules rebalanced', {
+    factor,
+    touched: touched.length,
+  });
+  return {
+    ok: true,
+    factor,
+    minEveryMs,
+    maxEveryMs,
+    touched,
+    schedules: listOpsMissionSchedules(),
+  };
 }
 
 function resolveOpsMission(nameRaw: string): OpsMission {
@@ -4740,6 +5021,7 @@ function buildAuditExport(host: string, port: number): JsonObject {
     opsMissions: listOpsMissions(),
     opsMissionRuns: opsMissionRuns.slice(-200),
     opsMissionSchedules: listOpsMissionSchedules(),
+    opsMissionPolicy: currentOpsMissionPolicyState(),
     controlRoomHistory: listControlRoomHistory(200),
     schedules: schedulesList(),
     timeline: dashboardTimeline.slice(-300),
@@ -5816,6 +6098,8 @@ function buildStatePayload(host: string, port: number): JsonObject {
     opsMissionCount: Object.keys(opsMissions).length,
     opsMissionRunCount: opsMissionRuns.length,
     opsMissionScheduleCount: Object.keys(opsMissionSchedules).length,
+    opsMissionPolicySuspended: currentOpsMissionPolicyState().suspended,
+    opsMissionPolicyResumeAt: currentOpsMissionPolicyState().resumeAt,
     controlRoomHistoryCount: controlRoomHistory.length,
     runbookExecutionCount: runbookExecutions.length,
     laneCount: totals.laneCount,
@@ -5900,6 +6184,7 @@ function buildOpsBoard(host: string, port: number): JsonObject {
     opsMissions: listOpsMissions(),
     opsMissionRuns: opsMissionRuns.slice(-60),
     opsMissionSchedules: listOpsMissionSchedules(),
+    opsMissionPolicy: currentOpsMissionPolicyState(),
     controlRoomHistory: listControlRoomHistory(80),
     updateHint: UPDATE_HINT,
   };
@@ -5955,6 +6240,7 @@ function buildSessionExport(): JsonObject {
     opsMissions,
     opsMissionRuns,
     opsMissionSchedules,
+    opsMissionPolicy: currentOpsMissionPolicyState(),
     controlRoomHistory,
     lanes: lanesSummary(),
     jobs,
@@ -6481,12 +6767,91 @@ async function handleApi(
     return;
   }
 
+  if (method === 'GET' && pathname === '/api/ops/missions/policy') {
+    await withMetric('ops-missions-policy-get', () => {
+      sendJson(response, 200, {
+        ok: true,
+        policy: currentOpsMissionPolicyState(),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/policy') {
+    await withMetric('ops-missions-policy-update', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, {
+        ok: true,
+        policy: updateOpsMissionPolicyState(body),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/policy/suspend') {
+    await withMetric('ops-missions-policy-suspend', async () => {
+      const body = await readJsonBody(request);
+      const reason = typeof body.reason === 'string' && body.reason.trim().length > 0
+        ? body.reason.trim()
+        : 'manual-suspend';
+      sendJson(response, 200, {
+        ok: true,
+        policy: suspendOpsMissionPolicyState(reason),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/policy/resume') {
+    await withMetric('ops-missions-policy-resume', async () => {
+      const body = await readJsonBody(request);
+      const reason = typeof body.reason === 'string' && body.reason.trim().length > 0
+        ? body.reason.trim()
+        : 'manual-resume';
+      sendJson(response, 200, {
+        ok: true,
+        policy: resumeOpsMissionPolicyState(reason),
+      });
+    });
+    return;
+  }
+
   if (method === 'GET' && pathname === '/api/ops/missions/schedules') {
     await withMetric('ops-missions-schedules-list', () => {
       sendJson(response, 200, {
         ok: true,
         schedules: listOpsMissionSchedules(),
       });
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/missions/schedules/forecast') {
+    await withMetric('ops-missions-schedules-forecast', () => {
+      const horizonMsRaw = Number(url.searchParams.get('horizonMs') ?? '1200000');
+      sendJson(response, 200, missionSchedulePolicyForecast(horizonMsRaw));
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/schedules/pause-all') {
+    await withMetric('ops-missions-schedules-pause-all', () => {
+      sendJson(response, 200, setAllOpsMissionSchedulesActive(false));
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/schedules/resume-all') {
+    await withMetric('ops-missions-schedules-resume-all', () => {
+      sendJson(response, 200, setAllOpsMissionSchedulesActive(true));
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/schedules/rebalance') {
+    await withMetric('ops-missions-schedules-rebalance', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, rebalanceOpsMissionSchedules(body));
     });
     return;
   }
@@ -8468,7 +8833,44 @@ https://developer.android.com</textarea>
             <button class="s" id="ops-mission-schedule-run-now-btn">Run now</button>
             <button class="w" id="ops-mission-schedule-delete-btn">Delete schedule</button>
           </div>
+          <div class="split">
+            <button class="w" id="ops-mission-schedules-pause-all-btn">Pause all schedules</button>
+            <button class="p" id="ops-mission-schedules-resume-all-btn">Resume all schedules</button>
+          </div>
+          <div class="split">
+            <input id="ops-mission-schedules-factor" type="number" step="0.1" min="0.1" value="1.2" />
+            <button class="s" id="ops-mission-schedules-rebalance-btn">Rebalance schedules</button>
+          </div>
+          <div class="split">
+            <input id="ops-mission-forecast-horizon-ms" type="number" min="60000" value="1200000" />
+            <button class="s" id="ops-mission-forecast-btn">Forecast schedule runs</button>
+          </div>
           <div id="ops-mission-schedules-panel" class="metrics"></div>
+          <div id="ops-mission-forecast-panel" class="metrics"></div>
+          <hr style="border:0;border-top:1px solid #2f4a61;" />
+          <div class="split">
+            <select id="ops-mission-policy-block">
+              <option value="true">block on gate fail: true</option>
+              <option value="false">block on gate fail: false</option>
+            </select>
+            <input id="ops-mission-policy-max-failures" type="number" min="1" value="3" />
+          </div>
+          <div class="split">
+            <input id="ops-mission-policy-cooldown-ms" type="number" min="5000" value="180000" />
+            <select id="ops-mission-policy-auto-resume">
+              <option value="true">auto-resume: true</option>
+              <option value="false">auto-resume: false</option>
+            </select>
+          </div>
+          <div class="split">
+            <button class="s" id="ops-mission-policy-load-btn">Load mission policy</button>
+            <button class="s" id="ops-mission-policy-save-btn">Save mission policy</button>
+          </div>
+          <div class="split">
+            <button class="w" id="ops-mission-policy-suspend-btn">Suspend scheduler</button>
+            <button class="p" id="ops-mission-policy-resume-btn">Resume scheduler</button>
+          </div>
+          <div id="ops-mission-policy-panel" class="metrics"></div>
         </article>
 
         <article class="card stack">
@@ -8598,6 +9000,14 @@ https://developer.android.com</textarea>
       const $opsMissionScheduleEveryMs = document.getElementById('ops-mission-schedule-every-ms');
       const $opsMissionScheduleMaxItems = document.getElementById('ops-mission-schedule-max-items');
       const $opsMissionSchedulesPanel = document.getElementById('ops-mission-schedules-panel');
+      const $opsMissionSchedulesFactor = document.getElementById('ops-mission-schedules-factor');
+      const $opsMissionForecastHorizonMs = document.getElementById('ops-mission-forecast-horizon-ms');
+      const $opsMissionForecastPanel = document.getElementById('ops-mission-forecast-panel');
+      const $opsMissionPolicyBlock = document.getElementById('ops-mission-policy-block');
+      const $opsMissionPolicyMaxFailures = document.getElementById('ops-mission-policy-max-failures');
+      const $opsMissionPolicyCooldownMs = document.getElementById('ops-mission-policy-cooldown-ms');
+      const $opsMissionPolicyAutoResume = document.getElementById('ops-mission-policy-auto-resume');
+      const $opsMissionPolicyPanel = document.getElementById('ops-mission-policy-panel');
       const $queueSnapshotName = document.getElementById('queue-snapshot-name');
       const $campaignDeviceIds = document.getElementById('campaign-device-ids');
 
@@ -9004,6 +9414,46 @@ https://developer.android.com</textarea>
         if (!schedules.length) {
           $opsMissionSchedulesPanel.textContent = 'No mission schedules.';
         }
+      }
+
+      function renderOpsMissionForecast(payload) {
+        if (!$opsMissionForecastPanel) {
+          return;
+        }
+        const items = Array.isArray(payload && payload.items) ? payload.items : [];
+        $opsMissionForecastPanel.innerHTML = '';
+        const head = document.createElement('div');
+        head.className = 'item';
+        head.innerHTML =
+          '<div class="meta">forecast horizonMs=' + (payload.horizonMs || 0) + '</div>' +
+          '<div>suspended=' + String(payload.suspended === true) + ' resumeAt=' + (payload.resumeAt || '-') + '</div>' +
+          '<div>plannedRuns=' + items.length + '</div>';
+        $opsMissionForecastPanel.appendChild(head);
+        for (const item of items.slice(0, 30)) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">[' + item.at + '] #' + item.id + ' ' + item.name + '</div>' +
+            '<div>mission=' + item.mission + '</div>';
+          $opsMissionForecastPanel.appendChild(row);
+        }
+      }
+
+      function renderOpsMissionPolicy(payload) {
+        if (!$opsMissionPolicyPanel) {
+          return;
+        }
+        const policy = payload && payload.policy ? payload.policy : payload || {};
+        $opsMissionPolicyPanel.innerHTML = '';
+        const row = document.createElement('div');
+        row.className = 'item';
+        row.innerHTML =
+          '<div class="meta">scheduler policy</div>' +
+          '<div>block=' + String(policy.blockSchedulesOnGateFail !== false) + ' maxFailures=' + (policy.maxConsecutiveFailures || 0) + '</div>' +
+          '<div>cooldownMs=' + (policy.cooldownMs || 0) + ' autoResume=' + String(policy.autoResumeAfterCooldown !== false) + '</div>' +
+          '<div>suspended=' + String(policy.suspended === true) + ' reason=' + (policy.suspendedReason || '-') + ' resumeAt=' + (policy.resumeAt || '-') + '</div>' +
+          '<div>consecutiveFailures=' + (policy.consecutiveFailures || 0) + '</div>';
+        $opsMissionPolicyPanel.appendChild(row);
       }
 
       function renderSchedules(payload) {
@@ -10710,6 +11160,81 @@ https://developer.android.com</textarea>
         await listOpsMissionSchedulesUi();
       }
 
+      async function loadOpsMissionPolicyUi() {
+        const result = await api('/api/ops/missions/policy');
+        renderOpsMissionPolicy(result);
+        renderOutput(result);
+        const policy = result.policy || {};
+        $opsMissionPolicyBlock.value = policy.blockSchedulesOnGateFail === false ? 'false' : 'true';
+        $opsMissionPolicyMaxFailures.value = String(policy.maxConsecutiveFailures || 3);
+        $opsMissionPolicyCooldownMs.value = String(policy.cooldownMs || 180000);
+        $opsMissionPolicyAutoResume.value = policy.autoResumeAfterCooldown === false ? 'false' : 'true';
+        setMessage('Mission policy loaded', false);
+      }
+
+      async function saveOpsMissionPolicyUi() {
+        const result = await api('/api/ops/missions/policy', 'POST', {
+          blockSchedulesOnGateFail: asBoolean($opsMissionPolicyBlock.value, true),
+          maxConsecutiveFailures: Number($opsMissionPolicyMaxFailures.value || '3'),
+          cooldownMs: Number($opsMissionPolicyCooldownMs.value || '180000'),
+          autoResumeAfterCooldown: asBoolean($opsMissionPolicyAutoResume.value, true),
+        });
+        renderOpsMissionPolicy(result);
+        renderOutput(result);
+        setMessage('Mission policy updated', false);
+      }
+
+      async function suspendOpsMissionPolicyUi() {
+        const result = await api('/api/ops/missions/policy/suspend', 'POST', {
+          reason: 'web-ui-manual-suspend',
+        });
+        renderOpsMissionPolicy(result);
+        renderOutput(result);
+        setMessage('Mission scheduler suspended', false);
+      }
+
+      async function resumeOpsMissionPolicyUi() {
+        const result = await api('/api/ops/missions/policy/resume', 'POST', {
+          reason: 'web-ui-manual-resume',
+        });
+        renderOpsMissionPolicy(result);
+        renderOutput(result);
+        setMessage('Mission scheduler resumed', false);
+      }
+
+      async function pauseAllOpsMissionSchedulesUi() {
+        const result = await api('/api/ops/missions/schedules/pause-all', 'POST', {});
+        renderOpsMissionSchedules(result);
+        renderOutput(result);
+        setMessage('All mission schedules paused', false);
+      }
+
+      async function resumeAllOpsMissionSchedulesUi() {
+        const result = await api('/api/ops/missions/schedules/resume-all', 'POST', {});
+        renderOpsMissionSchedules(result);
+        renderOutput(result);
+        setMessage('All mission schedules resumed', false);
+      }
+
+      async function rebalanceOpsMissionSchedulesUi() {
+        const result = await api('/api/ops/missions/schedules/rebalance', 'POST', {
+          factor: Number($opsMissionSchedulesFactor.value || '1'),
+          minEveryMs: 5000,
+          maxEveryMs: 24 * 60 * 60 * 1000,
+        });
+        renderOpsMissionSchedules(result);
+        renderOutput(result);
+        setMessage('Mission schedules rebalanced', false);
+      }
+
+      async function forecastOpsMissionSchedulesUi() {
+        const horizonMs = Number($opsMissionForecastHorizonMs.value || '1200000');
+        const result = await api('/api/ops/missions/schedules/forecast?horizonMs=' + encodeURIComponent(String(horizonMs)));
+        renderOpsMissionForecast(result);
+        renderOutput(result);
+        setMessage('Mission schedule forecast ready', false);
+      }
+
       async function runOpsStabilizeUi() {
         const result = await api('/api/ops/stabilize', 'POST', {
           laneId: selectedLaneId(),
@@ -11085,6 +11610,30 @@ https://developer.android.com</textarea>
       document.getElementById('ops-mission-schedule-delete-btn').addEventListener('click', async function () {
         try { await deleteOpsMissionScheduleUi(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('ops-mission-schedules-pause-all-btn').addEventListener('click', async function () {
+        try { await pauseAllOpsMissionSchedulesUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-schedules-resume-all-btn').addEventListener('click', async function () {
+        try { await resumeAllOpsMissionSchedulesUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-schedules-rebalance-btn').addEventListener('click', async function () {
+        try { await rebalanceOpsMissionSchedulesUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-forecast-btn').addEventListener('click', async function () {
+        try { await forecastOpsMissionSchedulesUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-policy-load-btn').addEventListener('click', async function () {
+        try { await loadOpsMissionPolicyUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-policy-save-btn').addEventListener('click', async function () {
+        try { await saveOpsMissionPolicyUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-policy-suspend-btn').addEventListener('click', async function () {
+        try { await suspendOpsMissionPolicyUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-policy-resume-btn').addEventListener('click', async function () {
+        try { await resumeOpsMissionPolicyUi(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('clear-output-btn').addEventListener('click', function () {
         renderOutput({});
       });
@@ -11161,6 +11710,8 @@ https://developer.android.com</textarea>
           await listOpsMissionsUi();
           await listOpsMissionRunsUi();
           await listOpsMissionSchedulesUi();
+          await loadOpsMissionPolicyUi();
+          await forecastOpsMissionSchedulesUi();
           renderOutput({ ok: true, message: 'UI ready', updateHint: '${UPDATE_HINT}' });
           setMessage('Ready.', false);
 
@@ -11185,6 +11736,8 @@ https://developer.android.com</textarea>
               renderOpsMissionRuns(missionRunsPayload);
               const missionSchedulesPayload = await api('/api/ops/missions/schedules');
               renderOpsMissionSchedules(missionSchedulesPayload);
+              const missionPolicyPayload = await api('/api/ops/missions/policy');
+              renderOpsMissionPolicy(missionPolicyPayload);
               const schedulesPayload = await api('/api/schedules');
               renderSchedules(schedulesPayload);
               const queueBoardPayload = await api('/api/board/queue');
