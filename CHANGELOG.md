@@ -24,6 +24,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.17.0] - 2026-02-20
+### Added
+- New persisted ops mission orchestration model with mission definitions (`scenario + policy preset + watchdog profile + gate policy + action queue plan`).
+- New ops mission API workflows:
+- `GET /api/ops/missions`
+- `POST /api/ops/missions`
+- `DELETE /api/ops/missions/:name`
+- `POST /api/ops/missions/plan`
+- `POST /api/ops/missions/run`
+- `GET /api/ops/missions/runs`
+- `POST /api/ops/missions/runs/clear`
+- New Web UI Mission Control section with:
+- mission authoring (scenario/policy/watchdog/queue/gate binding)
+- one-click mission planning and execution
+- live mission run history panel with status and gate result visibility.
+
+### Improved
+- Release gate evaluation now supports reusable policy-normalization and mission-specific gate previews.
+- Ops board/state/session/audit payloads now include mission inventory and mission run history for stronger operator handoff and diagnostics.
+
 ## [3.16.0] - 2026-02-19
 ### Added
 - New operations scenario management workflows:

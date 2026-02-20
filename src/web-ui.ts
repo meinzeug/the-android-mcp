@@ -40,6 +40,7 @@ const QUEUE_SNAPSHOTS_FILE = path.join(APP_STATE_DIR, 'web-ui-queue-snapshots.js
 const OPS_SCENARIOS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-scenarios.json');
 const OPS_POLICY_PRESETS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-policy-presets.json');
 const WATCHDOG_PROFILES_FILE = path.join(APP_STATE_DIR, 'web-ui-watchdog-profiles.json');
+const OPS_MISSIONS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-missions.json');
 
 const SNAPSHOT_KINDS = [
   'radio',
@@ -273,6 +274,36 @@ interface OpsActionQueueItem {
   error?: string;
 }
 
+interface OpsMissionAction {
+  type: OpsActionQueueItem['type'];
+  payload: JsonObject;
+}
+
+interface OpsMission {
+  name: string;
+  updatedAt: string;
+  description?: string;
+  scenarioName?: string;
+  policyPresetName?: string;
+  watchdogProfileName?: string;
+  preflightUrl?: string;
+  gatePolicy?: JsonObject;
+  queuePlan: OpsMissionAction[];
+  autoRunQueue: boolean;
+}
+
+interface OpsMissionRun {
+  id: number;
+  mission: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  ok: boolean;
+  steps: JsonObject[];
+  gate?: JsonObject;
+  error?: string;
+}
+
 const serverStartedAt = Date.now();
 let eventSeq = 1;
 let jobSeq = 1;
@@ -313,6 +344,7 @@ let queueSnapshots: Record<string, QueueSnapshotRecord> = loadQueueSnapshots();
 let opsScenarios: Record<string, OpsScenario> = loadOpsScenarios();
 let opsPolicyPresets: Record<string, OpsPolicyPreset> = loadOpsPolicyPresets();
 let watchdogProfiles: Record<string, WatchdogProfile> = loadWatchdogProfiles();
+let opsMissions: Record<string, OpsMission> = loadOpsMissions();
 const opsActionQueue: OpsActionQueueItem[] = [];
 let opsActionSeq = 1;
 let opsGatePolicy: JsonObject = {
@@ -321,6 +353,8 @@ let opsGatePolicy: JsonObject = {
   maxFailedJobs: 0,
   maxOpenIncidents: 0,
 };
+const opsMissionRuns: OpsMissionRun[] = [];
+let opsMissionRunSeq = 1;
 const runbookExecutions: RunbookExecution[] = [];
 const controlRoomHistory: ControlRoomHistoryPoint[] = [];
 let controlRoomHistorySeq = 1;
@@ -355,6 +389,16 @@ function isJobType(value: string): value is JobType {
     value === 'stress_run' ||
     value === 'workflow_run' ||
     value === 'device_profile'
+  );
+}
+
+function isOpsActionType(value: string): value is OpsActionQueueItem['type'] {
+  return (
+    value === 'stabilize' ||
+    value === 'watchdog' ||
+    value === 'chaos-drill' ||
+    value === 'scenario-run' ||
+    value === 'campaign'
   );
 }
 
@@ -1444,6 +1488,122 @@ function saveWatchdogProfiles(): void {
 
 function listWatchdogProfiles(): WatchdogProfile[] {
   return Object.values(watchdogProfiles).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function defaultOpsMissions(): Record<string, OpsMission> {
+  return {
+    'release-guard-default': {
+      name: 'release-guard-default',
+      updatedAt: nowIso(),
+      description: 'Default release mission for stabilization + guard checks.',
+      scenarioName: 'stability-default',
+      policyPresetName: 'balanced-default',
+      watchdogProfileName: 'watchdog-default',
+      preflightUrl: 'https://www.wikipedia.org',
+      gatePolicy: {
+        minScore: 80,
+        allowedSeverity: 'green',
+        maxFailedJobs: 0,
+        maxOpenIncidents: 0,
+      },
+      queuePlan: [
+        {
+          type: 'scenario-run',
+          payload: {
+            name: 'stability-default',
+          },
+        },
+        {
+          type: 'watchdog',
+          payload: {
+            autoHealOnAlert: true,
+          },
+        },
+      ],
+      autoRunQueue: true,
+    },
+  };
+}
+
+function normalizeMissionQueuePlan(value: unknown): OpsMissionAction[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized: OpsMissionAction[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+    const entry = item as Record<string, unknown>;
+    const type = typeof entry.type === 'string' ? entry.type.trim() : '';
+    if (!isOpsActionType(type)) {
+      continue;
+    }
+    normalized.push({
+      type,
+      payload: entry.payload && typeof entry.payload === 'object' && !Array.isArray(entry.payload)
+        ? (entry.payload as JsonObject)
+        : {},
+    });
+  }
+  return normalized;
+}
+
+function loadOpsMissions(): Record<string, OpsMission> {
+  try {
+    ensureAppStateDir();
+    if (!fs.existsSync(OPS_MISSIONS_FILE)) {
+      const defaults = defaultOpsMissions();
+      fs.writeFileSync(OPS_MISSIONS_FILE, JSON.stringify(defaults, null, 2), 'utf8');
+      return defaults;
+    }
+    const raw = fs.readFileSync(OPS_MISSIONS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return defaultOpsMissions();
+    }
+    const result: Record<string, OpsMission> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        continue;
+      }
+      const item = value as Record<string, unknown>;
+      const name = typeof item.name === 'string' && item.name.trim().length > 0 ? item.name.trim() : key;
+      if (!name) {
+        continue;
+      }
+      const gatePolicyRaw = item.gatePolicy && typeof item.gatePolicy === 'object' && !Array.isArray(item.gatePolicy)
+        ? (item.gatePolicy as JsonObject)
+        : undefined;
+      const preflightUrl = typeof item.preflightUrl === 'string' && /^https?:\/\//i.test(item.preflightUrl)
+        ? item.preflightUrl
+        : undefined;
+      result[name] = {
+        name,
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : nowIso(),
+        description: typeof item.description === 'string' ? item.description : undefined,
+        scenarioName: typeof item.scenarioName === 'string' && item.scenarioName.trim().length > 0 ? item.scenarioName.trim() : undefined,
+        policyPresetName: typeof item.policyPresetName === 'string' && item.policyPresetName.trim().length > 0 ? item.policyPresetName.trim() : undefined,
+        watchdogProfileName: typeof item.watchdogProfileName === 'string' && item.watchdogProfileName.trim().length > 0 ? item.watchdogProfileName.trim() : undefined,
+        preflightUrl,
+        gatePolicy: gatePolicyRaw ? normalizeOpsGatePolicy(gatePolicyRaw) : undefined,
+        queuePlan: normalizeMissionQueuePlan(item.queuePlan),
+        autoRunQueue: item.autoRunQueue !== false,
+      };
+    }
+    return Object.keys(result).length > 0 ? result : defaultOpsMissions();
+  } catch {
+    return defaultOpsMissions();
+  }
+}
+
+function saveOpsMissions(): void {
+  ensureAppStateDir();
+  fs.writeFileSync(OPS_MISSIONS_FILE, JSON.stringify(opsMissions, null, 2), 'utf8');
+}
+
+function listOpsMissions(): OpsMission[] {
+  return Object.values(opsMissions).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function loadSchedules(): void {
@@ -3738,28 +3898,17 @@ function runWatchdogProfile(nameRaw: string, body: JsonObject, host: string, por
   }, host, port);
 }
 
-function currentOpsGatePolicy(): JsonObject {
+function normalizeOpsGatePolicy(input: JsonObject): JsonObject {
   return {
-    minScore: clampInt(opsGatePolicy.minScore, 80, 0, 100),
-    allowedSeverity: typeof opsGatePolicy.allowedSeverity === 'string' ? opsGatePolicy.allowedSeverity : 'green',
-    maxFailedJobs: clampInt(opsGatePolicy.maxFailedJobs, 0, 0, 100000),
-    maxOpenIncidents: clampInt(opsGatePolicy.maxOpenIncidents, 0, 0, 100000),
+    minScore: clampInt(input.minScore, 80, 0, 100),
+    allowedSeverity: typeof input.allowedSeverity === 'string' ? input.allowedSeverity : 'green',
+    maxFailedJobs: clampInt(input.maxFailedJobs, 0, 0, 100000),
+    maxOpenIncidents: clampInt(input.maxOpenIncidents, 0, 0, 100000),
   };
 }
 
-function updateOpsGatePolicy(body: JsonObject): JsonObject {
-  opsGatePolicy = {
-    minScore: clampInt(body.minScore, clampInt(opsGatePolicy.minScore, 80, 0, 100), 0, 100),
-    allowedSeverity: typeof body.allowedSeverity === 'string' ? body.allowedSeverity : (typeof opsGatePolicy.allowedSeverity === 'string' ? opsGatePolicy.allowedSeverity : 'green'),
-    maxFailedJobs: clampInt(body.maxFailedJobs, clampInt(opsGatePolicy.maxFailedJobs, 0, 0, 100000), 0, 100000),
-    maxOpenIncidents: clampInt(body.maxOpenIncidents, clampInt(opsGatePolicy.maxOpenIncidents, 0, 0, 100000), 0, 100000),
-  };
-  pushEvent('ops-gate-policy-updated', 'Ops gate policy updated', opsGatePolicy);
-  return currentOpsGatePolicy();
-}
-
-function evaluateOpsGate(host: string, port: number): JsonObject {
-  const policy = currentOpsGatePolicy();
+function evaluateOpsGateWithPolicy(policyInput: JsonObject, host: string, port: number): JsonObject {
+  const policy = normalizeOpsGatePolicy(policyInput);
   const control = buildControlRoomPayload(host, port);
   const diagnostics = buildDiagnosticsReport(host, port);
   const failedJobsCount = Array.isArray(diagnostics.failedJobs) ? diagnostics.failedJobs.length : 0;
@@ -3795,10 +3944,33 @@ function evaluateOpsGate(host: string, port: number): JsonObject {
   return {
     ok: true,
     pass,
-    checkedAt: nowIso(),
     policy,
     control,
     checks,
+  };
+}
+
+function currentOpsGatePolicy(): JsonObject {
+  return normalizeOpsGatePolicy(opsGatePolicy);
+}
+
+function updateOpsGatePolicy(body: JsonObject): JsonObject {
+  const current = currentOpsGatePolicy();
+  opsGatePolicy = normalizeOpsGatePolicy({
+    minScore: body.minScore ?? current.minScore,
+    allowedSeverity: typeof body.allowedSeverity === 'string' ? body.allowedSeverity : current.allowedSeverity,
+    maxFailedJobs: body.maxFailedJobs ?? current.maxFailedJobs,
+    maxOpenIncidents: body.maxOpenIncidents ?? current.maxOpenIncidents,
+  });
+  pushEvent('ops-gate-policy-updated', 'Ops gate policy updated', opsGatePolicy);
+  return currentOpsGatePolicy();
+}
+
+function evaluateOpsGate(host: string, port: number): JsonObject {
+  const result = evaluateOpsGateWithPolicy(currentOpsGatePolicy(), host, port);
+  return {
+    ...result,
+    checkedAt: nowIso(),
     updateHint: UPDATE_HINT,
   };
 }
@@ -3946,6 +4118,321 @@ function clearOpsActionQueue(body: JsonObject): JsonObject {
   };
 }
 
+function saveOpsMission(nameRaw: string, body: JsonObject): OpsMission {
+  const name = nameRaw.trim();
+  if (!name) {
+    throw new Error('mission name is required');
+  }
+  const queuePlan = normalizeMissionQueuePlan(body.queuePlan);
+  const mission: OpsMission = {
+    name,
+    updatedAt: nowIso(),
+    description: typeof body.description === 'string' ? body.description : undefined,
+    scenarioName: typeof body.scenarioName === 'string' && body.scenarioName.trim().length > 0 ? body.scenarioName.trim() : undefined,
+    policyPresetName: typeof body.policyPresetName === 'string' && body.policyPresetName.trim().length > 0 ? body.policyPresetName.trim() : undefined,
+    watchdogProfileName: typeof body.watchdogProfileName === 'string' && body.watchdogProfileName.trim().length > 0 ? body.watchdogProfileName.trim() : undefined,
+    preflightUrl: typeof body.preflightUrl === 'string' && /^https?:\/\//i.test(body.preflightUrl) ? body.preflightUrl : undefined,
+    gatePolicy: body.gatePolicy && typeof body.gatePolicy === 'object' && !Array.isArray(body.gatePolicy)
+      ? normalizeOpsGatePolicy(body.gatePolicy as JsonObject)
+      : undefined,
+    queuePlan,
+    autoRunQueue: body.autoRunQueue !== false,
+  };
+  if (mission.queuePlan.length === 0 && mission.scenarioName) {
+    mission.queuePlan.push({
+      type: 'scenario-run',
+      payload: { name: mission.scenarioName },
+    });
+  }
+  opsMissions[name] = mission;
+  saveOpsMissions();
+  pushEvent('ops-mission-saved', 'Ops mission saved', { name });
+  return mission;
+}
+
+function deleteOpsMission(nameRaw: string): boolean {
+  const name = nameRaw.trim();
+  if (!name || !opsMissions[name]) {
+    return false;
+  }
+  delete opsMissions[name];
+  saveOpsMissions();
+  pushEvent('ops-mission-deleted', 'Ops mission deleted', { name });
+  return true;
+}
+
+function listOpsMissionRuns(limitRaw: unknown): JsonObject {
+  const limit = clampInt(limitRaw, 120, 1, 1000);
+  const runs = opsMissionRuns.slice(-limit).reverse();
+  return {
+    ok: true,
+    count: runs.length,
+    runs,
+  };
+}
+
+function clearOpsMissionRuns(body: JsonObject): JsonObject {
+  const keepLatest = clampInt(body.keepLatest, 0, 0, 1000);
+  const before = opsMissionRuns.length;
+  if (keepLatest === 0) {
+    opsMissionRuns.splice(0, opsMissionRuns.length);
+  } else if (before > keepLatest) {
+    opsMissionRuns.splice(0, before - keepLatest);
+  }
+  const removed = before - opsMissionRuns.length;
+  pushEvent('ops-mission-runs-cleared', 'Ops mission run history pruned', { removed, keepLatest });
+  return {
+    ok: true,
+    before,
+    after: opsMissionRuns.length,
+    removed,
+    keepLatest,
+  };
+}
+
+function resolveOpsMission(nameRaw: string): OpsMission {
+  const name = nameRaw.trim();
+  if (!name) {
+    throw new Error('mission name is required');
+  }
+  const mission = opsMissions[name];
+  if (!mission) {
+    throw new Error(`mission '${name}' not found`);
+  }
+  return mission;
+}
+
+function planOpsMission(nameRaw: string, body: JsonObject, host: string, port: number): JsonObject {
+  const mission = resolveOpsMission(nameRaw);
+  const scenarioExists = mission.scenarioName ? Boolean(opsScenarios[mission.scenarioName]) : true;
+  const policyPresetExists = mission.policyPresetName ? Boolean(opsPolicyPresets[mission.policyPresetName]) : true;
+  const watchdogProfileExists = mission.watchdogProfileName ? Boolean(watchdogProfiles[mission.watchdogProfileName]) : true;
+  const unknownActionTypes = mission.queuePlan
+    .map(item => item.type)
+    .filter(type => !isOpsActionType(type));
+  const gatePreview = evaluateOpsGateWithPolicy(
+    mission.gatePolicy ? mission.gatePolicy : currentOpsGatePolicy(),
+    host,
+    port
+  );
+  const checks = [
+    {
+      check: 'scenario',
+      pass: scenarioExists,
+      value: mission.scenarioName || '-',
+    },
+    {
+      check: 'policyPreset',
+      pass: policyPresetExists,
+      value: mission.policyPresetName || '-',
+    },
+    {
+      check: 'watchdogProfile',
+      pass: watchdogProfileExists,
+      value: mission.watchdogProfileName || '-',
+    },
+    {
+      check: 'queuePlanTypes',
+      pass: unknownActionTypes.length === 0,
+      value: unknownActionTypes.length === 0 ? 'ok' : unknownActionTypes.join(','),
+    },
+    {
+      check: 'gatePreview',
+      pass: gatePreview.pass === true,
+      value: gatePreview.pass === true ? 'pass' : 'fail',
+    },
+  ];
+  const ready = checks.every(item => item.pass);
+  return {
+    ok: true,
+    ready,
+    plannedAt: nowIso(),
+    mission,
+    checks,
+    gatePreview,
+    suggestedMaxQueueRun: Math.max(1, mission.queuePlan.length || 1),
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function runOpsMission(nameRaw: string, body: JsonObject, host: string, port: number): JsonObject {
+  const mission = resolveOpsMission(nameRaw);
+  const startedAt = nowIso();
+  const startedMs = Date.now();
+  const steps: JsonObject[] = [];
+  let gate: JsonObject | undefined;
+  const laneId = typeof body.laneId === 'string' && body.laneId.trim().length > 0 ? body.laneId.trim() : undefined;
+
+  try {
+    if (mission.policyPresetName) {
+      const appliedPolicy = applyOpsPolicyPreset(mission.policyPresetName);
+      steps.push({
+        step: 'apply-policy-preset',
+        ok: true,
+        name: mission.policyPresetName,
+        policy: appliedPolicy.policy,
+      });
+    }
+
+    if (mission.gatePolicy) {
+      const updatedGate = updateOpsGatePolicy(mission.gatePolicy);
+      steps.push({
+        step: 'apply-gate-policy',
+        ok: true,
+        policy: updatedGate,
+      });
+    }
+
+    const url = typeof body.url === 'string' && /^https?:\/\//i.test(body.url)
+      ? body.url
+      : mission.preflightUrl;
+    if (url) {
+      const openResult = openUrlInChrome(url, extractDeviceId(body), {
+        waitForReadyMs: clampInt(body.waitForReadyMs, 900, 200, 15000),
+        fallbackToDefault: true,
+      });
+      steps.push({
+        step: 'preflight-open-url',
+        ok: true,
+        url,
+        deviceId: openResult.deviceId,
+      });
+    }
+
+    if (mission.scenarioName) {
+      const scenarioResult = runOpsScenario({
+        ...body,
+        name: mission.scenarioName,
+        laneId,
+      }, host, port);
+      steps.push({
+        step: 'scenario-run',
+        ok: scenarioResult.ok !== false,
+        name: mission.scenarioName,
+      });
+    }
+
+    if (mission.watchdogProfileName) {
+      const watchdogResult = runWatchdogProfile(mission.watchdogProfileName, {
+        ...body,
+        laneId,
+      }, host, port);
+      steps.push({
+        step: 'watchdog-profile-run',
+        ok: watchdogResult.ok !== false,
+        name: mission.watchdogProfileName,
+      });
+    }
+
+    const queued: OpsActionQueueItem[] = [];
+    for (const action of mission.queuePlan) {
+      const payload: JsonObject = action.payload && typeof action.payload === 'object' ? { ...action.payload } : {};
+      if (laneId && typeof payload.laneId !== 'string') {
+        payload.laneId = laneId;
+      }
+      if (action.type === 'scenario-run' && mission.scenarioName && typeof payload.name !== 'string') {
+        payload.name = mission.scenarioName;
+      }
+      const item = enqueueOpsAction({
+        type: action.type,
+        payload,
+      });
+      queued.push(item);
+    }
+    steps.push({
+      step: 'enqueue-actions',
+      ok: true,
+      queued: queued.length,
+    });
+
+    if ((mission.autoRunQueue || body.autoRunQueue === true) && queued.length > 0) {
+      const maxItems = clampInt(body.maxQueueItems, queued.length, 1, 400);
+      const queueRun = runAllOpsActions(host, port, maxItems);
+      steps.push({
+        step: 'run-action-queue',
+        ok: queueRun.ok !== false,
+        executed: queueRun.executed,
+      });
+    }
+
+    gate = evaluateOpsGateWithPolicy(
+      mission.gatePolicy ? mission.gatePolicy : currentOpsGatePolicy(),
+      host,
+      port
+    );
+    const ok = steps.every(item => item.ok !== false) && gate.pass === true;
+    const finishedAt = nowIso();
+    const durationMs = Date.now() - startedMs;
+
+    const record: OpsMissionRun = {
+      id: opsMissionRunSeq++,
+      mission: mission.name,
+      startedAt,
+      finishedAt,
+      durationMs,
+      ok,
+      steps,
+      gate,
+    };
+    opsMissionRuns.push(record);
+    if (opsMissionRuns.length > MAX_JOBS) {
+      opsMissionRuns.splice(0, opsMissionRuns.length - MAX_JOBS);
+    }
+
+    pushEvent('ops-mission-run', 'Ops mission executed', {
+      name: mission.name,
+      ok,
+      durationMs,
+      gatePass: gate.pass,
+    });
+
+    return {
+      ok,
+      mission: mission.name,
+      startedAt,
+      finishedAt,
+      durationMs,
+      steps,
+      gate,
+      updateHint: UPDATE_HINT,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const finishedAt = nowIso();
+    const durationMs = Date.now() - startedMs;
+    const record: OpsMissionRun = {
+      id: opsMissionRunSeq++,
+      mission: mission.name,
+      startedAt,
+      finishedAt,
+      durationMs,
+      ok: false,
+      steps,
+      gate,
+      error: message,
+    };
+    opsMissionRuns.push(record);
+    if (opsMissionRuns.length > MAX_JOBS) {
+      opsMissionRuns.splice(0, opsMissionRuns.length - MAX_JOBS);
+    }
+    pushEvent('ops-mission-failed', 'Ops mission failed', {
+      name: mission.name,
+      error: message,
+    });
+    return {
+      ok: false,
+      mission: mission.name,
+      startedAt,
+      finishedAt,
+      durationMs,
+      steps,
+      gate,
+      error: message,
+      updateHint: UPDATE_HINT,
+    };
+  }
+}
+
 function buildAuditExport(host: string, port: number): JsonObject {
   return {
     ok: true,
@@ -3961,6 +4448,8 @@ function buildAuditExport(host: string, port: number): JsonObject {
     opsGatePolicy: currentOpsGatePolicy(),
     opsActionQueue: opsActionQueue.slice(-200),
     opsScenarios: listOpsScenarios(),
+    opsMissions: listOpsMissions(),
+    opsMissionRuns: opsMissionRuns.slice(-200),
     controlRoomHistory: listControlRoomHistory(200),
     schedules: schedulesList(),
     timeline: dashboardTimeline.slice(-300),
@@ -5034,6 +5523,8 @@ function buildStatePayload(host: string, port: number): JsonObject {
     watchdogProfileCount: Object.keys(watchdogProfiles).length,
     opsActionQueueCount: opsActionQueue.length,
     opsScenarioCount: Object.keys(opsScenarios).length,
+    opsMissionCount: Object.keys(opsMissions).length,
+    opsMissionRunCount: opsMissionRuns.length,
     controlRoomHistoryCount: controlRoomHistory.length,
     runbookExecutionCount: runbookExecutions.length,
     laneCount: totals.laneCount,
@@ -5115,6 +5606,8 @@ function buildOpsBoard(host: string, port: number): JsonObject {
     opsGatePolicy: currentOpsGatePolicy(),
     opsActionQueue: opsActionQueue.slice(-40),
     opsScenarios: listOpsScenarios(),
+    opsMissions: listOpsMissions(),
+    opsMissionRuns: opsMissionRuns.slice(-60),
     controlRoomHistory: listControlRoomHistory(80),
     updateHint: UPDATE_HINT,
   };
@@ -5167,6 +5660,8 @@ function buildSessionExport(): JsonObject {
     opsGatePolicy: currentOpsGatePolicy(),
     opsActionQueue,
     opsScenarios,
+    opsMissions,
+    opsMissionRuns,
     controlRoomHistory,
     lanes: lanesSummary(),
     jobs,
@@ -5620,6 +6115,88 @@ async function handleApi(
     await withMetric('ops-action-queue-clear', async () => {
       const body = await readJsonBody(request);
       sendJson(response, 200, clearOpsActionQueue(body));
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/missions') {
+    await withMetric('ops-missions-list', () => {
+      sendJson(response, 200, {
+        ok: true,
+        missions: listOpsMissions(),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions') {
+    await withMetric('ops-missions-save', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name : '';
+      try {
+        const mission = saveOpsMission(name, body);
+        sendJson(response, 200, { ok: true, mission, updateHint: UPDATE_HINT });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/plan') {
+    await withMetric('ops-missions-plan', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name : '';
+      try {
+        sendJson(response, 200, planOpsMission(name, body, context.host, context.port));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/run') {
+    await withMetric('ops-missions-run', async () => {
+      const body = await readJsonBody(request);
+      const name = typeof body.name === 'string' ? body.name : '';
+      try {
+        sendJson(response, 200, runOpsMission(name, body, context.host, context.port));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/missions/runs') {
+    await withMetric('ops-missions-runs-list', () => {
+      const limitRaw = Number(url.searchParams.get('limit') ?? '120');
+      sendJson(response, 200, listOpsMissionRuns(limitRaw));
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/runs/clear') {
+    await withMetric('ops-missions-runs-clear', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, clearOpsMissionRuns(body));
+    });
+    return;
+  }
+
+  if (method === 'DELETE' && pathname.startsWith('/api/ops/missions/')) {
+    await withMetric('ops-missions-delete', () => {
+      const name = decodeURIComponent(pathname.slice('/api/ops/missions/'.length));
+      const ok = deleteOpsMission(name);
+      if (!ok) {
+        sendJson(response, 404, { error: `mission '${name}' not found` });
+        return;
+      }
+      sendJson(response, 200, { ok: true, name });
     });
     return;
   }
@@ -7467,6 +8044,37 @@ https://developer.android.com</textarea>
           </div>
           <button class="p" id="ops-gate-eval-btn">Evaluate gate</button>
           <div id="ops-gate-panel" class="metrics"></div>
+          <hr style="border:0;border-top:1px solid #2f4a61;" />
+          <input id="ops-mission-name" placeholder="mission name" value="release-guard-default" />
+          <div class="split">
+            <input id="ops-mission-scenario" placeholder="scenario name" value="stability-default" />
+            <input id="ops-mission-policy-preset" placeholder="policy preset" value="balanced-default" />
+          </div>
+          <div class="split">
+            <input id="ops-mission-watchdog-profile" placeholder="watchdog profile" value="watchdog-default" />
+            <select id="ops-mission-auto-run-queue">
+              <option value="true">auto-run queue: true</option>
+              <option value="false">auto-run queue: false</option>
+            </select>
+          </div>
+          <textarea id="ops-mission-queue-plan">[
+  {"type":"scenario-run","payload":{"name":"stability-default"}},
+  {"type":"watchdog","payload":{"autoHealOnAlert":true}}
+]</textarea>
+          <div class="split">
+            <button class="s" id="ops-missions-list-btn">List missions</button>
+            <button class="s" id="ops-mission-save-btn">Save mission</button>
+          </div>
+          <div class="split">
+            <button class="p" id="ops-mission-plan-btn">Plan mission</button>
+            <button class="p" id="ops-mission-run-btn">Run mission</button>
+          </div>
+          <div class="split">
+            <button class="s" id="ops-mission-runs-btn">Load mission runs</button>
+            <button class="w" id="ops-mission-runs-clear-btn">Clear mission runs</button>
+          </div>
+          <div id="ops-missions-panel" class="metrics"></div>
+          <div id="ops-mission-runs-panel" class="metrics"></div>
         </article>
 
         <article class="card stack">
@@ -7583,6 +8191,14 @@ https://developer.android.com</textarea>
       const $opsGateMaxFailed = document.getElementById('ops-gate-max-failed');
       const $opsGateMaxIncidents = document.getElementById('ops-gate-max-incidents');
       const $opsGatePanel = document.getElementById('ops-gate-panel');
+      const $opsMissionName = document.getElementById('ops-mission-name');
+      const $opsMissionScenario = document.getElementById('ops-mission-scenario');
+      const $opsMissionPolicyPreset = document.getElementById('ops-mission-policy-preset');
+      const $opsMissionWatchdogProfile = document.getElementById('ops-mission-watchdog-profile');
+      const $opsMissionAutoRunQueue = document.getElementById('ops-mission-auto-run-queue');
+      const $opsMissionQueuePlan = document.getElementById('ops-mission-queue-plan');
+      const $opsMissionsPanel = document.getElementById('ops-missions-panel');
+      const $opsMissionRunsPanel = document.getElementById('ops-mission-runs-panel');
       const $queueSnapshotName = document.getElementById('queue-snapshot-name');
       const $campaignDeviceIds = document.getElementById('campaign-device-ids');
 
@@ -7926,6 +8542,47 @@ https://developer.android.com</textarea>
             '<div class="meta">' + item.check + ' [' + (item.pass ? 'pass' : 'fail') + ']</div>' +
             '<div>value=' + item.value + ' expected=' + item.expected + '</div>';
           $opsGatePanel.appendChild(row);
+        }
+      }
+
+      function renderOpsMissions(payload) {
+        if (!$opsMissionsPanel) {
+          return;
+        }
+        const missions = Array.isArray(payload && payload.missions) ? payload.missions : [];
+        $opsMissionsPanel.innerHTML = '';
+        for (const mission of missions.slice(0, 25)) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">' + mission.name + '</div>' +
+            '<div>scenario=' + (mission.scenarioName || '-') + ' policyPreset=' + (mission.policyPresetName || '-') + '</div>' +
+            '<div>watchdog=' + (mission.watchdogProfileName || '-') + ' queuePlan=' + ((mission.queuePlan && mission.queuePlan.length) || 0) + ' autoRun=' + String(mission.autoRunQueue !== false) + '</div>';
+          $opsMissionsPanel.appendChild(row);
+        }
+        if (!missions.length) {
+          $opsMissionsPanel.textContent = 'No missions.';
+        }
+      }
+
+      function renderOpsMissionRuns(payload) {
+        if (!$opsMissionRunsPanel) {
+          return;
+        }
+        const runs = Array.isArray(payload && payload.runs) ? payload.runs : [];
+        $opsMissionRunsPanel.innerHTML = '';
+        for (const run of runs.slice(0, 30)) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">#' + run.id + ' ' + run.mission + ' [' + (run.ok ? 'ok' : 'fail') + ']</div>' +
+            '<div>started=' + run.startedAt + ' durationMs=' + (run.durationMs || 0) + '</div>' +
+            '<div>steps=' + ((run.steps && run.steps.length) || 0) + ' gate=' + (run.gate && run.gate.pass === true ? 'pass' : 'fail') + '</div>' +
+            (run.error ? '<div style="color:#ff8f8f;">' + run.error + '</div>' : '');
+          $opsMissionRunsPanel.appendChild(row);
+        }
+        if (!runs.length) {
+          $opsMissionRunsPanel.textContent = 'No mission runs.';
         }
       }
 
@@ -9441,6 +10098,106 @@ https://developer.android.com</textarea>
         setMessage(result.pass ? 'Ops gate PASS' : 'Ops gate FAIL', !result.pass);
       }
 
+      async function listOpsMissionsUi() {
+        const result = await api('/api/ops/missions');
+        renderOpsMissions(result);
+        renderOutput(result);
+        const missions = Array.isArray(result.missions) ? result.missions : [];
+        if (missions.length > 0) {
+          const top = missions[0];
+          $opsMissionName.value = top.name || '';
+          $opsMissionScenario.value = top.scenarioName || '';
+          $opsMissionPolicyPreset.value = top.policyPresetName || '';
+          $opsMissionWatchdogProfile.value = top.watchdogProfileName || '';
+          $opsMissionAutoRunQueue.value = top.autoRunQueue === false ? 'false' : 'true';
+          $opsMissionQueuePlan.value = JSON.stringify(top.queuePlan || [], null, 2);
+        }
+        setMessage('Ops missions loaded', false);
+      }
+
+      async function saveOpsMissionUi() {
+        const name = ($opsMissionName.value || '').trim();
+        if (!name) {
+          throw new Error('mission name required');
+        }
+        let queuePlan = [];
+        try {
+          const parsed = JSON.parse($opsMissionQueuePlan.value || '[]');
+          queuePlan = Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+          throw new Error('mission queue plan must be valid JSON array');
+        }
+        const result = await api('/api/ops/missions', 'POST', {
+          name,
+          description: 'web-ui mission',
+          scenarioName: ($opsMissionScenario.value || '').trim() || undefined,
+          policyPresetName: ($opsMissionPolicyPreset.value || '').trim() || undefined,
+          watchdogProfileName: ($opsMissionWatchdogProfile.value || '').trim() || undefined,
+          preflightUrl: ($opsScenarioUrl.value || '').trim() || undefined,
+          autoRunQueue: asBoolean($opsMissionAutoRunQueue.value, true),
+          queuePlan,
+          gatePolicy: {
+            minScore: Number($opsGateMinScore.value || '80'),
+            allowedSeverity: $opsGateSeverity.value || 'green',
+            maxFailedJobs: Number($opsGateMaxFailed.value || '0'),
+            maxOpenIncidents: Number($opsGateMaxIncidents.value || '0'),
+          },
+        });
+        renderOutput(result);
+        setMessage('Ops mission saved', false);
+        await listOpsMissionsUi();
+      }
+
+      async function planOpsMissionUi() {
+        const name = ($opsMissionName.value || '').trim();
+        if (!name) {
+          throw new Error('mission name required');
+        }
+        const result = await api('/api/ops/missions/plan', 'POST', { name });
+        renderOutput(result);
+        if (result.gatePreview) {
+          renderGate(result.gatePreview);
+        }
+        setMessage(result.ready ? 'Mission plan ready' : 'Mission plan has warnings', !result.ready);
+      }
+
+      async function runOpsMissionUi() {
+        const name = ($opsMissionName.value || '').trim();
+        if (!name) {
+          throw new Error('mission name required');
+        }
+        const result = await api('/api/ops/missions/run', 'POST', {
+          name,
+          laneId: selectedLaneId(),
+          deviceId: selectedDeviceId(),
+          url: ($opsScenarioUrl.value || '').trim() || undefined,
+          waitForReadyMs: 1000,
+        });
+        renderOutput(result);
+        if (result.gate) {
+          renderGate(result.gate);
+        }
+        setMessage(result.ok ? 'Mission executed' : 'Mission execution failed', !result.ok);
+        await listOpsMissionRunsUi();
+        await refreshJobsAndLanes();
+      }
+
+      async function listOpsMissionRunsUi() {
+        const result = await api('/api/ops/missions/runs?limit=120');
+        renderOpsMissionRuns(result);
+        renderOutput(result);
+        setMessage('Mission runs loaded', false);
+      }
+
+      async function clearOpsMissionRunsUi() {
+        const result = await api('/api/ops/missions/runs/clear', 'POST', {
+          keepLatest: 20,
+        });
+        renderOutput(result);
+        setMessage('Mission runs cleared', false);
+        await listOpsMissionRunsUi();
+      }
+
       async function runOpsStabilizeUi() {
         const result = await api('/api/ops/stabilize', 'POST', {
           laneId: selectedLaneId(),
@@ -9780,6 +10537,24 @@ https://developer.android.com</textarea>
       document.getElementById('ops-gate-eval-btn').addEventListener('click', async function () {
         try { await evaluateGateUi(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('ops-missions-list-btn').addEventListener('click', async function () {
+        try { await listOpsMissionsUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-save-btn').addEventListener('click', async function () {
+        try { await saveOpsMissionUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-plan-btn').addEventListener('click', async function () {
+        try { await planOpsMissionUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-run-btn').addEventListener('click', async function () {
+        try { await runOpsMissionUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-runs-btn').addEventListener('click', async function () {
+        try { await listOpsMissionRunsUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-runs-clear-btn').addEventListener('click', async function () {
+        try { await clearOpsMissionRunsUi(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('clear-output-btn').addEventListener('click', function () {
         renderOutput({});
       });
@@ -9853,6 +10628,8 @@ https://developer.android.com</textarea>
           await listWatchdogProfilesUi();
           await listOpsActionQueueUi();
           await loadGateUi();
+          await listOpsMissionsUi();
+          await listOpsMissionRunsUi();
           renderOutput({ ok: true, message: 'UI ready', updateHint: '${UPDATE_HINT}' });
           setMessage('Ready.', false);
 
@@ -9873,6 +10650,8 @@ https://developer.android.com</textarea>
               renderControlHistory(controlHistoryPayload);
               const actionQueuePayload = await api('/api/ops/action-queue');
               renderActionQueue(actionQueuePayload);
+              const missionRunsPayload = await api('/api/ops/missions/runs?limit=80');
+              renderOpsMissionRuns(missionRunsPayload);
               const schedulesPayload = await api('/api/schedules');
               renderSchedules(schedulesPayload);
               const queueBoardPayload = await api('/api/board/queue');
