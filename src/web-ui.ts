@@ -41,6 +41,7 @@ const OPS_SCENARIOS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-scenarios.json')
 const OPS_POLICY_PRESETS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-policy-presets.json');
 const WATCHDOG_PROFILES_FILE = path.join(APP_STATE_DIR, 'web-ui-watchdog-profiles.json');
 const OPS_MISSIONS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-missions.json');
+const OPS_MISSION_SCHEDULES_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-mission-schedules.json');
 
 const SNAPSHOT_KINDS = [
   'radio',
@@ -304,6 +305,23 @@ interface OpsMissionRun {
   error?: string;
 }
 
+interface OpsMissionSchedule {
+  id: number;
+  name: string;
+  mission: string;
+  everyMs: number;
+  laneId?: string;
+  deviceId?: string;
+  maxQueueItems?: number;
+  active: boolean;
+  runs: number;
+  failures: number;
+  createdAt: string;
+  updatedAt: string;
+  lastRunAt?: string;
+  lastError?: string;
+}
+
 const serverStartedAt = Date.now();
 let eventSeq = 1;
 let jobSeq = 1;
@@ -355,6 +373,11 @@ let opsGatePolicy: JsonObject = {
 };
 const opsMissionRuns: OpsMissionRun[] = [];
 let opsMissionRunSeq = 1;
+const opsMissionSchedules: Record<number, OpsMissionSchedule> = {};
+const opsMissionScheduleTimers: Record<number, NodeJS.Timeout> = {};
+const opsMissionScheduleRunning: Record<number, boolean> = {};
+let opsMissionScheduleSeq = 1;
+let opsMissionSchedulesInitialized = false;
 const runbookExecutions: RunbookExecution[] = [];
 const controlRoomHistory: ControlRoomHistoryPoint[] = [];
 let controlRoomHistorySeq = 1;
@@ -1604,6 +1627,88 @@ function saveOpsMissions(): void {
 
 function listOpsMissions(): OpsMission[] {
   return Object.values(opsMissions).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function loadOpsMissionSchedules(): void {
+  try {
+    ensureAppStateDir();
+    if (!fs.existsSync(OPS_MISSION_SCHEDULES_FILE)) {
+      const seed: Record<string, unknown> = {
+        missionScheduleSeq: 1,
+        schedules: {},
+      };
+      fs.writeFileSync(OPS_MISSION_SCHEDULES_FILE, JSON.stringify(seed, null, 2), 'utf8');
+      return;
+    }
+    const raw = fs.readFileSync(OPS_MISSION_SCHEDULES_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return;
+    }
+    const payload = parsed as Record<string, unknown>;
+    const schedulesRaw = payload.schedules && typeof payload.schedules === 'object' && !Array.isArray(payload.schedules)
+      ? (payload.schedules as Record<string, unknown>)
+      : {};
+    let maxId = 0;
+    for (const key of Object.keys(opsMissionSchedules)) {
+      delete opsMissionSchedules[Number(key)];
+    }
+    for (const value of Object.values(schedulesRaw)) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        continue;
+      }
+      const item = value as Record<string, unknown>;
+      const id = Number(item.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        continue;
+      }
+      const mission = typeof item.mission === 'string' ? item.mission.trim() : '';
+      if (!mission) {
+        continue;
+      }
+      const schedule: OpsMissionSchedule = {
+        id,
+        name: typeof item.name === 'string' && item.name.trim().length > 0 ? item.name.trim() : `mission-schedule-${id}`,
+        mission,
+        everyMs: clampInt(item.everyMs, 120000, 5000, 24 * 60 * 60 * 1000),
+        laneId: typeof item.laneId === 'string' && item.laneId.trim().length > 0 ? item.laneId.trim() : undefined,
+        deviceId: typeof item.deviceId === 'string' && item.deviceId.trim().length > 0 ? item.deviceId.trim() : undefined,
+        maxQueueItems: item.maxQueueItems === undefined ? undefined : clampInt(item.maxQueueItems, 20, 1, 400),
+        active: item.active === true,
+        runs: clampInt(item.runs, 0, 0, 1000000),
+        failures: clampInt(item.failures, 0, 0, 1000000),
+        createdAt: typeof item.createdAt === 'string' ? item.createdAt : nowIso(),
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : nowIso(),
+        lastRunAt: typeof item.lastRunAt === 'string' ? item.lastRunAt : undefined,
+        lastError: typeof item.lastError === 'string' ? item.lastError : undefined,
+      };
+      opsMissionSchedules[id] = schedule;
+      if (id > maxId) {
+        maxId = id;
+      }
+    }
+    const storedSeq = Number(payload.missionScheduleSeq);
+    if (Number.isFinite(storedSeq) && storedSeq > maxId) {
+      opsMissionScheduleSeq = Math.trunc(storedSeq);
+    } else {
+      opsMissionScheduleSeq = maxId + 1;
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function saveOpsMissionSchedules(): void {
+  ensureAppStateDir();
+  const payload = {
+    missionScheduleSeq: opsMissionScheduleSeq,
+    schedules: opsMissionSchedules,
+  };
+  fs.writeFileSync(OPS_MISSION_SCHEDULES_FILE, JSON.stringify(payload, null, 2), 'utf8');
+}
+
+function listOpsMissionSchedules(): OpsMissionSchedule[] {
+  return Object.values(opsMissionSchedules).sort((a, b) => a.id - b.id);
 }
 
 function loadSchedules(): void {
@@ -4190,6 +4295,190 @@ function clearOpsMissionRuns(body: JsonObject): JsonObject {
   };
 }
 
+function runOpsMissionScheduleTask(id: number): JsonObject {
+  const schedule = opsMissionSchedules[id];
+  if (!schedule) {
+    throw new Error(`mission schedule ${id} not found`);
+  }
+  if (opsMissionScheduleRunning[id]) {
+    return {
+      ok: false,
+      id,
+      skipped: true,
+      reason: 'already-running',
+    };
+  }
+  opsMissionScheduleRunning[id] = true;
+  const startedAt = nowIso();
+  try {
+    const result = runOpsMission(schedule.mission, {
+      laneId: schedule.laneId,
+      deviceId: schedule.deviceId,
+      maxQueueItems: schedule.maxQueueItems,
+    }, DEFAULT_WEB_UI_HOST, DEFAULT_WEB_UI_PORT);
+    schedule.runs += 1;
+    schedule.lastRunAt = startedAt;
+    schedule.updatedAt = nowIso();
+    if (result.ok !== true) {
+      schedule.failures += 1;
+      schedule.lastError = typeof result.error === 'string' ? result.error : 'mission run failed';
+    } else {
+      schedule.lastError = undefined;
+    }
+    saveOpsMissionSchedules();
+    pushEvent('ops-mission-schedule-run', 'Ops mission schedule executed', {
+      id,
+      mission: schedule.mission,
+      ok: result.ok === true,
+    });
+    return {
+      ok: result.ok === true,
+      id,
+      mission: schedule.mission,
+      result,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    schedule.runs += 1;
+    schedule.failures += 1;
+    schedule.lastRunAt = startedAt;
+    schedule.lastError = message;
+    schedule.updatedAt = nowIso();
+    saveOpsMissionSchedules();
+    pushEvent('ops-mission-schedule-run-failed', 'Ops mission schedule failed', {
+      id,
+      mission: schedule.mission,
+      error: message,
+    });
+    return {
+      ok: false,
+      id,
+      mission: schedule.mission,
+      error: message,
+    };
+  } finally {
+    opsMissionScheduleRunning[id] = false;
+  }
+}
+
+function startOpsMissionSchedule(id: number): void {
+  const schedule = opsMissionSchedules[id];
+  if (!schedule) {
+    throw new Error(`mission schedule ${id} not found`);
+  }
+  if (opsMissionScheduleTimers[id]) {
+    clearInterval(opsMissionScheduleTimers[id]);
+    delete opsMissionScheduleTimers[id];
+  }
+  const interval = Math.max(5000, schedule.everyMs);
+  const timer = setInterval(() => {
+    try {
+      runOpsMissionScheduleTask(id);
+    } catch {
+      // ignore
+    }
+  }, interval);
+  opsMissionScheduleTimers[id] = timer;
+  schedule.active = true;
+  schedule.updatedAt = nowIso();
+  saveOpsMissionSchedules();
+  pushEvent('ops-mission-schedule-start', 'Ops mission schedule started', {
+    id,
+    mission: schedule.mission,
+    everyMs: schedule.everyMs,
+  });
+}
+
+function stopOpsMissionSchedule(id: number): void {
+  const schedule = opsMissionSchedules[id];
+  if (!schedule) {
+    throw new Error(`mission schedule ${id} not found`);
+  }
+  const timer = opsMissionScheduleTimers[id];
+  if (timer) {
+    clearInterval(timer);
+    delete opsMissionScheduleTimers[id];
+  }
+  schedule.active = false;
+  schedule.updatedAt = nowIso();
+  saveOpsMissionSchedules();
+  pushEvent('ops-mission-schedule-stop', 'Ops mission schedule stopped', {
+    id,
+    mission: schedule.mission,
+  });
+}
+
+function ensureOpsMissionSchedulesInitialized(): void {
+  if (opsMissionSchedulesInitialized) {
+    return;
+  }
+  loadOpsMissionSchedules();
+  for (const schedule of Object.values(opsMissionSchedules)) {
+    if (schedule.active) {
+      startOpsMissionSchedule(schedule.id);
+    }
+  }
+  opsMissionSchedulesInitialized = true;
+}
+
+function createOpsMissionSchedule(body: JsonObject): OpsMissionSchedule {
+  const mission = typeof body.mission === 'string' ? body.mission.trim() : '';
+  if (!mission) {
+    throw new Error('mission is required');
+  }
+  if (!opsMissions[mission]) {
+    throw new Error(`mission '${mission}' not found`);
+  }
+  const idRaw = Number(body.id);
+  const id = Number.isFinite(idRaw) && idRaw > 0 ? Math.trunc(idRaw) : opsMissionScheduleSeq++;
+  const existing = opsMissionSchedules[id];
+  const schedule: OpsMissionSchedule = {
+    id,
+    name: typeof body.name === 'string' && body.name.trim().length > 0 ? body.name.trim() : existing?.name || `mission-schedule-${id}`,
+    mission,
+    everyMs: clampInt(body.everyMs, existing?.everyMs ?? 120000, 5000, 24 * 60 * 60 * 1000),
+    laneId: typeof body.laneId === 'string' && body.laneId.trim().length > 0 ? body.laneId.trim() : undefined,
+    deviceId: typeof body.deviceId === 'string' && body.deviceId.trim().length > 0 ? body.deviceId.trim() : undefined,
+    maxQueueItems: body.maxQueueItems === undefined ? existing?.maxQueueItems : clampInt(body.maxQueueItems, existing?.maxQueueItems ?? 20, 1, 400),
+    active: body.active === true,
+    runs: existing?.runs ?? 0,
+    failures: existing?.failures ?? 0,
+    createdAt: existing?.createdAt ?? nowIso(),
+    updatedAt: nowIso(),
+    lastRunAt: existing?.lastRunAt,
+    lastError: existing?.lastError,
+  };
+  opsMissionSchedules[id] = schedule;
+  saveOpsMissionSchedules();
+  if (schedule.active) {
+    startOpsMissionSchedule(id);
+  } else if (opsMissionScheduleTimers[id]) {
+    clearInterval(opsMissionScheduleTimers[id]);
+    delete opsMissionScheduleTimers[id];
+  }
+  pushEvent('ops-mission-schedule-saved', 'Ops mission schedule saved', {
+    id,
+    mission,
+    active: schedule.active,
+  });
+  return schedule;
+}
+
+function deleteOpsMissionSchedule(id: number): boolean {
+  if (!opsMissionSchedules[id]) {
+    return false;
+  }
+  if (opsMissionScheduleTimers[id]) {
+    clearInterval(opsMissionScheduleTimers[id]);
+    delete opsMissionScheduleTimers[id];
+  }
+  delete opsMissionScheduleRunning[id];
+  delete opsMissionSchedules[id];
+  saveOpsMissionSchedules();
+  pushEvent('ops-mission-schedule-deleted', 'Ops mission schedule deleted', { id });
+  return true;
+}
+
 function resolveOpsMission(nameRaw: string): OpsMission {
   const name = nameRaw.trim();
   if (!name) {
@@ -4450,6 +4739,7 @@ function buildAuditExport(host: string, port: number): JsonObject {
     opsScenarios: listOpsScenarios(),
     opsMissions: listOpsMissions(),
     opsMissionRuns: opsMissionRuns.slice(-200),
+    opsMissionSchedules: listOpsMissionSchedules(),
     controlRoomHistory: listControlRoomHistory(200),
     schedules: schedulesList(),
     timeline: dashboardTimeline.slice(-300),
@@ -5525,6 +5815,7 @@ function buildStatePayload(host: string, port: number): JsonObject {
     opsScenarioCount: Object.keys(opsScenarios).length,
     opsMissionCount: Object.keys(opsMissions).length,
     opsMissionRunCount: opsMissionRuns.length,
+    opsMissionScheduleCount: Object.keys(opsMissionSchedules).length,
     controlRoomHistoryCount: controlRoomHistory.length,
     runbookExecutionCount: runbookExecutions.length,
     laneCount: totals.laneCount,
@@ -5608,6 +5899,7 @@ function buildOpsBoard(host: string, port: number): JsonObject {
     opsScenarios: listOpsScenarios(),
     opsMissions: listOpsMissions(),
     opsMissionRuns: opsMissionRuns.slice(-60),
+    opsMissionSchedules: listOpsMissionSchedules(),
     controlRoomHistory: listControlRoomHistory(80),
     updateHint: UPDATE_HINT,
   };
@@ -5662,6 +5954,7 @@ function buildSessionExport(): JsonObject {
     opsScenarios,
     opsMissions,
     opsMissionRuns,
+    opsMissionSchedules,
     controlRoomHistory,
     lanes: lanesSummary(),
     jobs,
@@ -6184,6 +6477,85 @@ async function handleApi(
     await withMetric('ops-missions-runs-clear', async () => {
       const body = await readJsonBody(request);
       sendJson(response, 200, clearOpsMissionRuns(body));
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/missions/schedules') {
+    await withMetric('ops-missions-schedules-list', () => {
+      sendJson(response, 200, {
+        ok: true,
+        schedules: listOpsMissionSchedules(),
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/schedules') {
+    await withMetric('ops-missions-schedules-save', async () => {
+      const body = await readJsonBody(request);
+      try {
+        const schedule = createOpsMissionSchedule(body);
+        sendJson(response, 200, { ok: true, schedule, updateHint: UPDATE_HINT });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 400, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'POST' && /^\/api\/ops\/missions\/schedules\/\d+\/start$/.test(pathname)) {
+    await withMetric('ops-missions-schedules-start', () => {
+      const id = Number(pathname.split('/')[5]);
+      try {
+        startOpsMissionSchedule(id);
+        sendJson(response, 200, { ok: true, id });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 404, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'POST' && /^\/api\/ops\/missions\/schedules\/\d+\/stop$/.test(pathname)) {
+    await withMetric('ops-missions-schedules-stop', () => {
+      const id = Number(pathname.split('/')[5]);
+      try {
+        stopOpsMissionSchedule(id);
+        sendJson(response, 200, { ok: true, id });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 404, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'POST' && /^\/api\/ops\/missions\/schedules\/\d+\/run-now$/.test(pathname)) {
+    await withMetric('ops-missions-schedules-run-now', () => {
+      const id = Number(pathname.split('/')[5]);
+      try {
+        const result = runOpsMissionScheduleTask(id);
+        sendJson(response, 200, { ok: result.ok === true, id, result });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(response, 404, { error: message });
+      }
+    });
+    return;
+  }
+
+  if (method === 'DELETE' && /^\/api\/ops\/missions\/schedules\/\d+$/.test(pathname)) {
+    await withMetric('ops-missions-schedules-delete', () => {
+      const id = Number(pathname.split('/')[5]);
+      const ok = deleteOpsMissionSchedule(id);
+      if (!ok) {
+        sendJson(response, 404, { error: `mission schedule ${id} not found` });
+        return;
+      }
+      sendJson(response, 200, { ok: true, id });
     });
     return;
   }
@@ -8075,6 +8447,28 @@ https://developer.android.com</textarea>
           </div>
           <div id="ops-missions-panel" class="metrics"></div>
           <div id="ops-mission-runs-panel" class="metrics"></div>
+          <hr style="border:0;border-top:1px solid #2f4a61;" />
+          <div class="split">
+            <input id="ops-mission-schedule-id" type="number" min="0" value="0" />
+            <input id="ops-mission-schedule-name" placeholder="schedule name" value="release-guard-loop" />
+          </div>
+          <div class="split">
+            <input id="ops-mission-schedule-every-ms" type="number" min="5000" value="120000" />
+            <input id="ops-mission-schedule-max-items" type="number" min="1" value="20" />
+          </div>
+          <div class="split">
+            <button class="s" id="ops-mission-schedules-list-btn">List schedules</button>
+            <button class="s" id="ops-mission-schedule-save-btn">Save schedule</button>
+          </div>
+          <div class="split">
+            <button class="p" id="ops-mission-schedule-start-btn">Start schedule</button>
+            <button class="w" id="ops-mission-schedule-stop-btn">Stop schedule</button>
+          </div>
+          <div class="split">
+            <button class="s" id="ops-mission-schedule-run-now-btn">Run now</button>
+            <button class="w" id="ops-mission-schedule-delete-btn">Delete schedule</button>
+          </div>
+          <div id="ops-mission-schedules-panel" class="metrics"></div>
         </article>
 
         <article class="card stack">
@@ -8199,6 +8593,11 @@ https://developer.android.com</textarea>
       const $opsMissionQueuePlan = document.getElementById('ops-mission-queue-plan');
       const $opsMissionsPanel = document.getElementById('ops-missions-panel');
       const $opsMissionRunsPanel = document.getElementById('ops-mission-runs-panel');
+      const $opsMissionScheduleId = document.getElementById('ops-mission-schedule-id');
+      const $opsMissionScheduleName = document.getElementById('ops-mission-schedule-name');
+      const $opsMissionScheduleEveryMs = document.getElementById('ops-mission-schedule-every-ms');
+      const $opsMissionScheduleMaxItems = document.getElementById('ops-mission-schedule-max-items');
+      const $opsMissionSchedulesPanel = document.getElementById('ops-mission-schedules-panel');
       const $queueSnapshotName = document.getElementById('queue-snapshot-name');
       const $campaignDeviceIds = document.getElementById('campaign-device-ids');
 
@@ -8583,6 +8982,27 @@ https://developer.android.com</textarea>
         }
         if (!runs.length) {
           $opsMissionRunsPanel.textContent = 'No mission runs.';
+        }
+      }
+
+      function renderOpsMissionSchedules(payload) {
+        if (!$opsMissionSchedulesPanel) {
+          return;
+        }
+        const schedules = Array.isArray(payload && payload.schedules) ? payload.schedules : [];
+        $opsMissionSchedulesPanel.innerHTML = '';
+        for (const schedule of schedules.slice(0, 40)) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">#' + schedule.id + ' ' + schedule.name + ' [' + (schedule.active ? 'active' : 'idle') + ']</div>' +
+            '<div>mission=' + schedule.mission + ' everyMs=' + schedule.everyMs + ' maxItems=' + (schedule.maxQueueItems || '-') + '</div>' +
+            '<div>runs=' + schedule.runs + ' failures=' + schedule.failures + ' lane=' + (schedule.laneId || '-') + ' device=' + (schedule.deviceId || '-') + '</div>' +
+            (schedule.lastError ? '<div style="color:#ff8f8f;">' + schedule.lastError + '</div>' : '');
+          $opsMissionSchedulesPanel.appendChild(row);
+        }
+        if (!schedules.length) {
+          $opsMissionSchedulesPanel.textContent = 'No mission schedules.';
         }
       }
 
@@ -10198,6 +10618,98 @@ https://developer.android.com</textarea>
         await listOpsMissionRunsUi();
       }
 
+      async function listOpsMissionSchedulesUi() {
+        const result = await api('/api/ops/missions/schedules');
+        renderOpsMissionSchedules(result);
+        renderOutput(result);
+        const schedules = Array.isArray(result.schedules) ? result.schedules : [];
+        if (schedules.length > 0) {
+          const top = schedules[0];
+          $opsMissionScheduleId.value = String(top.id || 0);
+          $opsMissionScheduleName.value = top.name || '';
+          $opsMissionName.value = top.mission || $opsMissionName.value;
+          $opsMissionScheduleEveryMs.value = String(top.everyMs || 120000);
+          $opsMissionScheduleMaxItems.value = String(top.maxQueueItems || 20);
+        }
+        setMessage('Mission schedules loaded', false);
+      }
+
+      function selectedMissionScheduleId() {
+        return Number($opsMissionScheduleId.value || '0');
+      }
+
+      async function saveOpsMissionScheduleUi() {
+        const mission = ($opsMissionName.value || '').trim();
+        if (!mission) {
+          throw new Error('mission name required');
+        }
+        const id = selectedMissionScheduleId();
+        const result = await api('/api/ops/missions/schedules', 'POST', {
+          id: id > 0 ? id : undefined,
+          name: ($opsMissionScheduleName.value || '').trim() || undefined,
+          mission,
+          everyMs: Number($opsMissionScheduleEveryMs.value || '120000'),
+          maxQueueItems: Number($opsMissionScheduleMaxItems.value || '20'),
+          laneId: selectedLaneId(),
+          deviceId: selectedDeviceId(),
+          active: false,
+        });
+        renderOutput(result);
+        const schedule = result.schedule || {};
+        if (schedule.id) {
+          $opsMissionScheduleId.value = String(schedule.id);
+        }
+        setMessage('Mission schedule saved', false);
+        await listOpsMissionSchedulesUi();
+      }
+
+      async function startOpsMissionScheduleUi() {
+        const id = selectedMissionScheduleId();
+        if (!id) {
+          throw new Error('mission schedule id required');
+        }
+        const result = await api('/api/ops/missions/schedules/' + id + '/start', 'POST', {});
+        renderOutput(result);
+        setMessage('Mission schedule started', false);
+        await listOpsMissionSchedulesUi();
+      }
+
+      async function stopOpsMissionScheduleUi() {
+        const id = selectedMissionScheduleId();
+        if (!id) {
+          throw new Error('mission schedule id required');
+        }
+        const result = await api('/api/ops/missions/schedules/' + id + '/stop', 'POST', {});
+        renderOutput(result);
+        setMessage('Mission schedule stopped', false);
+        await listOpsMissionSchedulesUi();
+      }
+
+      async function runNowOpsMissionScheduleUi() {
+        const id = selectedMissionScheduleId();
+        if (!id) {
+          throw new Error('mission schedule id required');
+        }
+        const result = await api('/api/ops/missions/schedules/' + id + '/run-now', 'POST', {});
+        renderOutput(result);
+        setMessage(result.ok ? 'Mission schedule executed' : 'Mission schedule execution failed', !result.ok);
+        await listOpsMissionRunsUi();
+        await listOpsMissionSchedulesUi();
+        await refreshJobsAndLanes();
+      }
+
+      async function deleteOpsMissionScheduleUi() {
+        const id = selectedMissionScheduleId();
+        if (!id) {
+          throw new Error('mission schedule id required');
+        }
+        const result = await api('/api/ops/missions/schedules/' + id, 'DELETE');
+        renderOutput(result);
+        setMessage('Mission schedule deleted', false);
+        $opsMissionScheduleId.value = '0';
+        await listOpsMissionSchedulesUi();
+      }
+
       async function runOpsStabilizeUi() {
         const result = await api('/api/ops/stabilize', 'POST', {
           laneId: selectedLaneId(),
@@ -10555,6 +11067,24 @@ https://developer.android.com</textarea>
       document.getElementById('ops-mission-runs-clear-btn').addEventListener('click', async function () {
         try { await clearOpsMissionRunsUi(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('ops-mission-schedules-list-btn').addEventListener('click', async function () {
+        try { await listOpsMissionSchedulesUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-schedule-save-btn').addEventListener('click', async function () {
+        try { await saveOpsMissionScheduleUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-schedule-start-btn').addEventListener('click', async function () {
+        try { await startOpsMissionScheduleUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-schedule-stop-btn').addEventListener('click', async function () {
+        try { await stopOpsMissionScheduleUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-schedule-run-now-btn').addEventListener('click', async function () {
+        try { await runNowOpsMissionScheduleUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-schedule-delete-btn').addEventListener('click', async function () {
+        try { await deleteOpsMissionScheduleUi(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('clear-output-btn').addEventListener('click', function () {
         renderOutput({});
       });
@@ -10630,6 +11160,7 @@ https://developer.android.com</textarea>
           await loadGateUi();
           await listOpsMissionsUi();
           await listOpsMissionRunsUi();
+          await listOpsMissionSchedulesUi();
           renderOutput({ ok: true, message: 'UI ready', updateHint: '${UPDATE_HINT}' });
           setMessage('Ready.', false);
 
@@ -10652,6 +11183,8 @@ https://developer.android.com</textarea>
               renderActionQueue(actionQueuePayload);
               const missionRunsPayload = await api('/api/ops/missions/runs?limit=80');
               renderOpsMissionRuns(missionRunsPayload);
+              const missionSchedulesPayload = await api('/api/ops/missions/schedules');
+              renderOpsMissionSchedules(missionSchedulesPayload);
               const schedulesPayload = await api('/api/schedules');
               renderSchedules(schedulesPayload);
               const queueBoardPayload = await api('/api/board/queue');
@@ -10686,6 +11219,7 @@ export function startWebUiServer(options: { host?: string; port?: number } = {})
   const host = options.host ?? DEFAULT_WEB_UI_HOST;
   const port = options.port ?? DEFAULT_WEB_UI_PORT;
   ensureSchedulesInitialized();
+  ensureOpsMissionSchedulesInitialized();
 
   const server = http.createServer(async (request, response) => {
     try {

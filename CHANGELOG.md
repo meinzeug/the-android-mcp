@@ -24,6 +24,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.18.0] - 2026-02-20
+### Added
+- New mission scheduler backend for persistent automated mission execution.
+- New mission scheduler API workflows:
+- `GET /api/ops/missions/schedules`
+- `POST /api/ops/missions/schedules`
+- `POST /api/ops/missions/schedules/:id/start`
+- `POST /api/ops/missions/schedules/:id/stop`
+- `POST /api/ops/missions/schedules/:id/run-now`
+- `DELETE /api/ops/missions/schedules/:id`
+- New Web UI Mission Scheduler controls for schedule save/list/start/stop/run-now/delete with live status panel.
+- Mission scheduler state is now persisted in `~/.the-android-mcp/web-ui-ops-mission-schedules.json` and auto-restored on server start.
+
+### Improved
+- Ops state/board/audit/session payloads now include mission schedule counts and schedule inventory for better operations observability.
+- Mission orchestration now supports continuous loop automation with failure accounting and recent error visibility directly in Web UI.
+
 ## [3.17.0] - 2026-02-20
 ### Added
 - New persisted ops mission orchestration model with mission definitions (`scenario + policy preset + watchdog profile + gate policy + action queue plan`).
