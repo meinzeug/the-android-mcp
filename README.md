@@ -38,6 +38,24 @@ sequenceDiagram
   M-->>A: Result (fields found, submit tapped)
 ```
 
+## Web UI v3 (Local 50000)
+
+The local web cockpit is now designed for complete beginners first, with advanced controls hidden behind an explicit toggle.
+
+- URL: `http://127.0.0.1:50000`
+- Start command: `the-android-mcp-web-ui --serve --host 127.0.0.1 --port 50000`
+- UX direction: plain-language actions, large guided cards, futuristic gradients, and visual mission feedback.
+
+### Screenshots
+
+Desktop:
+
+![Web UI v3 desktop overview](docs/screenshots/web-ui-v3-23-futuristic.png)
+
+Android live session (captured from connected device workflow):
+
+![Web UI v3 android live view](docs/screenshots/web-ui-v3-24-android.png)
+
 ## Quick Start (Copy/Paste)
 
 ```bash
@@ -182,6 +200,7 @@ Based on the original project: [infiniV/Android-Ui-MCP](https://github.com/infin
 
 ## Table of Contents
 
+- [Web UI v3 (Local 50000)](#web-ui-v3-local-50000)
 - [AI Agent Configuration](#ai-agent-configuration)
 - [Installation](#installation)
 - [GUI App (Linux)](#gui-app-linux)

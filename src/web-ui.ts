@@ -9985,18 +9985,21 @@ const INDEX_HTML = String.raw`<!doctype html>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <style>
       :root {
-        --bg0: #090f16;
-        --bg1: #0f1d2b;
-        --bg2: #193042;
-        --card: #101f2cb3;
-        --line: #2e4a6199;
-        --text: #eaf3fb;
-        --muted: #98b3c8;
-        --ok: #8be3c6;
-        --err: #ff7676;
-        --acc0: #00c8a4;
-        --acc1: #14a7ff;
-        --warn: #ffb24d;
+        --bg0: #071019;
+        --bg1: #0e1f2d;
+        --bg2: #153448;
+        --card: #0f1f2cbd;
+        --card-strong: #102434f2;
+        --line: #2f516bba;
+        --line-soft: #3a617d66;
+        --text: #eef8ff;
+        --muted: #9fbed2;
+        --ok: #8eeecf;
+        --err: #ff8f9c;
+        --acc0: #00d2a6;
+        --acc1: #16a8ff;
+        --acc2: #75e2ff;
+        --warn: #ffc067;
       }
       * { box-sizing: border-box; }
       body {
@@ -10005,42 +10008,166 @@ const INDEX_HTML = String.raw`<!doctype html>
         color: var(--text);
         min-height: 100vh;
         background:
-          radial-gradient(1000px 500px at -5% -10%, #1e3246 0%, transparent 58%),
-          radial-gradient(900px 500px at 110% -20%, #1f3f4d 0%, transparent 55%),
-          linear-gradient(155deg, var(--bg0), var(--bg1) 44%, var(--bg2));
+          linear-gradient(135deg, #05111cfa, #0a1825e8 45%, #0d2334de),
+          url('https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=2200&q=80') center/cover fixed no-repeat;
         padding: 16px;
       }
-      .app { max-width: 1560px; margin: 0 auto; display: grid; gap: 12px; }
+      .app { max-width: 1600px; margin: 0 auto; display: grid; gap: 14px; }
       .hero {
         border: 1px solid var(--line);
-        border-radius: 18px;
-        background: linear-gradient(135deg, #122536cc, #102334b3);
-        padding: 14px;
+        border-radius: 20px;
+        background:
+          linear-gradient(125deg, #0d2538d8, #10263bd1),
+          url('https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1800&q=80') center/cover;
+        box-shadow: 0 20px 60px #02090f8c;
+        padding: 16px;
         display: grid;
-        gap: 6px;
+        gap: 8px;
+      }
+      .hero h1 { margin: 0; font-size: 1.55rem; letter-spacing: 0.01em; }
+      .hero-badge {
+        display: inline-flex;
+        width: fit-content;
+        border: 1px solid #86d8ff55;
+        color: #cff1ff;
+        background: #05273bcc;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
       }
       .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
       .pill {
-        border: 1px solid #3b5d75;
+        border: 1px solid #5a8daf;
+        background: #0a2232d9;
         border-radius: 999px;
         padding: 4px 10px;
         font-size: 12px;
         font-family: 'JetBrains Mono', monospace;
-        color: #bdd7ea;
+        color: #dbf3ff;
       }
       .dot {
         width: 8px;
         height: 8px;
         border-radius: 50%;
         background: var(--acc0);
-        box-shadow: 0 0 11px var(--acc0);
+        box-shadow: 0 0 12px var(--acc0);
         display: inline-block;
         margin-right: 6px;
+      }
+      .easy-mode {
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        background: linear-gradient(145deg, #0f2436db, #102638e6);
+        backdrop-filter: blur(7px);
+        padding: 14px;
+        display: grid;
+        gap: 10px;
+        box-shadow: 0 16px 42px #0510198a;
+      }
+      .easy-head {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .easy-head h2 {
+        margin: 0;
+        font-size: 1.2rem;
+      }
+      .easy-note {
+        margin: 0;
+        color: #d8efff;
+        font-size: 13px;
+      }
+      .easy-grid {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 1.3fr 1fr 1fr;
+      }
+      .easy-card {
+        border: 1px solid var(--line-soft);
+        border-radius: 14px;
+        padding: 10px;
+        background:
+          linear-gradient(145deg, #0f2232e8, #0c1d2be8),
+          var(--easy-bg, none);
+        background-size: cover;
+        background-position: center;
+        display: grid;
+        gap: 7px;
+      }
+      .easy-card h3 {
+        margin: 0;
+        font-size: 0.98rem;
+      }
+      .easy-stats {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .easy-stat {
+        border: 1px solid #4f789266;
+        border-radius: 10px;
+        padding: 8px;
+        background: #0a1c2cdb;
+      }
+      .easy-stat strong {
+        display: block;
+        font-size: 0.95rem;
+      }
+      .easy-stat span {
+        font-size: 11px;
+        color: #cde4f5;
+      }
+      .easy-ops {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: 1fr 1fr;
+      }
+      .easy-btn {
+        border: 1px solid #65bee799;
+        border-radius: 12px;
+        background: linear-gradient(140deg, #0d6f88, #1a5b93);
+        color: #effbff;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        padding: 11px;
+      }
+      .easy-btn.alt {
+        background: linear-gradient(140deg, #225265, #1f6f58);
+      }
+      .easy-btn.warn {
+        background: linear-gradient(140deg, #875b1b, #7d3f1c);
+        border-color: #e6b37588;
+      }
+      .easy-hint {
+        border: 1px solid #4f789266;
+        border-radius: 12px;
+        background: #0a1b29d1;
+        padding: 10px;
+        font-size: 13px;
+      }
+      .advanced-toggle-wrap {
+        display: flex;
+        justify-content: flex-end;
+      }
+      .advanced-toggle-btn {
+        width: auto;
+        min-width: 240px;
+        border-radius: 999px;
       }
       .grid {
         display: grid;
         gap: 10px;
         grid-template-columns: 1fr 1fr 1fr;
+      }
+      .grid.hidden {
+        display: none;
       }
       .card {
         border: 1px solid var(--line);
@@ -10055,9 +10182,9 @@ const INDEX_HTML = String.raw`<!doctype html>
       .quick { display: grid; gap: 6px; grid-template-columns: 1fr 1fr; }
       input, textarea, select, button {
         width: 100%;
-        border: 1px solid #3b5d75;
+        border: 1px solid #3f6985;
         border-radius: 10px;
-        background: #0f1c28;
+        background: #0f1c28e0;
         color: var(--text);
         padding: 9px;
         font: inherit;
@@ -10071,10 +10198,10 @@ const INDEX_HTML = String.raw`<!doctype html>
       .events, .metrics, .jobs, .lanes {
         max-height: 300px;
         overflow: auto;
-        border: 1px solid #2f4a61;
+        border: 1px solid #32556f;
         border-radius: 10px;
         padding: 8px;
-        background: #0b141d;
+        background: #0b141de6;
       }
       .item {
         border: 1px solid #2e4a61;
@@ -10108,8 +10235,16 @@ const INDEX_HTML = String.raw`<!doctype html>
       .muted { margin: 0; color: var(--muted); font-size: 12px; }
       .ok { color: var(--ok); }
       .err { color: var(--err); }
+      @media (max-width: 1300px) {
+        .easy-grid { grid-template-columns: 1fr 1fr; }
+        .easy-stats { grid-template-columns: 1fr 1fr; }
+      }
       @media (max-width: 1200px) { .grid { grid-template-columns: 1fr 1fr; } }
-      @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+      @media (max-width: 900px) {
+        .grid { grid-template-columns: 1fr; }
+        .easy-grid { grid-template-columns: 1fr; }
+        .easy-ops { grid-template-columns: 1fr; }
+      }
     </style>
   </head>
   <body>
@@ -10124,11 +10259,51 @@ const INDEX_HTML = String.raw`<!doctype html>
           <span class="pill" id="queue-pill">queue: 0</span>
           <span class="pill">port: 50000</span>
         </div>
-        <h1 style="margin:0;font-size:1.45rem;">the-android-mcp v${pkg.version} command center</h1>
-        <p class="muted">Multi-lane orchestration, queue maintenance, device smoke runs, autopilot bundles, and live timeline telemetry.</p>
+        <span class="hero-badge">Futuristic Easy Control</span>
+        <h1>the-android-mcp v${pkg.version} command center</h1>
+        <p class="muted">Eine Oberfläche für alle: erst einfache Knöpfe, dann bei Bedarf Profi-Tools.</p>
       </section>
 
-      <section class="grid">
+      <section class="easy-mode">
+        <div class="easy-head">
+          <h2>Easy Mode: 1-Klick Steuerung</h2>
+          <p class="easy-note">Für Nicht-Techniker: URL eintragen, großen Knopf drücken, fertig.</p>
+        </div>
+        <div class="easy-grid">
+          <article class="easy-card" style="--easy-bg:url('https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?auto=format&fit=crop&w=1400&q=80')">
+            <h3>Schritt 1: Website aufs Handy schicken</h3>
+            <input id="easy-url-input" type="url" value="https://www.wikipedia.org" />
+            <div class="easy-ops">
+              <button class="easy-btn" id="easy-open-btn">Website öffnen</button>
+              <button class="easy-btn alt" id="easy-smoke-btn">Schnellcheck starten</button>
+            </div>
+            <div class="easy-hint" id="easy-last-action">Noch keine Aktion ausgeführt.</div>
+          </article>
+          <article class="easy-card" style="--easy-bg:url('https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1400&q=80')">
+            <h3>Schritt 2: Automatisch reparieren</h3>
+            <div class="easy-ops">
+              <button class="easy-btn alt" id="easy-autofix-btn">Auto-Fix ausführen</button>
+              <button class="easy-btn" id="easy-strategy-btn">Turbo-Strategie</button>
+            </div>
+            <button class="easy-btn warn" id="easy-panic-btn">Notfall-Stabilisierung</button>
+          </article>
+          <article class="easy-card">
+            <h3>Status in Klartext</h3>
+            <div class="easy-stats">
+              <div class="easy-stat"><strong id="easy-risk">-</strong><span>Risiko</span></div>
+              <div class="easy-stat"><strong id="easy-mode">-</strong><span>Modus</span></div>
+              <div class="easy-stat"><strong id="easy-device">-</strong><span>Geräte</span></div>
+              <div class="easy-stat"><strong id="easy-jobs">-</strong><span>Jobs</span></div>
+            </div>
+            <div class="easy-hint" id="easy-recommendation">Empfehlung wird geladen ...</div>
+          </article>
+        </div>
+        <div class="advanced-toggle-wrap">
+          <button class="s advanced-toggle-btn" id="easy-toggle-advanced-btn">Profi-Bereich einblenden</button>
+        </div>
+      </section>
+
+      <section class="grid hidden" id="advanced-grid">
         <article class="card stack">
           <h2>Device operations</h2>
           <select id="device-select"></select>
@@ -10764,6 +10939,15 @@ https://developer.android.com</textarea>
       const $opsMissionPolicyPanel = document.getElementById('ops-mission-policy-panel');
       const $queueSnapshotName = document.getElementById('queue-snapshot-name');
       const $campaignDeviceIds = document.getElementById('campaign-device-ids');
+      const $easyUrlInput = document.getElementById('easy-url-input');
+      const $easyRisk = document.getElementById('easy-risk');
+      const $easyMode = document.getElementById('easy-mode');
+      const $easyDevice = document.getElementById('easy-device');
+      const $easyJobs = document.getElementById('easy-jobs');
+      const $easyRecommendation = document.getElementById('easy-recommendation');
+      const $easyLastAction = document.getElementById('easy-last-action');
+      const $advancedGrid = document.getElementById('advanced-grid');
+      const $easyToggleAdvancedBtn = document.getElementById('easy-toggle-advanced-btn');
 
       function setMessage(text, isError) {
         $message.textContent = text;
@@ -11590,6 +11774,91 @@ https://developer.android.com</textarea>
         await refreshJobsAndLanes();
       }
 
+      function setEasyLastAction(text, isError) {
+        if (!$easyLastAction) {
+          return;
+        }
+        $easyLastAction.textContent = text;
+        $easyLastAction.style.borderColor = isError ? '#cf6d7a88' : '#4f789266';
+        $easyLastAction.style.color = isError ? '#ffd3da' : '#d5ecff';
+      }
+
+      function renderEasyOverview(statePayload, controlPayload, commandPayload) {
+        if ($easyRisk) {
+          const value = commandPayload && typeof commandPayload.riskScore === 'number'
+            ? commandPayload.riskScore
+            : 0;
+          $easyRisk.textContent = String(value);
+        }
+        if ($easyMode) {
+          $easyMode.textContent = commandPayload && commandPayload.mode ? String(commandPayload.mode) : 'unknown';
+        }
+        if ($easyDevice) {
+          $easyDevice.textContent = String((statePayload && statePayload.connectedDeviceCount) || 0);
+        }
+        if ($easyJobs) {
+          $easyJobs.textContent = String((statePayload && statePayload.jobCount) || 0);
+        }
+        if ($easyRecommendation) {
+          const commandActions = commandPayload && Array.isArray(commandPayload.quickActions) ? commandPayload.quickActions : [];
+          const controlActions = controlPayload && Array.isArray(controlPayload.recommendations) ? controlPayload.recommendations : [];
+          const recommendation = commandActions[0] || controlActions[0] || 'Alles stabil. Du kannst normal weiterarbeiten.';
+          $easyRecommendation.textContent = String(recommendation);
+        }
+      }
+
+      async function loadEasyOverview() {
+        const statePayload = await api('/api/state');
+        const controlPayload = await api('/api/ops/control-room');
+        const commandPayload = await api('/api/ops/missions/command-center?horizonMs=1200000&analyticsLimit=200');
+        renderEasyOverview(statePayload, controlPayload, commandPayload);
+      }
+
+      async function easyOpenWebsiteUi() {
+        const url = ($easyUrlInput && $easyUrlInput.value ? $easyUrlInput.value : $urlInput.value || '').trim();
+        if (!url) {
+          throw new Error('Bitte eine URL eintragen.');
+        }
+        $urlInput.value = url;
+        await openUrl(url);
+        setEasyLastAction('Website geöffnet: ' + url, false);
+        await loadEasyOverview();
+      }
+
+      async function easySmokeUi() {
+        await runDeviceSmoke();
+        await runSuite();
+        setEasyLastAction('Schnellcheck abgeschlossen.', false);
+        await loadEasyOverview();
+      }
+
+      async function easyAutoFixUi() {
+        await runOpsMissionCommandQuickFixUi();
+        setEasyLastAction('Auto-Fix wurde ausgeführt.', false);
+        await loadEasyOverview();
+      }
+
+      async function easyStrategyUi() {
+        await executeOpsMissionCommandStrategyUi();
+        setEasyLastAction('Turbo-Strategie abgeschlossen.', false);
+        await loadEasyOverview();
+      }
+
+      async function easyPanicUi() {
+        await runOpsStabilizeUi();
+        await runWatchdogUi();
+        setEasyLastAction('Notfall-Stabilisierung abgeschlossen.', false);
+        await loadEasyOverview();
+      }
+
+      function toggleAdvancedUi() {
+        if (!$advancedGrid || !$easyToggleAdvancedBtn) {
+          return;
+        }
+        const hidden = $advancedGrid.classList.toggle('hidden');
+        $easyToggleAdvancedBtn.textContent = hidden ? 'Profi-Bereich einblenden' : 'Profi-Bereich ausblenden';
+      }
+
       function connectRealtime() {
         const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
         const wsUrl = scheme + '://' + window.location.host + '/api/ws';
@@ -11644,6 +11913,10 @@ https://developer.android.com</textarea>
           waitForReadyMs: 900,
         });
         renderOutput(result);
+        if ($easyUrlInput) {
+          $easyUrlInput.value = url;
+        }
+        setEasyLastAction('Website geöffnet: ' + url, false);
         setMessage('URL opened', false);
       }
 
@@ -13820,6 +14093,27 @@ https://developer.android.com</textarea>
         await loadAlertsUi();
       }
 
+      document.getElementById('easy-open-btn').addEventListener('click', async function () {
+        try { await easyOpenWebsiteUi(); } catch (error) { setEasyLastAction(String(error), true); setMessage(String(error), true); }
+      });
+      document.getElementById('easy-smoke-btn').addEventListener('click', async function () {
+        try { await easySmokeUi(); } catch (error) { setEasyLastAction(String(error), true); setMessage(String(error), true); }
+      });
+      document.getElementById('easy-autofix-btn').addEventListener('click', async function () {
+        try { await easyAutoFixUi(); } catch (error) { setEasyLastAction(String(error), true); setMessage(String(error), true); }
+      });
+      document.getElementById('easy-strategy-btn').addEventListener('click', async function () {
+        try { await easyStrategyUi(); } catch (error) { setEasyLastAction(String(error), true); setMessage(String(error), true); }
+      });
+      document.getElementById('easy-panic-btn').addEventListener('click', async function () {
+        try { await easyPanicUi(); } catch (error) { setEasyLastAction(String(error), true); setMessage(String(error), true); }
+      });
+      if ($easyToggleAdvancedBtn) {
+        $easyToggleAdvancedBtn.addEventListener('click', function () {
+          toggleAdvancedUi();
+        });
+      }
+
       document.getElementById('open-url-btn').addEventListener('click', async function () {
         try { await openUrl($urlInput.value); } catch (error) { setMessage(String(error), true); }
       });
@@ -14253,6 +14547,11 @@ https://developer.android.com</textarea>
         try {
           ensureOpsMissionCommandCenterUi();
           await refreshCore();
+          if ($easyUrlInput && !$easyUrlInput.value) {
+            $easyUrlInput.value = $urlInput.value || 'https://www.wikipedia.org';
+          }
+          await loadEasyOverview();
+          setEasyLastAction('Bereit. Wähle eine Aktion oben im Easy Mode.', false);
           const history = await api('/api/history?limit=45');
           const events = Array.isArray(history.events) ? history.events : [];
           for (let i = events.length - 1; i >= 0; i -= 1) {
@@ -14331,6 +14630,8 @@ https://developer.android.com</textarea>
               if (missionCommandCenterPayload.anomalies) {
                 renderOpsMissionAnomaliesUi(missionCommandCenterPayload.anomalies);
               }
+              const easyStatePayload = await api('/api/state');
+              renderEasyOverview(easyStatePayload, controlRoomPayload, missionCommandCenterPayload);
               const missionCommandRiskPayload = await api('/api/ops/missions/command-center/risk-explain?horizonMs=1200000&analyticsLimit=200');
               renderOpsMissionCommandRiskUi(missionCommandRiskPayload);
               const missionCommandHistoryPayload = await api('/api/ops/missions/command-center/history?limit=40');

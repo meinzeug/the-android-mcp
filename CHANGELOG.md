@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.24.0] - 2026-02-20
+### Added
+- Beginner-first Web UI flow on local port `50000` with simplified entry actions and plain-language guidance.
+- Futuristic visual overhaul with gradient/glass styling and richer hero imagery for clearer orientation.
+- Dedicated Web UI showcase in `README.md` with desktop and Android session screenshots from live tool-driven runs.
+
+### Improved
+- Advanced operations controls are now clearly separated from core beginner flows to reduce setup friction.
+- Release documentation now highlights direct Web UI start command and local URL onboarding path.
+
 ## [3.23.0] - 2026-02-20
 ### Added
 - Mission Command Center risk intelligence and strategy orchestration:
