@@ -24,6 +24,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.22.0] - 2026-02-20
+### Added
+- Mission Command Center backend expansion with persistent command-audit storage in `~/.the-android-mcp/web-ui-ops-mission-command-audit.json`.
+- New Mission Command Center APIs:
+- `GET /api/ops/missions/command-center/contract`
+- `GET /api/ops/missions/command-center/history`
+- `POST /api/ops/missions/command-center/history/clear`
+- `POST /api/ops/missions/command-center/device-drill`
+- `GET /api/ops/missions/command-center/stream` (SSE live feed)
+- New Web UI Command Center operator surfaces for:
+- live stream start/stop and stream state
+- command-audit history load/prune panel
+- backend contract panel
+- device-drill URL batch runner.
+
+### Improved
+- Mission/control-room/quick-fix/burst workflows now append command-audit records with mode/risk metadata for stronger operator traceability.
+- Ops board/state/session/audit payloads now include command-audit visibility for backend-bound diagnostics and handoff.
+
 ## [3.21.0] - 2026-02-20
 ### Added
 - New Mission Command Center backend intelligence and orchestration workflows:

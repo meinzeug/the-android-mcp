@@ -44,6 +44,7 @@ const OPS_MISSIONS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-missions.json');
 const OPS_MISSION_SCHEDULES_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-mission-schedules.json');
 const OPS_MISSION_POLICY_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-mission-policy.json');
 const OPS_MISSION_RUNS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-mission-runs.json');
+const OPS_MISSION_COMMAND_AUDIT_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-mission-command-audit.json');
 
 const SNAPSHOT_KINDS = [
   'radio',
@@ -324,6 +325,17 @@ interface OpsMissionSchedule {
   lastError?: string;
 }
 
+interface OpsMissionCommandAudit {
+  id: number;
+  at: string;
+  action: string;
+  ok: boolean;
+  mission?: string;
+  mode?: string;
+  riskScore?: number;
+  details?: JsonObject;
+}
+
 interface OpsMissionPolicyState {
   blockSchedulesOnGateFail: boolean;
   maxConsecutiveFailures: number;
@@ -389,6 +401,9 @@ let opsGatePolicy: JsonObject = {
 const opsMissionRuns: OpsMissionRun[] = [];
 let opsMissionRunSeq = 1;
 let opsMissionRunsLoaded = false;
+const opsMissionCommandAudit: OpsMissionCommandAudit[] = [];
+let opsMissionCommandAuditSeq = 1;
+let opsMissionCommandAuditLoaded = false;
 const opsMissionSchedules: Record<number, OpsMissionSchedule> = {};
 const opsMissionScheduleTimers: Record<number, NodeJS.Timeout> = {};
 const opsMissionScheduleRunning: Record<number, boolean> = {};
@@ -1723,6 +1738,131 @@ function ensureOpsMissionRunsLoaded(): void {
   loadOpsMissionRunsFromDisk();
 }
 
+function loadOpsMissionCommandAuditFromDisk(): void {
+  try {
+    ensureAppStateDir();
+    if (!fs.existsSync(OPS_MISSION_COMMAND_AUDIT_FILE)) {
+      fs.writeFileSync(OPS_MISSION_COMMAND_AUDIT_FILE, JSON.stringify([], null, 2), 'utf8');
+      opsMissionCommandAudit.splice(0, opsMissionCommandAudit.length);
+      opsMissionCommandAuditSeq = 1;
+      opsMissionCommandAuditLoaded = true;
+      return;
+    }
+    const raw = fs.readFileSync(OPS_MISSION_COMMAND_AUDIT_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      opsMissionCommandAudit.splice(0, opsMissionCommandAudit.length);
+      opsMissionCommandAuditSeq = 1;
+      opsMissionCommandAuditLoaded = true;
+      return;
+    }
+    const restored: OpsMissionCommandAudit[] = [];
+    let maxId = 0;
+    for (const value of parsed) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        continue;
+      }
+      const item = value as Record<string, unknown>;
+      const id = Number(item.id);
+      const action = typeof item.action === 'string' ? item.action.trim() : '';
+      if (!Number.isFinite(id) || id <= 0 || !action) {
+        continue;
+      }
+      const record: OpsMissionCommandAudit = {
+        id: Math.trunc(id),
+        at: typeof item.at === 'string' ? item.at : nowIso(),
+        action,
+        ok: item.ok !== false,
+        mission: typeof item.mission === 'string' ? item.mission : undefined,
+        mode: typeof item.mode === 'string' ? item.mode : undefined,
+        riskScore: typeof item.riskScore === 'number' ? item.riskScore : undefined,
+        details: item.details && typeof item.details === 'object' && !Array.isArray(item.details)
+          ? (item.details as JsonObject)
+          : undefined,
+      };
+      restored.push(record);
+      if (record.id > maxId) {
+        maxId = record.id;
+      }
+    }
+    restored.sort((a, b) => a.id - b.id);
+    const limited = restored.slice(-MAX_JOBS * 2);
+    opsMissionCommandAudit.splice(0, opsMissionCommandAudit.length, ...limited);
+    opsMissionCommandAuditSeq = Math.max(1, maxId + 1);
+    opsMissionCommandAuditLoaded = true;
+  } catch {
+    opsMissionCommandAudit.splice(0, opsMissionCommandAudit.length);
+    opsMissionCommandAuditSeq = 1;
+    opsMissionCommandAuditLoaded = true;
+  }
+}
+
+function saveOpsMissionCommandAuditToDisk(): void {
+  ensureAppStateDir();
+  fs.writeFileSync(OPS_MISSION_COMMAND_AUDIT_FILE, JSON.stringify(opsMissionCommandAudit, null, 2), 'utf8');
+}
+
+function ensureOpsMissionCommandAuditLoaded(): void {
+  if (opsMissionCommandAuditLoaded) {
+    return;
+  }
+  loadOpsMissionCommandAuditFromDisk();
+}
+
+function appendOpsMissionCommandAudit(entry: JsonObject): OpsMissionCommandAudit {
+  ensureOpsMissionCommandAuditLoaded();
+  const action = typeof entry.action === 'string' && entry.action.trim().length > 0 ? entry.action.trim() : 'unknown';
+  const record: OpsMissionCommandAudit = {
+    id: opsMissionCommandAuditSeq++,
+    at: nowIso(),
+    action,
+    ok: entry.ok !== false,
+    mission: typeof entry.mission === 'string' ? entry.mission : undefined,
+    mode: typeof entry.mode === 'string' ? entry.mode : undefined,
+    riskScore: typeof entry.riskScore === 'number' ? entry.riskScore : undefined,
+    details: entry.details && typeof entry.details === 'object' && !Array.isArray(entry.details)
+      ? (entry.details as JsonObject)
+      : undefined,
+  };
+  opsMissionCommandAudit.push(record);
+  if (opsMissionCommandAudit.length > MAX_JOBS * 2) {
+    opsMissionCommandAudit.splice(0, opsMissionCommandAudit.length - MAX_JOBS * 2);
+  }
+  saveOpsMissionCommandAuditToDisk();
+  return record;
+}
+
+function listOpsMissionCommandAudit(limitRaw: unknown): JsonObject {
+  ensureOpsMissionCommandAuditLoaded();
+  const limit = clampInt(limitRaw, 120, 1, 2000);
+  const entries = opsMissionCommandAudit.slice(-limit).reverse();
+  return {
+    ok: true,
+    count: entries.length,
+    entries,
+  };
+}
+
+function clearOpsMissionCommandAudit(body: JsonObject): JsonObject {
+  ensureOpsMissionCommandAuditLoaded();
+  const keepLatest = clampInt(body.keepLatest, 0, 0, 2000);
+  const before = opsMissionCommandAudit.length;
+  if (keepLatest === 0) {
+    opsMissionCommandAudit.splice(0, opsMissionCommandAudit.length);
+  } else if (before > keepLatest) {
+    opsMissionCommandAudit.splice(0, before - keepLatest);
+  }
+  const removed = before - opsMissionCommandAudit.length;
+  saveOpsMissionCommandAuditToDisk();
+  return {
+    ok: true,
+    before,
+    after: opsMissionCommandAudit.length,
+    removed,
+    keepLatest,
+  };
+}
+
 function loadOpsMissionSchedules(): void {
   try {
     ensureAppStateDir();
@@ -2298,6 +2438,15 @@ function runOpsMissionControlRoom(body: JsonObject): JsonObject {
     dueBefore: before.summary && typeof before.summary === 'object' ? (before.summary as Record<string, unknown>).dueSchedules : undefined,
     dueAfter: after.summary && typeof after.summary === 'object' ? (after.summary as Record<string, unknown>).dueSchedules : undefined,
   });
+  appendOpsMissionCommandAudit({
+    action: 'control-room-run',
+    ok: actions.every(item => item.ok !== false),
+    mode: 'control-room',
+    details: {
+      actions: actions.length,
+      dueRunExecuted: dueRun && typeof dueRun.executed === 'number' ? dueRun.executed : 0,
+    },
+  });
 
   return {
     ok: actions.every(item => item.ok !== false),
@@ -2590,6 +2739,16 @@ function runOpsMissionCommandCenterQuickFix(body: JsonObject): JsonObject {
   }
 
   const after = buildOpsMissionCommandCenter(20 * 60 * 1000, analyticsLimit);
+  appendOpsMissionCommandAudit({
+    action: 'command-center-quick-fix',
+    ok: actions.every(item => item.ok !== false),
+    mode: typeof after.mode === 'string' ? after.mode : undefined,
+    riskScore: typeof after.riskScore === 'number' ? after.riskScore : undefined,
+    details: {
+      actions: actions.length,
+      targetPassRate,
+    },
+  });
   pushEvent('ops-mission-command-center-quick-fix', 'Mission command center quick-fix executed', {
     targetPassRate,
     actions: actions.length,
@@ -2635,6 +2794,17 @@ function runOpsMissionCommandCenterBurstTest(body: JsonObject, host: string, por
   const failureCount = results.length - successCount;
   const commandCenter = buildOpsMissionCommandCenter(horizonMs, analyticsLimit);
   const board = buildOpsBoard(host, port);
+  appendOpsMissionCommandAudit({
+    action: 'command-center-burst-test',
+    ok: failureCount === 0,
+    mode: typeof commandCenter.mode === 'string' ? commandCenter.mode : undefined,
+    riskScore: typeof commandCenter.riskScore === 'number' ? commandCenter.riskScore : undefined,
+    details: {
+      cycles,
+      successCount,
+      failureCount,
+    },
+  });
   pushEvent('ops-mission-command-center-burst', 'Mission command center burst test executed', {
     cycles,
     successCount,
@@ -2651,6 +2821,151 @@ function runOpsMissionCommandCenterBurstTest(body: JsonObject, host: string, por
     board,
     updateHint: UPDATE_HINT,
   };
+}
+
+function buildOpsMissionCommandCenterContract(): JsonObject {
+  return {
+    ok: true,
+    version: pkg.version,
+    updateHint: UPDATE_HINT,
+    generatedAt: nowIso(),
+    endpoints: [
+      { method: 'GET', path: '/api/ops/missions/command-center', purpose: 'overview + risk score + quick actions' },
+      { method: 'GET', path: '/api/ops/missions/command-center/timeline', purpose: 'run timeline and pass-rate trend' },
+      { method: 'GET', path: '/api/ops/missions/command-center/anomalies', purpose: 'anomaly diagnostics' },
+      { method: 'POST', path: '/api/ops/missions/command-center/quick-fix', purpose: 'resume/run-due/autotune orchestration' },
+      { method: 'POST', path: '/api/ops/missions/command-center/burst-test', purpose: 'multi-cycle mission stress run' },
+      { method: 'POST', path: '/api/ops/missions/command-center/device-drill', purpose: 'live smartphone url drill' },
+      { method: 'GET', path: '/api/ops/missions/command-center/history', purpose: 'load command audit history' },
+      { method: 'POST', path: '/api/ops/missions/command-center/history/clear', purpose: 'prune command audit history' },
+      { method: 'GET', path: '/api/ops/missions/command-center/stream', purpose: 'live command-center SSE feed' },
+    ],
+    pollHints: {
+      dashboardMs: 5000,
+      commandCenterMs: 3000,
+      timelineMs: 8000,
+    },
+  };
+}
+
+function runOpsMissionCommandCenterDeviceDrill(body: JsonObject): JsonObject {
+  const urls: string[] = [];
+  if (Array.isArray(body.urls)) {
+    for (const value of body.urls.slice(0, 30)) {
+      if (typeof value === 'string' && /^https?:\/\//i.test(value.trim())) {
+        urls.push(value.trim());
+      }
+    }
+  }
+  if (urls.length === 0 && typeof body.url === 'string' && /^https?:\/\//i.test(body.url.trim())) {
+    urls.push(body.url.trim());
+  }
+  if (urls.length === 0) {
+    urls.push('https://www.wikipedia.org');
+  }
+
+  const waitForReadyMs = clampInt(body.waitForReadyMs, 900, 200, 15000);
+  const deviceId = extractDeviceId(body);
+  const results: JsonObject[] = [];
+  for (const url of urls) {
+    try {
+      const openResult = openUrlInChrome(url, deviceId, {
+        waitForReadyMs,
+        fallbackToDefault: true,
+      });
+      results.push({
+        ok: true,
+        url,
+        deviceId: openResult.deviceId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      results.push({
+        ok: false,
+        url,
+        error: message,
+      });
+    }
+  }
+  const ok = results.every(item => item.ok !== false);
+  const commandCenter = buildOpsMissionCommandCenter(20 * 60 * 1000, 300);
+  appendOpsMissionCommandAudit({
+    action: 'device-drill',
+    ok,
+    mode: typeof commandCenter.mode === 'string' ? commandCenter.mode : undefined,
+    riskScore: typeof commandCenter.riskScore === 'number' ? commandCenter.riskScore : undefined,
+    details: {
+      urls: urls.length,
+      successCount: results.filter(item => item.ok !== false).length,
+      failureCount: results.filter(item => item.ok === false).length,
+    },
+  });
+  pushEvent('ops-mission-command-center-device-drill', 'Mission command center device drill executed', {
+    ok,
+    urls: urls.length,
+  });
+  return {
+    ok,
+    executed: results.length,
+    results,
+    commandCenter,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function buildOpsMissionCommandCenterStreamPayload(horizonMsRaw: unknown, analyticsLimitRaw: unknown): JsonObject {
+  const commandCenter = buildOpsMissionCommandCenter(horizonMsRaw, analyticsLimitRaw);
+  return {
+    ok: true,
+    streamedAt: nowIso(),
+    commandCenter,
+    audit: listOpsMissionCommandAudit(25),
+    state: {
+      connectedDevices: getConnectedDevices().length,
+      missionRuns: opsMissionRuns.length,
+      commandAuditEntries: opsMissionCommandAudit.length,
+    },
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function writeSseFrame(response: ServerResponse, eventName: string, payload: JsonObject): void {
+  response.write(`event: ${eventName}\n`);
+  response.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function startOpsMissionCommandCenterStream(
+  request: IncomingMessage,
+  response: ServerResponse,
+  horizonMsRaw: unknown,
+  analyticsLimitRaw: unknown
+): void {
+  const horizonMs = clampInt(horizonMsRaw, 20 * 60 * 1000, 60000, 7 * 24 * 60 * 60 * 1000);
+  const analyticsLimit = clampInt(analyticsLimitRaw, 300, 1, 5000);
+  response.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  response.write('retry: 3000\n\n');
+  const sendSnapshot = () => {
+    const payload = buildOpsMissionCommandCenterStreamPayload(horizonMs, analyticsLimit);
+    writeSseFrame(response, 'snapshot', payload);
+  };
+  sendSnapshot();
+  const timer = setInterval(() => {
+    try {
+      sendSnapshot();
+    } catch {
+      // ignore stream write errors
+    }
+  }, 3000);
+  const close = () => {
+    clearInterval(timer);
+  };
+  request.on('close', close);
+  response.on('close', close);
 }
 
 function loadSchedules(): void {
@@ -5718,6 +6033,17 @@ function runOpsMission(nameRaw: string, body: JsonObject, host: string, port: nu
       durationMs,
       gatePass: gate.pass,
     });
+    appendOpsMissionCommandAudit({
+      action: 'mission-run',
+      ok,
+      mission: mission.name,
+      mode: ok ? 'mission-ok' : 'mission-failed',
+      details: {
+        durationMs,
+        steps: steps.length,
+        gatePass: gate.pass === true,
+      },
+    });
 
     return {
       ok,
@@ -5753,6 +6079,17 @@ function runOpsMission(nameRaw: string, body: JsonObject, host: string, port: nu
       name: mission.name,
       error: message,
     });
+    appendOpsMissionCommandAudit({
+      action: 'mission-run',
+      ok: false,
+      mission: mission.name,
+      mode: 'mission-failed',
+      details: {
+        durationMs,
+        steps: steps.length,
+        error: message,
+      },
+    });
     return {
       ok: false,
       mission: mission.name,
@@ -5768,6 +6105,7 @@ function runOpsMission(nameRaw: string, body: JsonObject, host: string, port: nu
 }
 
 function buildAuditExport(host: string, port: number): JsonObject {
+  ensureOpsMissionCommandAuditLoaded();
   const missionAnalytics = buildOpsMissionAnalytics(1000);
   const missionScheduleStatus = buildOpsMissionScheduleStatus();
   return {
@@ -5790,6 +6128,7 @@ function buildAuditExport(host: string, port: number): JsonObject {
     opsMissionPolicy: currentOpsMissionPolicyState(),
     opsMissionAnalytics: missionAnalytics,
     opsMissionScheduleStatus: missionScheduleStatus,
+    opsMissionCommandAudit: opsMissionCommandAudit.slice(-400),
     controlRoomHistory: listControlRoomHistory(200),
     schedules: schedulesList(),
     timeline: dashboardTimeline.slice(-300),
@@ -6842,6 +7181,7 @@ function setupSse(request: IncomingMessage, response: ServerResponse): void {
 
 function buildStatePayload(host: string, port: number): JsonObject {
   const missionScheduleStatus = buildOpsMissionScheduleStatus();
+  ensureOpsMissionCommandAuditLoaded();
   const devices = getConnectedDevices();
   const totals = laneTotals();
   return {
@@ -6866,6 +7206,7 @@ function buildStatePayload(host: string, port: number): JsonObject {
     opsScenarioCount: Object.keys(opsScenarios).length,
     opsMissionCount: Object.keys(opsMissions).length,
     opsMissionRunCount: opsMissionRuns.length,
+    opsMissionCommandAuditCount: opsMissionCommandAudit.length,
     opsMissionScheduleCount: Object.keys(opsMissionSchedules).length,
     opsMissionDueCount: typeof missionScheduleStatus.dueCount === 'number' ? missionScheduleStatus.dueCount : 0,
     opsMissionPolicySuspended: currentOpsMissionPolicyState().suspended,
@@ -6910,6 +7251,7 @@ function buildDashboardPayload(host: string, port: number): JsonObject {
 function buildOpsBoard(host: string, port: number): JsonObject {
   const missionAnalytics = buildOpsMissionAnalytics(300);
   const missionScheduleStatus = buildOpsMissionScheduleStatus();
+  ensureOpsMissionCommandAuditLoaded();
   const missionCommandCenter = buildOpsMissionCommandCenter(20 * 60 * 1000, 300);
   const missionCommandTimeline = buildOpsMissionCommandTimeline(120);
   const missionAnomalies = detectOpsMissionAnomalies(300);
@@ -6965,6 +7307,7 @@ function buildOpsBoard(host: string, port: number): JsonObject {
     opsMissionCommandCenter: missionCommandCenter,
     opsMissionCommandTimeline: missionCommandTimeline,
     opsMissionAnomalies: missionAnomalies,
+    opsMissionCommandAudit: opsMissionCommandAudit.slice(-120).reverse(),
     controlRoomHistory: listControlRoomHistory(80),
     updateHint: UPDATE_HINT,
   };
@@ -7025,6 +7368,7 @@ function buildSessionExport(): JsonObject {
     opsMissionPolicy: currentOpsMissionPolicyState(),
     opsMissionAnalytics: missionAnalytics,
     opsMissionScheduleStatus: missionScheduleStatus,
+    opsMissionCommandAudit,
     controlRoomHistory,
     lanes: lanesSummary(),
     jobs,
@@ -7555,6 +7899,44 @@ async function handleApi(
       const body = await readJsonBody(request);
       sendJson(response, 200, runOpsMissionCommandCenterBurstTest(body, context.host, context.port));
     });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/command-center/device-drill') {
+    await withMetric('ops-missions-command-center-device-drill', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, runOpsMissionCommandCenterDeviceDrill(body));
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/missions/command-center/history') {
+    await withMetric('ops-missions-command-center-history', () => {
+      const limitRaw = Number(url.searchParams.get('limit') ?? '120');
+      sendJson(response, 200, listOpsMissionCommandAudit(limitRaw));
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/command-center/history/clear') {
+    await withMetric('ops-missions-command-center-history-clear', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, clearOpsMissionCommandAudit(body));
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/missions/command-center/contract') {
+    await withMetric('ops-missions-command-center-contract', () => {
+      sendJson(response, 200, buildOpsMissionCommandCenterContract());
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/missions/command-center/stream') {
+    const horizonMsRaw = Number(url.searchParams.get('horizonMs') ?? '1200000');
+    const analyticsLimitRaw = Number(url.searchParams.get('analyticsLimit') ?? '300');
+    startOpsMissionCommandCenterStream(request, response, horizonMsRaw, analyticsLimitRaw);
     return;
   }
 
@@ -12372,6 +12754,77 @@ https://developer.android.com</textarea>
         }
       }
 
+      function renderOpsMissionCommandAuditUi(payload) {
+        const panel = document.getElementById('ops-mission-command-center-history-panel');
+        if (!panel) {
+          return;
+        }
+        const entries = payload && Array.isArray(payload.entries) ? payload.entries : [];
+        panel.innerHTML = '';
+        const head = document.createElement('div');
+        head.className = 'item';
+        head.innerHTML =
+          '<div class="meta">Command Audit</div>' +
+          '<div>count=' + entries.length + '</div>';
+        panel.appendChild(head);
+        for (const entry of entries.slice(0, 16)) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">#' + (entry.id || '-') + ' @ ' + (entry.at || '-') + '</div>' +
+            '<div>' + (entry.action || 'unknown') + ' ok=' + (entry.ok !== false) + ' mode=' + (entry.mode || '-') + ' risk=' + (entry.riskScore || 0) + '</div>';
+          panel.appendChild(row);
+        }
+        if (!entries.length) {
+          panel.textContent = 'No command audit entries.';
+        }
+      }
+
+      function renderOpsMissionCommandContractUi(payload) {
+        const panel = document.getElementById('ops-mission-command-center-contract-panel');
+        if (!panel) {
+          return;
+        }
+        const endpoints = payload && Array.isArray(payload.endpoints) ? payload.endpoints : [];
+        panel.innerHTML = '';
+        const head = document.createElement('div');
+        head.className = 'item';
+        head.innerHTML =
+          '<div class="meta">Command Center Contract</div>' +
+          '<div>version=' + (payload.version || '-') + ' endpoints=' + endpoints.length + '</div>';
+        panel.appendChild(head);
+        for (const endpoint of endpoints.slice(0, 12)) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">' + (endpoint.method || 'GET') + ' ' + (endpoint.path || '-') + '</div>' +
+            '<div>' + (endpoint.purpose || '') + '</div>';
+          panel.appendChild(row);
+        }
+        if (!endpoints.length) {
+          panel.textContent = 'No contract endpoints.';
+        }
+      }
+
+      let opsMissionCommandCenterStream = null;
+
+      function setOpsMissionCommandCenterStreamState(text, isError) {
+        const state = document.getElementById('ops-mission-command-center-stream-state');
+        if (!state) {
+          return;
+        }
+        state.textContent = text;
+        state.style.color = isError ? '#ff9aa2' : '#9fd6ff';
+      }
+
+      function stopOpsMissionCommandCenterStream() {
+        if (opsMissionCommandCenterStream) {
+          opsMissionCommandCenterStream.close();
+          opsMissionCommandCenterStream = null;
+        }
+        setOpsMissionCommandCenterStreamState('stream: offline', false);
+      }
+
       function ensureOpsMissionCommandCenterUi() {
         if (document.getElementById('ops-mission-command-center-shell')) {
           return;
@@ -12400,9 +12853,29 @@ https://developer.android.com</textarea>
           '<button class="s" id="ops-mission-command-center-timeline-btn">Load timeline</button>' +
           '<input id="ops-mission-command-center-timeline-limit" type="number" min="10" max="2000" value="120" />' +
           '</div>' +
+          '<div class="split">' +
+          '<button class="s" id="ops-mission-command-center-stream-start-btn">Start live stream</button>' +
+          '<button class="w" id="ops-mission-command-center-stream-stop-btn">Stop live stream</button>' +
+          '</div>' +
+          '<div class="meta" id="ops-mission-command-center-stream-state">stream: offline</div>' +
+          '<div class="split">' +
+          '<button class="s" id="ops-mission-command-center-history-load-btn">Load command history</button>' +
+          '<button class="w" id="ops-mission-command-center-history-clear-btn">Clear command history</button>' +
+          '</div>' +
+          '<div class="split">' +
+          '<button class="s" id="ops-mission-command-center-contract-btn">Load backend contract</button>' +
+          '<input id="ops-mission-command-center-history-keep" type="number" min="0" max="2000" value="120" />' +
+          '</div>' +
+          '<textarea id="ops-mission-command-center-device-urls">[\n  \"https://developer.android.com\",\n  \"https://www.wikipedia.org\",\n  \"https://news.ycombinator.com\"\n]</textarea>' +
+          '<div class="split">' +
+          '<input id="ops-mission-command-center-device-wait" type="number" min="200" max="15000" value="900" />' +
+          '<button class="p" id="ops-mission-command-center-device-drill-btn">Run device drill</button>' +
+          '</div>' +
           '<div id="ops-mission-command-center-panel" class="metrics"></div>' +
           '<div id="ops-mission-command-center-timeline" class="metrics"></div>' +
-          '<div id="ops-mission-command-center-anomalies" class="metrics"></div>';
+          '<div id="ops-mission-command-center-anomalies" class="metrics"></div>' +
+          '<div id="ops-mission-command-center-history-panel" class="metrics"></div>' +
+          '<div id="ops-mission-command-center-contract-panel" class="metrics"></div>';
         anchor.insertAdjacentElement('afterend', shell);
 
         document.getElementById('ops-mission-command-center-load-btn').addEventListener('click', async function () {
@@ -12419,6 +12892,24 @@ https://developer.android.com</textarea>
         });
         document.getElementById('ops-mission-command-center-timeline-btn').addEventListener('click', async function () {
           try { await loadOpsMissionCommandTimelineUi(); } catch (error) { setMessage(String(error), true); }
+        });
+        document.getElementById('ops-mission-command-center-stream-start-btn').addEventListener('click', async function () {
+          try { await startOpsMissionCommandCenterStreamUi(); } catch (error) { setMessage(String(error), true); }
+        });
+        document.getElementById('ops-mission-command-center-stream-stop-btn').addEventListener('click', function () {
+          stopOpsMissionCommandCenterStream();
+        });
+        document.getElementById('ops-mission-command-center-history-load-btn').addEventListener('click', async function () {
+          try { await loadOpsMissionCommandHistoryUi(); } catch (error) { setMessage(String(error), true); }
+        });
+        document.getElementById('ops-mission-command-center-history-clear-btn').addEventListener('click', async function () {
+          try { await clearOpsMissionCommandHistoryUi(); } catch (error) { setMessage(String(error), true); }
+        });
+        document.getElementById('ops-mission-command-center-contract-btn').addEventListener('click', async function () {
+          try { await loadOpsMissionCommandContractUi(); } catch (error) { setMessage(String(error), true); }
+        });
+        document.getElementById('ops-mission-command-center-device-drill-btn').addEventListener('click', async function () {
+          try { await runOpsMissionCommandDeviceDrillUi(); } catch (error) { setMessage(String(error), true); }
         });
       }
 
@@ -12437,6 +12928,40 @@ https://developer.android.com</textarea>
         setMessage('Mission command center loaded', false);
       }
 
+      async function startOpsMissionCommandCenterStreamUi() {
+        stopOpsMissionCommandCenterStream();
+        const horizonMs = Number($opsMissionForecastHorizonMs.value || '1200000');
+        const analyticsLimit = Number($opsMissionAnalyticsLimit.value || '300');
+        const stream = new EventSource('/api/ops/missions/command-center/stream?horizonMs=' + encodeURIComponent(String(horizonMs)) + '&analyticsLimit=' + encodeURIComponent(String(analyticsLimit)));
+        opsMissionCommandCenterStream = stream;
+        setOpsMissionCommandCenterStreamState('stream: connecting', false);
+        stream.addEventListener('snapshot', function (event) {
+          try {
+            const payload = JSON.parse(event.data || '{}');
+            if (payload.commandCenter) {
+              renderOpsMissionCommandCenterUi(payload.commandCenter);
+              if (payload.commandCenter.timeline) {
+                renderOpsMissionCommandTimelineUi(payload.commandCenter.timeline);
+              }
+              if (payload.commandCenter.anomalies) {
+                renderOpsMissionAnomaliesUi(payload.commandCenter.anomalies);
+              }
+            }
+            if (payload.audit) {
+              renderOpsMissionCommandAuditUi(payload.audit);
+            }
+          } catch (error) {
+            setOpsMissionCommandCenterStreamState('stream: parse error', true);
+          }
+        });
+        stream.onopen = function () {
+          setOpsMissionCommandCenterStreamState('stream: online', false);
+        };
+        stream.onerror = function () {
+          setOpsMissionCommandCenterStreamState('stream: reconnecting', true);
+        };
+      }
+
       async function loadOpsMissionCommandTimelineUi() {
         const limitInput = document.getElementById('ops-mission-command-center-timeline-limit');
         const limit = Number((limitInput && limitInput.value) || '120');
@@ -12452,6 +12977,66 @@ https://developer.android.com</textarea>
         renderOpsMissionAnomaliesUi(result);
         renderOutput(result);
         setMessage('Mission anomalies loaded', false);
+      }
+
+      async function loadOpsMissionCommandHistoryUi() {
+        const keepInput = document.getElementById('ops-mission-command-center-history-keep');
+        const limit = Number((keepInput && keepInput.value) || '120');
+        const result = await api('/api/ops/missions/command-center/history?limit=' + encodeURIComponent(String(limit)));
+        renderOpsMissionCommandAuditUi(result);
+        renderOutput(result);
+        setMessage('Mission command history loaded', false);
+      }
+
+      async function clearOpsMissionCommandHistoryUi() {
+        const keepInput = document.getElementById('ops-mission-command-center-history-keep');
+        const keepLatest = Number((keepInput && keepInput.value) || '0');
+        const result = await api('/api/ops/missions/command-center/history/clear', 'POST', {
+          keepLatest,
+        });
+        renderOutput(result);
+        setMessage('Mission command history pruned', false);
+        await loadOpsMissionCommandHistoryUi();
+      }
+
+      async function loadOpsMissionCommandContractUi() {
+        const result = await api('/api/ops/missions/command-center/contract');
+        renderOpsMissionCommandContractUi(result);
+        renderOutput(result);
+        setMessage('Mission command backend contract loaded', false);
+      }
+
+      async function runOpsMissionCommandDeviceDrillUi() {
+        const urlsInput = document.getElementById('ops-mission-command-center-device-urls');
+        const waitInput = document.getElementById('ops-mission-command-center-device-wait');
+        let urls = [];
+        if (urlsInput && urlsInput.value) {
+          try {
+            const parsed = JSON.parse(urlsInput.value);
+            if (Array.isArray(parsed)) {
+              urls = parsed;
+            }
+          } catch {
+            urls = urlsInput.value.split(/\s+/).filter(Boolean);
+          }
+        }
+        const result = await api('/api/ops/missions/command-center/device-drill', 'POST', {
+          urls,
+          waitForReadyMs: Number((waitInput && waitInput.value) || '900'),
+          deviceId: selectedDeviceId(),
+        });
+        renderOutput(result);
+        if (result.commandCenter) {
+          renderOpsMissionCommandCenterUi(result.commandCenter);
+          if (result.commandCenter.anomalies) {
+            renderOpsMissionAnomaliesUi(result.commandCenter.anomalies);
+          }
+          if (result.commandCenter.timeline) {
+            renderOpsMissionCommandTimelineUi(result.commandCenter.timeline);
+          }
+        }
+        setMessage(result.ok ? 'Mission device drill completed' : 'Mission device drill completed with issues', !result.ok);
+        await loadOpsMissionCommandHistoryUi();
       }
 
       async function runOpsMissionCommandQuickFixUi() {
@@ -12478,6 +13063,7 @@ https://developer.android.com</textarea>
         setMessage(result.ok ? 'Mission quick-fix completed' : 'Mission quick-fix completed with issues', !result.ok);
         await listOpsMissionRunsUi();
         await listOpsMissionSchedulesUi();
+        await loadOpsMissionCommandHistoryUi();
       }
 
       async function runOpsMissionCommandBurstUi() {
@@ -12503,6 +13089,7 @@ https://developer.android.com</textarea>
         setMessage(result.ok ? 'Mission burst test completed' : 'Mission burst test finished with issues', !result.ok);
         await listOpsMissionRunsUi();
         await listOpsMissionSchedulesUi();
+        await loadOpsMissionCommandHistoryUi();
       }
 
       async function runOpsStabilizeUi() {
@@ -13007,6 +13594,9 @@ https://developer.android.com</textarea>
           await loadOpsMissionCommandCenterUi();
           await loadOpsMissionCommandTimelineUi();
           await loadOpsMissionCommandAnomaliesUi();
+          await loadOpsMissionCommandHistoryUi();
+          await loadOpsMissionCommandContractUi();
+          await startOpsMissionCommandCenterStreamUi();
           renderOutput({ ok: true, message: 'UI ready', updateHint: '${UPDATE_HINT}' });
           setMessage('Ready.', false);
 
@@ -13047,6 +13637,8 @@ https://developer.android.com</textarea>
               if (missionCommandCenterPayload.anomalies) {
                 renderOpsMissionAnomaliesUi(missionCommandCenterPayload.anomalies);
               }
+              const missionCommandHistoryPayload = await api('/api/ops/missions/command-center/history?limit=40');
+              renderOpsMissionCommandAuditUi(missionCommandHistoryPayload);
               const schedulesPayload = await api('/api/schedules');
               renderSchedules(schedulesPayload);
               const queueBoardPayload = await api('/api/board/queue');
@@ -13071,6 +13663,10 @@ https://developer.android.com</textarea>
         }
       }
 
+      window.addEventListener('beforeunload', function () {
+        stopOpsMissionCommandCenterStream();
+      });
+
       init();
     </script>
   </body>
@@ -13081,6 +13677,7 @@ export function startWebUiServer(options: { host?: string; port?: number } = {})
   const host = options.host ?? DEFAULT_WEB_UI_HOST;
   const port = options.port ?? DEFAULT_WEB_UI_PORT;
   ensureOpsMissionRunsLoaded();
+  ensureOpsMissionCommandAuditLoaded();
   ensureSchedulesInitialized();
   ensureOpsMissionSchedulesInitialized();
 
