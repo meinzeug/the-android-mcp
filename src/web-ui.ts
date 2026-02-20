@@ -2178,6 +2178,481 @@ function runDueOpsMissionSchedules(maxItemsRaw: unknown): JsonObject {
   };
 }
 
+function buildOpsMissionControlRoom(horizonMsRaw: unknown, analyticsLimitRaw: unknown): JsonObject {
+  const policy = currentOpsMissionPolicyState();
+  const status = buildOpsMissionScheduleStatus();
+  const analytics = buildOpsMissionAnalytics(analyticsLimitRaw);
+  const forecast = missionSchedulePolicyForecast(horizonMsRaw);
+
+  const totals = analytics && typeof analytics === 'object' && !Array.isArray(analytics)
+    ? (analytics.totals as Record<string, unknown> | undefined)
+    : undefined;
+  const failRate = totals && typeof totals.passRate === 'number'
+    ? Math.max(0, 100 - totals.passRate)
+    : 0;
+  const dueCount = status && typeof status === 'object' && !Array.isArray(status) && typeof status.dueCount === 'number'
+    ? status.dueCount
+    : 0;
+  const activeCount = status && typeof status === 'object' && !Array.isArray(status) && typeof status.activeCount === 'number'
+    ? status.activeCount
+    : 0;
+
+  const recommendations: string[] = [];
+  if (policy.suspended) {
+    recommendations.push(`Scheduler is suspended. Resume after cooldown or manual override. resumeAt=${policy.resumeAt || '-'}`);
+  }
+  if (dueCount > 0) {
+    recommendations.push(`There are ${dueCount} due schedules. Run due workloads now.`);
+  }
+  if (failRate >= 10) {
+    recommendations.push(`Mission fail-rate is elevated (${failRate.toFixed(2)}%). Rebalance intervals slower and inspect top failure reasons.`);
+  }
+  if (!policy.suspended && dueCount === 0 && failRate < 5 && activeCount > 0) {
+    recommendations.push('Mission system is stable. Keep current cadence or increase throughput gradually.');
+  }
+  if (recommendations.length === 0) {
+    recommendations.push('No mission recommendations at the moment.');
+  }
+
+  return {
+    ok: true,
+    generatedAt: nowIso(),
+    policy,
+    status,
+    analytics,
+    forecast,
+    summary: {
+      suspended: policy.suspended,
+      activeSchedules: activeCount,
+      dueSchedules: dueCount,
+      failRate,
+    },
+    recommendations,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function runOpsMissionControlRoom(body: JsonObject): JsonObject {
+  const horizonMs = clampInt(body.horizonMs, 20 * 60 * 1000, 60000, 7 * 24 * 60 * 60 * 1000);
+  const analyticsLimit = clampInt(body.analyticsLimit, 400, 1, 5000);
+  const runDue = body.runDue !== false;
+  const dueMaxItems = clampInt(body.maxDueItems, 10, 1, 200);
+  const autoResume = body.autoResume === true;
+  const autoRebalance = body.autoRebalance === true;
+  const actions: JsonObject[] = [];
+
+  const before = buildOpsMissionControlRoom(horizonMs, analyticsLimit);
+  let policy = currentOpsMissionPolicyState();
+  if (autoResume && policy.suspended) {
+    policy = resumeOpsMissionPolicyState('control-room-auto-resume');
+    actions.push({
+      action: 'resume-policy',
+      ok: true,
+      policy,
+    });
+  }
+
+  let dueRun: JsonObject | undefined;
+  if (runDue) {
+    dueRun = runDueOpsMissionSchedules(dueMaxItems);
+    actions.push({
+      action: 'run-due-schedules',
+      ok: dueRun.ok !== false,
+      requested: dueMaxItems,
+      executed: typeof dueRun.executed === 'number' ? dueRun.executed : 0,
+      dueBefore: typeof dueRun.dueBefore === 'number' ? dueRun.dueBefore : 0,
+    });
+  }
+
+  if (autoRebalance) {
+    const afterDueStatus = buildOpsMissionScheduleStatus();
+    const dueCount = typeof afterDueStatus.dueCount === 'number' ? afterDueStatus.dueCount : 0;
+    const analytics = buildOpsMissionAnalytics(analyticsLimit);
+    const totals = analytics && typeof analytics === 'object' && !Array.isArray(analytics)
+      ? (analytics.totals as Record<string, unknown> | undefined)
+      : undefined;
+    const passRate = totals && typeof totals.passRate === 'number' ? totals.passRate : 100;
+    let factor = 1;
+    if (dueCount > 0) {
+      factor = 1.15;
+    } else if (passRate > 99) {
+      factor = 0.95;
+    }
+    if (factor !== 1) {
+      const rebalance = rebalanceOpsMissionSchedules({
+        factor,
+        minEveryMs: 5000,
+        maxEveryMs: 24 * 60 * 60 * 1000,
+      });
+      actions.push({
+        action: 'rebalance-schedules',
+        ok: rebalance.ok !== false,
+        factor,
+      });
+    }
+  }
+
+  const after = buildOpsMissionControlRoom(horizonMs, analyticsLimit);
+  pushEvent('ops-mission-control-room-run', 'Mission control room executed', {
+    actions: actions.length,
+    dueBefore: before.summary && typeof before.summary === 'object' ? (before.summary as Record<string, unknown>).dueSchedules : undefined,
+    dueAfter: after.summary && typeof after.summary === 'object' ? (after.summary as Record<string, unknown>).dueSchedules : undefined,
+  });
+
+  return {
+    ok: actions.every(item => item.ok !== false),
+    startedAt: nowIso(),
+    before,
+    actions,
+    dueRun,
+    after,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function autoTuneOpsMissionScheduler(body: JsonObject): JsonObject {
+  const targetPassRate = clampInt(body.targetPassRate, 98, 1, 100);
+  const analyticsLimit = clampInt(body.analyticsLimit, 400, 1, 5000);
+  const analytics = buildOpsMissionAnalytics(analyticsLimit);
+  const totals = analytics && typeof analytics === 'object' && !Array.isArray(analytics)
+    ? (analytics.totals as Record<string, unknown> | undefined)
+    : undefined;
+  const passRate = totals && typeof totals.passRate === 'number' ? totals.passRate : 100;
+  const status = buildOpsMissionScheduleStatus();
+  const dueCount = typeof status.dueCount === 'number' ? status.dueCount : 0;
+
+  const changes: JsonObject[] = [];
+  let factor = 1;
+  if (passRate < targetPassRate || dueCount > 0) {
+    factor = 1.2;
+  } else if (passRate >= 99.9 && dueCount === 0) {
+    factor = 0.95;
+  }
+  if (factor !== 1) {
+    const rebalance = rebalanceOpsMissionSchedules({
+      factor,
+      minEveryMs: 5000,
+      maxEveryMs: 24 * 60 * 60 * 1000,
+    });
+    changes.push({
+      change: 'schedule-rebalance',
+      factor,
+      ok: rebalance.ok !== false,
+    });
+  }
+
+  const policyBefore = currentOpsMissionPolicyState();
+  let nextMaxFailures = policyBefore.maxConsecutiveFailures;
+  if (passRate < targetPassRate - 10) {
+    nextMaxFailures = Math.min(20, policyBefore.maxConsecutiveFailures + 1);
+  } else if (passRate >= targetPassRate && policyBefore.maxConsecutiveFailures > 2) {
+    nextMaxFailures = policyBefore.maxConsecutiveFailures - 1;
+  }
+  if (nextMaxFailures !== policyBefore.maxConsecutiveFailures) {
+    const policy = updateOpsMissionPolicyState({
+      maxConsecutiveFailures: nextMaxFailures,
+      cooldownMs: policyBefore.cooldownMs,
+      autoResumeAfterCooldown: policyBefore.autoResumeAfterCooldown,
+      blockSchedulesOnGateFail: policyBefore.blockSchedulesOnGateFail,
+    });
+    changes.push({
+      change: 'policy-max-consecutive-failures',
+      from: policyBefore.maxConsecutiveFailures,
+      to: policy.maxConsecutiveFailures,
+      ok: true,
+    });
+  }
+
+  const after = buildOpsMissionControlRoom(20 * 60 * 1000, analyticsLimit);
+  pushEvent('ops-mission-autotune', 'Mission scheduler autotune executed', {
+    targetPassRate,
+    passRate,
+    changes: changes.length,
+  });
+
+  return {
+    ok: true,
+    targetPassRate,
+    passRate,
+    dueCount,
+    changes,
+    after,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function buildOpsMissionCommandTimeline(limitRaw: unknown): JsonObject {
+  const limit = clampInt(limitRaw, 120, 10, 2000);
+  const runs = opsMissionRuns.slice(-limit);
+  let passed = 0;
+  let failed = 0;
+  let durationTotal = 0;
+  const points = runs.map((item, index) => {
+    const runAny = item as unknown as Record<string, unknown>;
+    const ok = item.ok !== false;
+    if (ok) {
+      passed += 1;
+    } else {
+      failed += 1;
+    }
+    const durationMs = typeof item.durationMs === 'number' ? item.durationMs : 0;
+    durationTotal += durationMs;
+    return {
+      idx: index + 1,
+      at: (runAny.startedAt as string | undefined) || (runAny.recordedAt as string | undefined) || nowIso(),
+      ok,
+      durationMs,
+      mission: (runAny.name as string | undefined) || (runAny.mission as string | undefined) || 'unknown',
+      scheduleId: typeof runAny.scheduleId === 'number' ? runAny.scheduleId : null,
+      reason: (runAny.reason as string | undefined) || (runAny.error as string | undefined) || null,
+    };
+  });
+  const passRate = points.length > 0 ? Math.round((passed / points.length) * 10000) / 100 : 100;
+  const avgDurationMs = points.length > 0 ? Math.round(durationTotal / points.length) : 0;
+  return {
+    ok: true,
+    generatedAt: nowIso(),
+    limit,
+    total: points.length,
+    passed,
+    failed,
+    passRate,
+    avgDurationMs,
+    points,
+  };
+}
+
+function detectOpsMissionAnomalies(limitRaw: unknown): JsonObject {
+  const analytics = buildOpsMissionAnalytics(limitRaw);
+  const status = buildOpsMissionScheduleStatus();
+  const policy = currentOpsMissionPolicyState();
+  const anomalies: JsonObject[] = [];
+
+  if (policy.suspended) {
+    anomalies.push({
+      severity: 'critical',
+      kind: 'policy-suspended',
+      message: `Mission scheduler is suspended${policy.resumeAt ? ` until ${policy.resumeAt}` : ''}.`,
+    });
+  }
+
+  const dueCount = typeof status.dueCount === 'number' ? status.dueCount : 0;
+  if (dueCount > 0) {
+    anomalies.push({
+      severity: dueCount > 3 ? 'high' : 'medium',
+      kind: 'due-schedules',
+      message: `${dueCount} schedules are due now.`,
+      dueCount,
+    });
+  }
+
+  const totals = analytics && typeof analytics === 'object' && !Array.isArray(analytics)
+    ? (analytics.totals as Record<string, unknown> | undefined)
+    : undefined;
+  const passRate = totals && typeof totals.passRate === 'number' ? totals.passRate : 100;
+  if (passRate < 98) {
+    anomalies.push({
+      severity: passRate < 92 ? 'critical' : 'high',
+      kind: 'pass-rate-drop',
+      message: `Mission pass-rate dropped to ${passRate.toFixed(2)}%.`,
+      passRate,
+    });
+  }
+
+  const reasons = analytics && typeof analytics === 'object' && !Array.isArray(analytics) && Array.isArray(analytics.failureReasons)
+    ? (analytics.failureReasons as Array<Record<string, unknown>>)
+    : [];
+  for (const reason of reasons.slice(0, 3)) {
+    const count = Number(reason.count || 0);
+    if (!Number.isFinite(count) || count <= 0) {
+      continue;
+    }
+    anomalies.push({
+      severity: count >= 5 ? 'high' : 'medium',
+      kind: 'failure-reason',
+      message: `Top failure reason: ${String(reason.reason || 'unknown')} (${count}).`,
+      reason: reason.reason || 'unknown',
+      count,
+    });
+  }
+
+  const severityScore = anomalies.reduce((sum, item) => {
+    const sev = String(item.severity || 'low');
+    if (sev === 'critical') {
+      return sum + 40;
+    }
+    if (sev === 'high') {
+      return sum + 20;
+    }
+    if (sev === 'medium') {
+      return sum + 10;
+    }
+    return sum + 5;
+  }, 0);
+
+  return {
+    ok: true,
+    generatedAt: nowIso(),
+    severityScore: Math.min(100, severityScore),
+    anomalies,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function buildOpsMissionCommandCenter(horizonMsRaw: unknown, analyticsLimitRaw: unknown): JsonObject {
+  const controlRoom = buildOpsMissionControlRoom(horizonMsRaw, analyticsLimitRaw);
+  const timeline = buildOpsMissionCommandTimeline(200);
+  const anomalies = detectOpsMissionAnomalies(analyticsLimitRaw);
+  const summary = controlRoom && typeof controlRoom === 'object' && !Array.isArray(controlRoom)
+    ? (controlRoom.summary as Record<string, unknown> | undefined)
+    : undefined;
+  const dueSchedules = summary && typeof summary.dueSchedules === 'number' ? summary.dueSchedules : 0;
+  const failRate = summary && typeof summary.failRate === 'number' ? summary.failRate : 0;
+  const anomalyScore = typeof anomalies.severityScore === 'number' ? anomalies.severityScore : 0;
+  const riskScore = Math.max(0, Math.min(100, Math.round(anomalyScore + dueSchedules * 3 + failRate * 1.5)));
+  const mode = riskScore >= 75
+    ? 'critical'
+    : riskScore >= 50
+      ? 'high-alert'
+      : riskScore >= 25
+        ? 'watch'
+        : 'stable';
+
+  const quickActions: string[] = [];
+  if (mode !== 'stable') {
+    quickActions.push('Run Command Center quick-fix');
+  }
+  if (dueSchedules > 0) {
+    quickActions.push('Execute due mission schedules');
+  }
+  if (failRate > 5) {
+    quickActions.push('Run mission autotune and inspect failure reasons');
+  }
+  if (quickActions.length === 0) {
+    quickActions.push('No immediate action required.');
+  }
+
+  return {
+    ok: true,
+    generatedAt: nowIso(),
+    mode,
+    riskScore,
+    quickActions,
+    controlRoom,
+    timeline,
+    anomalies,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function runOpsMissionCommandCenterQuickFix(body: JsonObject): JsonObject {
+  const actions: JsonObject[] = [];
+  const targetPassRate = clampInt(body.targetPassRate, 98, 1, 100);
+  const maxDueItems = clampInt(body.maxDueItems, 15, 1, 200);
+  const analyticsLimit = clampInt(body.analyticsLimit, 300, 1, 5000);
+  const resumeIfSuspended = body.resumeIfSuspended !== false;
+  const runDue = body.runDue !== false;
+  const autoTune = body.autoTune !== false;
+  const policyBefore = currentOpsMissionPolicyState();
+
+  if (resumeIfSuspended && policyBefore.suspended) {
+    const policy = resumeOpsMissionPolicyState('command-center-quick-fix');
+    actions.push({
+      action: 'resume-policy',
+      ok: true,
+      policy,
+    });
+  }
+
+  let dueRun: JsonObject | undefined;
+  if (runDue) {
+    dueRun = runDueOpsMissionSchedules(maxDueItems);
+    actions.push({
+      action: 'run-due-schedules',
+      ok: dueRun.ok !== false,
+      executed: dueRun.executed || 0,
+      requested: maxDueItems,
+    });
+  }
+
+  let tuneResult: JsonObject | undefined;
+  if (autoTune) {
+    tuneResult = autoTuneOpsMissionScheduler({
+      targetPassRate,
+      analyticsLimit,
+    });
+    actions.push({
+      action: 'autotune',
+      ok: tuneResult.ok !== false,
+      targetPassRate,
+      changes: Array.isArray(tuneResult.changes) ? tuneResult.changes.length : 0,
+    });
+  }
+
+  const after = buildOpsMissionCommandCenter(20 * 60 * 1000, analyticsLimit);
+  pushEvent('ops-mission-command-center-quick-fix', 'Mission command center quick-fix executed', {
+    targetPassRate,
+    actions: actions.length,
+  });
+
+  return {
+    ok: actions.every(item => item.ok !== false),
+    actions,
+    dueRun,
+    tuneResult,
+    after,
+    updateHint: UPDATE_HINT,
+  };
+}
+
+function runOpsMissionCommandCenterBurstTest(body: JsonObject, host: string, port: number): JsonObject {
+  const cycles = clampInt(body.cycles, 3, 1, 20);
+  const horizonMs = clampInt(body.horizonMs, 20 * 60 * 1000, 60000, 7 * 24 * 60 * 60 * 1000);
+  const analyticsLimit = clampInt(body.analyticsLimit, 300, 1, 5000);
+  const runDue = body.runDue !== false;
+  const maxDueItems = clampInt(body.maxDueItems, 10, 1, 200);
+  const results: JsonObject[] = [];
+
+  for (let i = 0; i < cycles; i += 1) {
+    const run = runOpsMissionControlRoom({
+      horizonMs,
+      analyticsLimit,
+      runDue,
+      maxDueItems,
+      autoResume: true,
+      autoRebalance: true,
+    });
+    results.push({
+      cycle: i + 1,
+      ok: run.ok !== false,
+      actionCount: Array.isArray(run.actions) ? run.actions.length : 0,
+      dueExecuted: run.dueRun && typeof run.dueRun === 'object' ? (run.dueRun as Record<string, unknown>).executed || 0 : 0,
+      at: nowIso(),
+    });
+  }
+
+  const successCount = results.filter(item => item.ok !== false).length;
+  const failureCount = results.length - successCount;
+  const commandCenter = buildOpsMissionCommandCenter(horizonMs, analyticsLimit);
+  const board = buildOpsBoard(host, port);
+  pushEvent('ops-mission-command-center-burst', 'Mission command center burst test executed', {
+    cycles,
+    successCount,
+    failureCount,
+  });
+
+  return {
+    ok: failureCount === 0,
+    cycles,
+    successCount,
+    failureCount,
+    results,
+    commandCenter,
+    board,
+    updateHint: UPDATE_HINT,
+  };
+}
+
 function loadSchedules(): void {
   try {
     ensureAppStateDir();
@@ -6435,6 +6910,9 @@ function buildDashboardPayload(host: string, port: number): JsonObject {
 function buildOpsBoard(host: string, port: number): JsonObject {
   const missionAnalytics = buildOpsMissionAnalytics(300);
   const missionScheduleStatus = buildOpsMissionScheduleStatus();
+  const missionCommandCenter = buildOpsMissionCommandCenter(20 * 60 * 1000, 300);
+  const missionCommandTimeline = buildOpsMissionCommandTimeline(120);
+  const missionAnomalies = detectOpsMissionAnomalies(300);
   const recentFailedJobs = jobs
     .filter(job => job.status === 'failed')
     .slice(0, 20)
@@ -6484,6 +6962,9 @@ function buildOpsBoard(host: string, port: number): JsonObject {
     opsMissionPolicy: currentOpsMissionPolicyState(),
     opsMissionAnalytics: missionAnalytics,
     opsMissionScheduleStatus: missionScheduleStatus,
+    opsMissionCommandCenter: missionCommandCenter,
+    opsMissionCommandTimeline: missionCommandTimeline,
+    opsMissionAnomalies: missionAnomalies,
     controlRoomHistory: listControlRoomHistory(80),
     updateHint: UPDATE_HINT,
   };
@@ -7007,6 +7488,72 @@ async function handleApi(
         ok: true,
         missions: listOpsMissions(),
       });
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/missions/control-room') {
+    await withMetric('ops-missions-control-room', () => {
+      const horizonMsRaw = Number(url.searchParams.get('horizonMs') ?? '1200000');
+      const analyticsLimitRaw = Number(url.searchParams.get('analyticsLimit') ?? '400');
+      sendJson(response, 200, buildOpsMissionControlRoom(horizonMsRaw, analyticsLimitRaw));
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/control-room/run') {
+    await withMetric('ops-missions-control-room-run', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, runOpsMissionControlRoom(body));
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/autotune') {
+    await withMetric('ops-missions-autotune', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, autoTuneOpsMissionScheduler(body));
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/missions/command-center') {
+    await withMetric('ops-missions-command-center', () => {
+      const horizonMsRaw = Number(url.searchParams.get('horizonMs') ?? '1200000');
+      const analyticsLimitRaw = Number(url.searchParams.get('analyticsLimit') ?? '300');
+      sendJson(response, 200, buildOpsMissionCommandCenter(horizonMsRaw, analyticsLimitRaw));
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/missions/command-center/timeline') {
+    await withMetric('ops-missions-command-center-timeline', () => {
+      const limitRaw = Number(url.searchParams.get('limit') ?? '120');
+      sendJson(response, 200, buildOpsMissionCommandTimeline(limitRaw));
+    });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/ops/missions/command-center/anomalies') {
+    await withMetric('ops-missions-command-center-anomalies', () => {
+      const limitRaw = Number(url.searchParams.get('limit') ?? '300');
+      sendJson(response, 200, detectOpsMissionAnomalies(limitRaw));
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/command-center/quick-fix') {
+    await withMetric('ops-missions-command-center-quick-fix', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, runOpsMissionCommandCenterQuickFix(body));
+    });
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/ops/missions/command-center/burst-test') {
+    await withMetric('ops-missions-command-center-burst-test', async () => {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, runOpsMissionCommandCenterBurstTest(body, context.host, context.port));
     });
     return;
   }
@@ -9181,8 +9728,17 @@ https://developer.android.com</textarea>
             <button class="s" id="ops-mission-schedules-status-btn">Load schedule status</button>
             <button class="p" id="ops-mission-run-due-btn">Run due schedules now</button>
           </div>
+          <div class="split">
+            <button class="s" id="ops-mission-control-room-load-btn">Load mission control room</button>
+            <button class="p" id="ops-mission-control-room-run-btn">Run mission control room</button>
+          </div>
+          <div class="split">
+            <input id="ops-mission-autotune-target-passrate" type="number" min="1" max="100" value="98" />
+            <button class="s" id="ops-mission-autotune-btn">Autotune mission scheduler</button>
+          </div>
           <div id="ops-mission-analytics-panel" class="metrics"></div>
           <div id="ops-mission-schedule-status-panel" class="metrics"></div>
+          <div id="ops-mission-control-room-panel" class="metrics"></div>
           <hr style="border:0;border-top:1px solid #2f4a61;" />
           <div class="split">
             <select id="ops-mission-policy-block">
@@ -9342,6 +9898,8 @@ https://developer.android.com</textarea>
       const $opsMissionAnalyticsLimit = document.getElementById('ops-mission-analytics-limit');
       const $opsMissionAnalyticsPanel = document.getElementById('ops-mission-analytics-panel');
       const $opsMissionScheduleStatusPanel = document.getElementById('ops-mission-schedule-status-panel');
+      const $opsMissionAutotuneTargetPassrate = document.getElementById('ops-mission-autotune-target-passrate');
+      const $opsMissionControlRoomPanel = document.getElementById('ops-mission-control-room-panel');
       const $opsMissionPolicyBlock = document.getElementById('ops-mission-policy-block');
       const $opsMissionPolicyMaxFailures = document.getElementById('ops-mission-policy-max-failures');
       const $opsMissionPolicyCooldownMs = document.getElementById('ops-mission-policy-cooldown-ms');
@@ -9849,6 +10407,28 @@ https://developer.android.com</textarea>
             '<div>mission=' + item.mission + ' due=' + String(item.due === true) + ' overdueMs=' + (item.overdueMs || 0) + '</div>' +
             '<div>nextRunAt=' + (item.nextRunAt || '-') + ' runs=' + item.runs + ' failures=' + item.failures + '</div>';
           $opsMissionScheduleStatusPanel.appendChild(row);
+        }
+      }
+
+      function renderOpsMissionControlRoom(payload) {
+        if (!$opsMissionControlRoomPanel) {
+          return;
+        }
+        const summary = payload && payload.summary ? payload.summary : {};
+        const recs = Array.isArray(payload && payload.recommendations) ? payload.recommendations : [];
+        $opsMissionControlRoomPanel.innerHTML = '';
+        const row = document.createElement('div');
+        row.className = 'item';
+        row.innerHTML =
+          '<div class="meta">mission control room</div>' +
+          '<div>suspended=' + String(summary.suspended === true) + ' active=' + (summary.activeSchedules || 0) + ' due=' + (summary.dueSchedules || 0) + '</div>' +
+          '<div>failRate=' + (summary.failRate || 0) + '%</div>';
+        $opsMissionControlRoomPanel.appendChild(row);
+        for (const rec of recs.slice(0, 8)) {
+          const next = document.createElement('div');
+          next.className = 'item';
+          next.innerHTML = '<div>' + String(rec) + '</div>';
+          $opsMissionControlRoomPanel.appendChild(next);
         }
       }
 
@@ -11661,6 +12241,270 @@ https://developer.android.com</textarea>
         await listOpsMissionSchedulesUi();
       }
 
+      async function loadOpsMissionControlRoomUi() {
+        const horizonMs = Number($opsMissionForecastHorizonMs.value || '1200000');
+        const analyticsLimit = Number($opsMissionAnalyticsLimit.value || '300');
+        const result = await api('/api/ops/missions/control-room?horizonMs=' + encodeURIComponent(String(horizonMs)) + '&analyticsLimit=' + encodeURIComponent(String(analyticsLimit)));
+        renderOpsMissionControlRoom(result);
+        renderOutput(result);
+        setMessage('Mission control room loaded', false);
+      }
+
+      async function runOpsMissionControlRoomUi() {
+        const result = await api('/api/ops/missions/control-room/run', 'POST', {
+          horizonMs: Number($opsMissionForecastHorizonMs.value || '1200000'),
+          analyticsLimit: Number($opsMissionAnalyticsLimit.value || '300'),
+          runDue: true,
+          maxDueItems: 15,
+          autoResume: true,
+          autoRebalance: true,
+        });
+        renderOutput(result);
+        if (result.after) {
+          renderOpsMissionControlRoom(result.after);
+          if (result.after.analytics) {
+            renderOpsMissionAnalytics(result.after.analytics);
+          }
+          if (result.after.status) {
+            renderOpsMissionScheduleStatus(result.after.status);
+          }
+          if (result.after.forecast) {
+            renderOpsMissionForecast(result.after.forecast);
+          }
+        }
+        setMessage(result.ok ? 'Mission control room executed' : 'Mission control room completed with issues', !result.ok);
+        await listOpsMissionRunsUi();
+        await listOpsMissionSchedulesUi();
+      }
+
+      async function autoTuneOpsMissionSchedulerUi() {
+        const result = await api('/api/ops/missions/autotune', 'POST', {
+          targetPassRate: Number($opsMissionAutotuneTargetPassrate.value || '98'),
+          analyticsLimit: Number($opsMissionAnalyticsLimit.value || '300'),
+        });
+        renderOutput(result);
+        if (result.after) {
+          renderOpsMissionControlRoom(result.after);
+        }
+        setMessage('Mission scheduler autotune completed', false);
+        await listOpsMissionSchedulesUi();
+        await loadOpsMissionPolicyUi();
+        await loadOpsMissionAnalyticsUi();
+        await loadOpsMissionScheduleStatusUi();
+      }
+
+      function renderOpsMissionCommandCenterUi(payload) {
+        const panel = document.getElementById('ops-mission-command-center-panel');
+        if (!panel) {
+          return;
+        }
+        const mode = payload && payload.mode ? String(payload.mode) : 'unknown';
+        const riskScore = payload && typeof payload.riskScore === 'number' ? payload.riskScore : 0;
+        const actions = Array.isArray(payload.quickActions) ? payload.quickActions : [];
+        panel.innerHTML = '';
+        const item = document.createElement('div');
+        item.className = 'item';
+        item.innerHTML =
+          '<div class="meta">Mission Command Center</div>' +
+          '<div>mode=' + mode + ' riskScore=' + riskScore + '</div>' +
+          '<div>quickActions=' + actions.length + '</div>';
+        panel.appendChild(item);
+        for (const action of actions.slice(0, 8)) {
+          const next = document.createElement('div');
+          next.className = 'item';
+          next.innerHTML = '<div>' + String(action) + '</div>';
+          panel.appendChild(next);
+        }
+        if (!actions.length) {
+          panel.textContent = 'No command center actions.';
+        }
+      }
+
+      function renderOpsMissionCommandTimelineUi(payload) {
+        const panel = document.getElementById('ops-mission-command-center-timeline');
+        if (!panel) {
+          return;
+        }
+        const points = payload && Array.isArray(payload.points) ? payload.points : [];
+        panel.innerHTML = '';
+        const headline = document.createElement('div');
+        headline.className = 'item';
+        headline.innerHTML =
+          '<div class="meta">Mission Timeline</div>' +
+          '<div>total=' + (payload.total || 0) + ' passRate=' + (payload.passRate || 0) + '% avg=' + (payload.avgDurationMs || 0) + 'ms</div>';
+        panel.appendChild(headline);
+        for (const point of points.slice(-10).reverse()) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">' + (point.at || '-') + '</div>' +
+            '<div>' + (point.ok ? 'ok' : 'failed') + ' mission=' + (point.mission || 'unknown') + ' duration=' + (point.durationMs || 0) + 'ms</div>';
+          panel.appendChild(row);
+        }
+        if (!points.length) {
+          panel.textContent = 'No mission timeline points.';
+        }
+      }
+
+      function renderOpsMissionAnomaliesUi(payload) {
+        const panel = document.getElementById('ops-mission-command-center-anomalies');
+        if (!panel) {
+          return;
+        }
+        const anomalies = payload && Array.isArray(payload.anomalies) ? payload.anomalies : [];
+        panel.innerHTML = '';
+        const headline = document.createElement('div');
+        headline.className = 'item';
+        headline.innerHTML =
+          '<div class="meta">Mission Anomalies</div>' +
+          '<div>severityScore=' + (payload.severityScore || 0) + ' count=' + anomalies.length + '</div>';
+        panel.appendChild(headline);
+        for (const anomaly of anomalies.slice(0, 12)) {
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML =
+            '<div class="meta">' + (anomaly.severity || 'info') + ' - ' + (anomaly.kind || 'unknown') + '</div>' +
+            '<div>' + (anomaly.message || '') + '</div>';
+          panel.appendChild(row);
+        }
+        if (!anomalies.length) {
+          panel.textContent = 'No mission anomalies detected.';
+        }
+      }
+
+      function ensureOpsMissionCommandCenterUi() {
+        if (document.getElementById('ops-mission-command-center-shell')) {
+          return;
+        }
+        const anchor = document.getElementById('ops-mission-control-room-panel');
+        if (!anchor) {
+          return;
+        }
+        const shell = document.createElement('div');
+        shell.id = 'ops-mission-command-center-shell';
+        shell.className = 'stack';
+        shell.innerHTML =
+          '<div class="split">' +
+          '<button class="s" id="ops-mission-command-center-load-btn">Load command center</button>' +
+          '<button class="w" id="ops-mission-command-center-anomalies-btn">Load anomalies</button>' +
+          '</div>' +
+          '<div class="split">' +
+          '<button class="p" id="ops-mission-command-center-quick-fix-btn">Run quick-fix</button>' +
+          '<button class="w" id="ops-mission-command-center-burst-btn">Run burst test</button>' +
+          '</div>' +
+          '<div class="split">' +
+          '<input id="ops-mission-command-center-target-passrate" type="number" min="1" max="100" value="98" />' +
+          '<input id="ops-mission-command-center-cycles" type="number" min="1" max="20" value="3" />' +
+          '</div>' +
+          '<div class="split">' +
+          '<button class="s" id="ops-mission-command-center-timeline-btn">Load timeline</button>' +
+          '<input id="ops-mission-command-center-timeline-limit" type="number" min="10" max="2000" value="120" />' +
+          '</div>' +
+          '<div id="ops-mission-command-center-panel" class="metrics"></div>' +
+          '<div id="ops-mission-command-center-timeline" class="metrics"></div>' +
+          '<div id="ops-mission-command-center-anomalies" class="metrics"></div>';
+        anchor.insertAdjacentElement('afterend', shell);
+
+        document.getElementById('ops-mission-command-center-load-btn').addEventListener('click', async function () {
+          try { await loadOpsMissionCommandCenterUi(); } catch (error) { setMessage(String(error), true); }
+        });
+        document.getElementById('ops-mission-command-center-anomalies-btn').addEventListener('click', async function () {
+          try { await loadOpsMissionCommandAnomaliesUi(); } catch (error) { setMessage(String(error), true); }
+        });
+        document.getElementById('ops-mission-command-center-quick-fix-btn').addEventListener('click', async function () {
+          try { await runOpsMissionCommandQuickFixUi(); } catch (error) { setMessage(String(error), true); }
+        });
+        document.getElementById('ops-mission-command-center-burst-btn').addEventListener('click', async function () {
+          try { await runOpsMissionCommandBurstUi(); } catch (error) { setMessage(String(error), true); }
+        });
+        document.getElementById('ops-mission-command-center-timeline-btn').addEventListener('click', async function () {
+          try { await loadOpsMissionCommandTimelineUi(); } catch (error) { setMessage(String(error), true); }
+        });
+      }
+
+      async function loadOpsMissionCommandCenterUi() {
+        const horizonMs = Number($opsMissionForecastHorizonMs.value || '1200000');
+        const analyticsLimit = Number($opsMissionAnalyticsLimit.value || '300');
+        const result = await api('/api/ops/missions/command-center?horizonMs=' + encodeURIComponent(String(horizonMs)) + '&analyticsLimit=' + encodeURIComponent(String(analyticsLimit)));
+        renderOpsMissionCommandCenterUi(result);
+        if (result.timeline) {
+          renderOpsMissionCommandTimelineUi(result.timeline);
+        }
+        if (result.anomalies) {
+          renderOpsMissionAnomaliesUi(result.anomalies);
+        }
+        renderOutput(result);
+        setMessage('Mission command center loaded', false);
+      }
+
+      async function loadOpsMissionCommandTimelineUi() {
+        const limitInput = document.getElementById('ops-mission-command-center-timeline-limit');
+        const limit = Number((limitInput && limitInput.value) || '120');
+        const result = await api('/api/ops/missions/command-center/timeline?limit=' + encodeURIComponent(String(limit)));
+        renderOpsMissionCommandTimelineUi(result);
+        renderOutput(result);
+        setMessage('Mission command timeline loaded', false);
+      }
+
+      async function loadOpsMissionCommandAnomaliesUi() {
+        const limit = Number($opsMissionAnalyticsLimit.value || '300');
+        const result = await api('/api/ops/missions/command-center/anomalies?limit=' + encodeURIComponent(String(limit)));
+        renderOpsMissionAnomaliesUi(result);
+        renderOutput(result);
+        setMessage('Mission anomalies loaded', false);
+      }
+
+      async function runOpsMissionCommandQuickFixUi() {
+        const targetInput = document.getElementById('ops-mission-command-center-target-passrate');
+        const targetPassRate = Number((targetInput && targetInput.value) || '98');
+        const result = await api('/api/ops/missions/command-center/quick-fix', 'POST', {
+          targetPassRate,
+          maxDueItems: 20,
+          analyticsLimit: Number($opsMissionAnalyticsLimit.value || '300'),
+          resumeIfSuspended: true,
+          runDue: true,
+          autoTune: true,
+        });
+        renderOutput(result);
+        if (result.after) {
+          renderOpsMissionCommandCenterUi(result.after);
+          if (result.after.anomalies) {
+            renderOpsMissionAnomaliesUi(result.after.anomalies);
+          }
+          if (result.after.timeline) {
+            renderOpsMissionCommandTimelineUi(result.after.timeline);
+          }
+        }
+        setMessage(result.ok ? 'Mission quick-fix completed' : 'Mission quick-fix completed with issues', !result.ok);
+        await listOpsMissionRunsUi();
+        await listOpsMissionSchedulesUi();
+      }
+
+      async function runOpsMissionCommandBurstUi() {
+        const cyclesInput = document.getElementById('ops-mission-command-center-cycles');
+        const cycles = Number((cyclesInput && cyclesInput.value) || '3');
+        const result = await api('/api/ops/missions/command-center/burst-test', 'POST', {
+          cycles,
+          horizonMs: Number($opsMissionForecastHorizonMs.value || '1200000'),
+          analyticsLimit: Number($opsMissionAnalyticsLimit.value || '300'),
+          runDue: true,
+          maxDueItems: 20,
+        });
+        renderOutput(result);
+        if (result.commandCenter) {
+          renderOpsMissionCommandCenterUi(result.commandCenter);
+          if (result.commandCenter.timeline) {
+            renderOpsMissionCommandTimelineUi(result.commandCenter.timeline);
+          }
+          if (result.commandCenter.anomalies) {
+            renderOpsMissionAnomaliesUi(result.commandCenter.anomalies);
+          }
+        }
+        setMessage(result.ok ? 'Mission burst test completed' : 'Mission burst test finished with issues', !result.ok);
+        await listOpsMissionRunsUi();
+        await listOpsMissionSchedulesUi();
+      }
+
       async function runOpsStabilizeUi() {
         const result = await api('/api/ops/stabilize', 'POST', {
           laneId: selectedLaneId(),
@@ -12057,6 +12901,15 @@ https://developer.android.com</textarea>
       document.getElementById('ops-mission-run-due-btn').addEventListener('click', async function () {
         try { await runDueOpsMissionSchedulesUi(); } catch (error) { setMessage(String(error), true); }
       });
+      document.getElementById('ops-mission-control-room-load-btn').addEventListener('click', async function () {
+        try { await loadOpsMissionControlRoomUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-control-room-run-btn').addEventListener('click', async function () {
+        try { await runOpsMissionControlRoomUi(); } catch (error) { setMessage(String(error), true); }
+      });
+      document.getElementById('ops-mission-autotune-btn').addEventListener('click', async function () {
+        try { await autoTuneOpsMissionSchedulerUi(); } catch (error) { setMessage(String(error), true); }
+      });
       document.getElementById('ops-mission-policy-load-btn').addEventListener('click', async function () {
         try { await loadOpsMissionPolicyUi(); } catch (error) { setMessage(String(error), true); }
       });
@@ -12119,6 +12972,7 @@ https://developer.android.com</textarea>
 
       async function init() {
         try {
+          ensureOpsMissionCommandCenterUi();
           await refreshCore();
           const history = await api('/api/history?limit=45');
           const events = Array.isArray(history.events) ? history.events : [];
@@ -12149,6 +13003,10 @@ https://developer.android.com</textarea>
           await forecastOpsMissionSchedulesUi();
           await loadOpsMissionAnalyticsUi();
           await loadOpsMissionScheduleStatusUi();
+          await loadOpsMissionControlRoomUi();
+          await loadOpsMissionCommandCenterUi();
+          await loadOpsMissionCommandTimelineUi();
+          await loadOpsMissionCommandAnomaliesUi();
           renderOutput({ ok: true, message: 'UI ready', updateHint: '${UPDATE_HINT}' });
           setMessage('Ready.', false);
 
@@ -12179,6 +13037,16 @@ https://developer.android.com</textarea>
               renderOpsMissionScheduleStatus(missionStatusPayload);
               const missionAnalyticsPayload = await api('/api/ops/missions/analytics?limit=200');
               renderOpsMissionAnalytics(missionAnalyticsPayload);
+              const missionControlPayload = await api('/api/ops/missions/control-room?horizonMs=1200000&analyticsLimit=200');
+              renderOpsMissionControlRoom(missionControlPayload);
+              const missionCommandCenterPayload = await api('/api/ops/missions/command-center?horizonMs=1200000&analyticsLimit=200');
+              renderOpsMissionCommandCenterUi(missionCommandCenterPayload);
+              if (missionCommandCenterPayload.timeline) {
+                renderOpsMissionCommandTimelineUi(missionCommandCenterPayload.timeline);
+              }
+              if (missionCommandCenterPayload.anomalies) {
+                renderOpsMissionAnomaliesUi(missionCommandCenterPayload.anomalies);
+              }
               const schedulesPayload = await api('/api/schedules');
               renderSchedules(schedulesPayload);
               const queueBoardPayload = await api('/api/board/queue');

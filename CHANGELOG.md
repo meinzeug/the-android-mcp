@@ -24,6 +24,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.21.0] - 2026-02-20
+### Added
+- New Mission Command Center backend intelligence and orchestration workflows:
+- `GET /api/ops/missions/command-center`
+- `GET /api/ops/missions/command-center/timeline`
+- `GET /api/ops/missions/command-center/anomalies`
+- `POST /api/ops/missions/command-center/quick-fix`
+- `POST /api/ops/missions/command-center/burst-test`
+- New dynamic Web UI Mission Command Center module with:
+- one-click command-center load
+- anomaly intelligence panel
+- timeline trend panel
+- quick-fix execution controls
+- burst-test execution controls.
+
+### Improved
+- Ops board payloads now include command-center intelligence, mission timeline, and mission anomaly views for stronger backend-bound observability.
+- Mission command-center views are now integrated into UI startup and periodic refresh loops for continuous operator visibility.
+
 ## [3.20.1] - 2026-02-20
 ### Fixed
 - Follow-up publish to ensure Mission Intelligence features are available to users via `latest` npm installation.
