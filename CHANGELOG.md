@@ -24,6 +24,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.23.0] - 2026-02-20
+### Added
+- Mission Command Center risk intelligence and strategy orchestration:
+- `GET /api/ops/missions/command-center/risk-explain`
+- `POST /api/ops/missions/command-center/strategy/plan`
+- `POST /api/ops/missions/command-center/strategy/execute`
+- Persistent command snapshot storage in `~/.the-android-mcp/web-ui-ops-mission-command-snapshots.json`.
+- New command snapshot APIs:
+- `GET /api/ops/missions/command-center/snapshots`
+- `POST /api/ops/missions/command-center/snapshots/capture`
+- `POST /api/ops/missions/command-center/snapshots/clear`
+- Expanded Web UI Command Center with:
+- risk explain panel
+- strategy plan/execute controls
+- snapshot replay/load/capture/prune controls.
+
+### Improved
+- Command center contract endpoint now documents strategy and snapshot workflows end-to-end.
+- State/ops/session/audit payloads now include command snapshot visibility alongside command audit data.
+- Strategy execution now orchestrates quick-fix, live device drill, and burst validation in one backend-bound flow.
+
 ## [3.22.0] - 2026-02-20
 ### Added
 - Mission Command Center backend expansion with persistent command-audit storage in `~/.the-android-mcp/web-ui-ops-mission-command-audit.json`.
