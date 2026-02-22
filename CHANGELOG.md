@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MCP tooling for direct browser automation: `open_chrome_url` and faster settings-toggle discovery for USB debugging via scroll-aware UI fallback.
 - Added `open_chrome_url_and_login` for one-shot Chrome navigation + credential fill + submit fallback.
 
+## [3.24.1] - 2026-02-22
+### Fixed
+- Web UI is now fully English across Simple Mode, Expert Area, labels, button text, and status/error guidance.
+
+### Improved
+- Advanced control surface is grouped into collapsible modules with explicit global actions (`Expand All Modules` / `Collapse All Modules`) for faster navigation.
+- Web UI visual structure was simplified for readability and clearer task flow between Simple Mode and Expert Area.
+- README Web UI section now reflects the current English-first UI, module grouping, and startup schedule-resume behavior.
+
 ## [3.24.0] - 2026-02-20
 ### Added
 - Beginner-first Web UI flow on local port `50000` with simplified entry actions and plain-language guidance.

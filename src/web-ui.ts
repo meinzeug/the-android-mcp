@@ -46,6 +46,7 @@ const OPS_MISSION_POLICY_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-mission-pol
 const OPS_MISSION_RUNS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-mission-runs.json');
 const OPS_MISSION_COMMAND_AUDIT_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-mission-command-audit.json');
 const OPS_MISSION_COMMAND_SNAPSHOTS_FILE = path.join(APP_STATE_DIR, 'web-ui-ops-mission-command-snapshots.json');
+const RESUME_SCHEDULES_ON_START_ENV = 'THE_ANDROID_MCP_RESUME_SCHEDULES_ON_START';
 
 const SNAPSHOT_KINDS = [
   'radio',
@@ -435,6 +436,15 @@ function ensureAppStateDir(): void {
   if (!fs.existsSync(APP_STATE_DIR)) {
     fs.mkdirSync(APP_STATE_DIR, { recursive: true });
   }
+}
+
+function shouldResumeSchedulesOnStart(): boolean {
+  const raw = process.env[RESUME_SCHEDULES_ON_START_ENV];
+  if (!raw) {
+    return false;
+  }
+  const normalized = raw.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
 }
 
 function appendSessionEvent(event: UiEvent): void {
@@ -3454,10 +3464,26 @@ function ensureSchedulesInitialized(): void {
     return;
   }
   loadSchedules();
+  const resumeOnStart = shouldResumeSchedulesOnStart();
+  let deactivated = 0;
   for (const task of Object.values(schedules)) {
     if (task.active) {
-      startSchedule(task.id);
+      if (resumeOnStart) {
+        startSchedule(task.id);
+      } else {
+        task.active = false;
+        task.updatedAt = nowIso();
+        deactivated += 1;
+      }
     }
+  }
+  if (!resumeOnStart && deactivated > 0) {
+    saveSchedules();
+    pushEvent('schedule-autoresume-skipped', 'Schedule auto-resume skipped on startup', {
+      deactivated,
+      env: RESUME_SCHEDULES_ON_START_ENV,
+    });
+    console.warn(`[web-ui] schedule auto-resume disabled; deactivated ${deactivated} schedule(s). Set ${RESUME_SCHEDULES_ON_START_ENV}=1 to re-enable.`);
   }
   schedulesInitialized = true;
 }
@@ -6123,10 +6149,26 @@ function ensureOpsMissionSchedulesInitialized(): void {
     return;
   }
   loadOpsMissionSchedules();
+  const resumeOnStart = shouldResumeSchedulesOnStart();
+  let deactivated = 0;
   for (const schedule of Object.values(opsMissionSchedules)) {
     if (schedule.active) {
-      startOpsMissionSchedule(schedule.id);
+      if (resumeOnStart) {
+        startOpsMissionSchedule(schedule.id);
+      } else {
+        schedule.active = false;
+        schedule.updatedAt = nowIso();
+        deactivated += 1;
+      }
     }
+  }
+  if (!resumeOnStart && deactivated > 0) {
+    saveOpsMissionSchedules();
+    pushEvent('ops-mission-schedule-autoresume-skipped', 'Ops mission schedule auto-resume skipped on startup', {
+      deactivated,
+      env: RESUME_SCHEDULES_ON_START_ENV,
+    });
+    console.warn(`[web-ui] ops mission schedule auto-resume disabled; deactivated ${deactivated} schedule(s). Set ${RESUME_SCHEDULES_ON_START_ENV}=1 to re-enable.`);
   }
   opsMissionSchedulesInitialized = true;
 }
@@ -9985,21 +10027,21 @@ const INDEX_HTML = String.raw`<!doctype html>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <style>
       :root {
-        --bg0: #071019;
-        --bg1: #0e1f2d;
-        --bg2: #153448;
-        --card: #0f1f2cbd;
-        --card-strong: #102434f2;
-        --line: #2f516bba;
-        --line-soft: #3a617d66;
-        --text: #eef8ff;
-        --muted: #9fbed2;
-        --ok: #8eeecf;
-        --err: #ff8f9c;
-        --acc0: #00d2a6;
-        --acc1: #16a8ff;
-        --acc2: #75e2ff;
-        --warn: #ffc067;
+        --bg0: #0a151f;
+        --bg1: #102334;
+        --bg2: #183a53;
+        --card: #122436e6;
+        --card-strong: #152c41f2;
+        --line: #3f6076b8;
+        --line-soft: #4b71895c;
+        --text: #edf7ff;
+        --muted: #a9c5d8;
+        --ok: #86f2ca;
+        --err: #ff9cab;
+        --acc0: #02c9a4;
+        --acc1: #1ea7ff;
+        --acc2: #8be8ff;
+        --warn: #ffc06f;
       }
       * { box-sizing: border-box; }
       body {
@@ -10008,21 +10050,19 @@ const INDEX_HTML = String.raw`<!doctype html>
         color: var(--text);
         min-height: 100vh;
         background:
-          linear-gradient(135deg, #05111cfa, #0a1825e8 45%, #0d2334de),
-          url('https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=2200&q=80') center/cover fixed no-repeat;
+          radial-gradient(circle at 10% 10%, #1c3f5f8a 0%, #0a1724 32%, #07131d 65%, #060f16 100%),
+          linear-gradient(180deg, #0a1622, #061019);
         padding: 16px;
       }
       .app { max-width: 1600px; margin: 0 auto; display: grid; gap: 14px; }
       .hero {
         border: 1px solid var(--line);
         border-radius: 20px;
-        background:
-          linear-gradient(125deg, #0d2538d8, #10263bd1),
-          url('https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1800&q=80') center/cover;
+        background: linear-gradient(135deg, #11283c, #0d1f2f 42%, #14324a);
         box-shadow: 0 20px 60px #02090f8c;
-        padding: 16px;
+        padding: 18px;
         display: grid;
-        gap: 8px;
+        gap: 10px;
       }
       .hero h1 { margin: 0; font-size: 1.55rem; letter-spacing: 0.01em; }
       .hero-badge {
@@ -10060,7 +10100,7 @@ const INDEX_HTML = String.raw`<!doctype html>
       .easy-mode {
         border: 1px solid var(--line);
         border-radius: 20px;
-        background: linear-gradient(145deg, #0f2436db, #102638e6);
+        background: linear-gradient(150deg, #11263aef, #11293fef 45%, #142f46eb);
         backdrop-filter: blur(7px);
         padding: 14px;
         display: grid;
@@ -10092,11 +10132,7 @@ const INDEX_HTML = String.raw`<!doctype html>
         border: 1px solid var(--line-soft);
         border-radius: 14px;
         padding: 10px;
-        background:
-          linear-gradient(145deg, #0f2232e8, #0c1d2be8),
-          var(--easy-bg, none);
-        background-size: cover;
-        background-position: center;
+        background: linear-gradient(145deg, #102435f2, #0e1f2ef2);
         display: grid;
         gap: 7px;
       }
@@ -10161,10 +10197,37 @@ const INDEX_HTML = String.raw`<!doctype html>
         min-width: 240px;
         border-radius: 999px;
       }
+      .advanced-head {
+        grid-column: 1 / -1;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: linear-gradient(140deg, #112537eb, #102132ef);
+        padding: 12px;
+        display: grid;
+        gap: 10px;
+      }
+      .advanced-head h2 {
+        margin: 0;
+        font-size: 1.02rem;
+      }
+      .advanced-head p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .advanced-head-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .advanced-head-actions button {
+        width: auto;
+        min-width: 200px;
+      }
       .grid {
         display: grid;
         gap: 10px;
-        grid-template-columns: 1fr 1fr 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
       .grid.hidden {
         display: none;
@@ -10235,15 +10298,45 @@ const INDEX_HTML = String.raw`<!doctype html>
       .muted { margin: 0; color: var(--muted); font-size: 12px; }
       .ok { color: var(--ok); }
       .err { color: var(--err); }
+      .ops-group {
+        border: 1px solid var(--line-soft);
+        border-radius: 12px;
+        background: #0d1d2be8;
+        overflow: hidden;
+      }
+      .ops-group + .ops-group {
+        margin-top: 8px;
+      }
+      .ops-group > summary {
+        list-style: none;
+        cursor: pointer;
+        padding: 10px 12px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        background: linear-gradient(140deg, #122a3e, #102435);
+      }
+      .ops-group > summary::-webkit-details-marker {
+        display: none;
+      }
+      .ops-group[open] > summary {
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .ops-group-body {
+        display: grid;
+        gap: 8px;
+        padding: 10px;
+      }
       @media (max-width: 1300px) {
         .easy-grid { grid-template-columns: 1fr 1fr; }
         .easy-stats { grid-template-columns: 1fr 1fr; }
       }
-      @media (max-width: 1200px) { .grid { grid-template-columns: 1fr 1fr; } }
+      @media (max-width: 1200px) { .grid { grid-template-columns: 1fr; } }
       @media (max-width: 900px) {
         .grid { grid-template-columns: 1fr; }
         .easy-grid { grid-template-columns: 1fr; }
         .easy-ops { grid-template-columns: 1fr; }
+        .advanced-head-actions button { width: 100%; min-width: 0; }
       }
     </style>
   </head>
@@ -10259,58 +10352,67 @@ const INDEX_HTML = String.raw`<!doctype html>
           <span class="pill" id="queue-pill">queue: 0</span>
           <span class="pill">port: 50000</span>
         </div>
-        <span class="hero-badge">Futuristic Easy Control</span>
-        <h1>the-android-mcp v${pkg.version} command center</h1>
-        <p class="muted">Eine Oberfläche für alle: erst einfache Knöpfe, dann bei Bedarf Profi-Tools.</p>
+        <span class="hero-badge">Clear Control Mode</span>
+        <h1>the-android-mcp v${pkg.version} Control Room</h1>
+        <p class="muted">Start in simple mode. Expert tools are available below in structured, collapsible modules.</p>
       </section>
 
       <section class="easy-mode">
         <div class="easy-head">
-          <h2>Easy Mode: 1-Klick Steuerung</h2>
-          <p class="easy-note">Für Nicht-Techniker: URL eintragen, großen Knopf drücken, fertig.</p>
+          <h2>Simple Mode: Quick Actions</h2>
+          <p class="easy-note">For everyday use and quick checks: enter a URL, run an action, and read the status.</p>
         </div>
         <div class="easy-grid">
-          <article class="easy-card" style="--easy-bg:url('https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?auto=format&fit=crop&w=1400&q=80')">
-            <h3>Schritt 1: Website aufs Handy schicken</h3>
+          <article class="easy-card">
+            <h3>1. Open a website on your device</h3>
             <input id="easy-url-input" type="url" value="https://www.wikipedia.org" />
             <div class="easy-ops">
-              <button class="easy-btn" id="easy-open-btn">Website öffnen</button>
-              <button class="easy-btn alt" id="easy-smoke-btn">Schnellcheck starten</button>
+              <button class="easy-btn" id="easy-open-btn">Open Website</button>
+              <button class="easy-btn alt" id="easy-smoke-btn">Run Quick Check</button>
             </div>
-            <div class="easy-hint" id="easy-last-action">Noch keine Aktion ausgeführt.</div>
-          </article>
-          <article class="easy-card" style="--easy-bg:url('https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1400&q=80')">
-            <h3>Schritt 2: Automatisch reparieren</h3>
-            <div class="easy-ops">
-              <button class="easy-btn alt" id="easy-autofix-btn">Auto-Fix ausführen</button>
-              <button class="easy-btn" id="easy-strategy-btn">Turbo-Strategie</button>
-            </div>
-            <button class="easy-btn warn" id="easy-panic-btn">Notfall-Stabilisierung</button>
+            <div class="easy-hint" id="easy-last-action">No action executed yet.</div>
           </article>
           <article class="easy-card">
-            <h3>Status in Klartext</h3>
+            <h3>2. Stabilize and recover</h3>
+            <div class="easy-ops">
+              <button class="easy-btn alt" id="easy-autofix-btn">Run Auto-Fix</button>
+              <button class="easy-btn" id="easy-strategy-btn">Run Turbo Strategy</button>
+            </div>
+            <button class="easy-btn warn" id="easy-panic-btn">Emergency Stabilization</button>
+          </article>
+          <article class="easy-card">
+            <h3>Status Summary</h3>
             <div class="easy-stats">
-              <div class="easy-stat"><strong id="easy-risk">-</strong><span>Risiko</span></div>
-              <div class="easy-stat"><strong id="easy-mode">-</strong><span>Modus</span></div>
-              <div class="easy-stat"><strong id="easy-device">-</strong><span>Geräte</span></div>
+              <div class="easy-stat"><strong id="easy-risk">-</strong><span>Risk</span></div>
+              <div class="easy-stat"><strong id="easy-mode">-</strong><span>Mode</span></div>
+              <div class="easy-stat"><strong id="easy-device">-</strong><span>Devices</span></div>
               <div class="easy-stat"><strong id="easy-jobs">-</strong><span>Jobs</span></div>
             </div>
-            <div class="easy-hint" id="easy-recommendation">Empfehlung wird geladen ...</div>
+            <div class="easy-hint" id="easy-recommendation">Loading recommendation ...</div>
           </article>
         </div>
         <div class="advanced-toggle-wrap">
-          <button class="s advanced-toggle-btn" id="easy-toggle-advanced-btn">Profi-Bereich einblenden</button>
+          <button class="s advanced-toggle-btn" id="easy-toggle-advanced-btn">Show Expert Area</button>
         </div>
       </section>
 
       <section class="grid hidden" id="advanced-grid">
+        <div class="advanced-head">
+          <h2>Expert Area</h2>
+          <p>All features remain available. Larger tool collections are grouped into thematic, collapsible modules.</p>
+          <div class="advanced-head-actions">
+            <button class="s" id="advanced-expand-all-btn">Expand All Modules</button>
+            <button class="s" id="advanced-collapse-all-btn">Collapse All Modules</button>
+          </div>
+        </div>
         <article class="card stack">
-          <h2>Device operations</h2>
+          <h2>Direct Device Control</h2>
+          <p class="muted">Run direct actions on the currently connected device.</p>
           <select id="device-select"></select>
           <input id="url-input" type="url" value="https://www.wikipedia.org" />
           <div class="split">
             <button class="p" id="open-url-btn">Open URL</button>
-            <button class="p" id="suite-btn">Run suite</button>
+            <button class="p" id="suite-btn">Run Diagnostic Suite</button>
           </div>
           <div class="quick">
             <button class="s quick-url" data-url="https://www.wikipedia.org">Wikipedia</button>
@@ -10319,14 +10421,15 @@ const INDEX_HTML = String.raw`<!doctype html>
             <button class="s quick-url" data-url="https://www.youtube.com">YouTube</button>
           </div>
           <div class="split">
-            <button class="s" id="profile-btn">Device profile</button>
-            <button class="s" id="profiles-btn">Profiles all</button>
+            <button class="s" id="profile-btn">Load Device Profile</button>
+            <button class="s" id="profiles-btn">Profiles for All Devices</button>
           </div>
           <p class="muted">Update hint: <code>npm install -g the-android-mcp@latest</code></p>
         </article>
 
         <article class="card stack">
-          <h2>Snapshot + stress</h2>
+          <h2>Diagnostics & Stress Testing</h2>
+          <p class="muted">Capture snapshots, compare deltas, and run URL loop tests.</p>
           <select id="snapshot-kind">
             <option value="radio">radio</option>
             <option value="display">display</option>
@@ -10349,7 +10452,8 @@ https://developer.android.com</textarea>
         </article>
 
         <article class="card stack">
-          <h2>Workflow engine</h2>
+          <h2>Manage Workflows</h2>
+          <p class="muted">Save, run, and export multi-step flows.</p>
           <select id="workflow-select"></select>
           <input id="workflow-name" placeholder="workflow name" />
           <textarea id="workflow-steps">[
@@ -10369,7 +10473,8 @@ https://developer.android.com</textarea>
         </article>
 
         <article class="card stack">
-          <h2>Job orchestrator</h2>
+          <h2>Jobs & Queue</h2>
+          <p class="muted">Queue single jobs or batch jobs.</p>
           <select id="job-type">
             <option value="open_url">open_url</option>
             <option value="snapshot_suite">snapshot_suite</option>
@@ -10393,13 +10498,15 @@ https://developer.android.com</textarea>
         </article>
 
         <article class="card stack">
-          <h2>Lanes + events</h2>
+          <h2>Live Status & Events</h2>
+          <p class="muted">Current lanes and event feed in realtime.</p>
           <div id="lanes" class="lanes"></div>
           <div id="events" class="events"></div>
         </article>
 
         <article class="card stack">
-          <h2>Queue control + autopilot</h2>
+          <h2>Advanced Control</h2>
+          <p class="muted">Autopilot, policies, schedules, and missions grouped into modules.</p>
           <div class="split">
             <button class="w" id="pause-all-lanes-btn">Pause all lanes</button>
             <button class="p" id="resume-all-lanes-btn">Resume all lanes</button>
@@ -10798,7 +10905,7 @@ https://developer.android.com</textarea>
         </article>
 
         <article class="card stack">
-          <h2>Metrics + session</h2>
+          <h2>Metriken & Sitzung</h2>
           <div id="metrics" class="metrics"></div>
           <div class="split">
             <button class="s" id="refresh-state-btn">Refresh state</button>
@@ -10948,6 +11055,8 @@ https://developer.android.com</textarea>
       const $easyLastAction = document.getElementById('easy-last-action');
       const $advancedGrid = document.getElementById('advanced-grid');
       const $easyToggleAdvancedBtn = document.getElementById('easy-toggle-advanced-btn');
+      const $advancedExpandAllBtn = document.getElementById('advanced-expand-all-btn');
+      const $advancedCollapseAllBtn = document.getElementById('advanced-collapse-all-btn');
 
       function setMessage(text, isError) {
         $message.textContent = text;
@@ -11817,38 +11926,141 @@ https://developer.android.com</textarea>
       async function easyOpenWebsiteUi() {
         const url = ($easyUrlInput && $easyUrlInput.value ? $easyUrlInput.value : $urlInput.value || '').trim();
         if (!url) {
-          throw new Error('Bitte eine URL eintragen.');
+          throw new Error('Please enter a URL.');
         }
         $urlInput.value = url;
         await openUrl(url);
-        setEasyLastAction('Website geöffnet: ' + url, false);
+        setEasyLastAction('Website opened: ' + url, false);
         await loadEasyOverview();
       }
 
       async function easySmokeUi() {
         await runDeviceSmoke();
         await runSuite();
-        setEasyLastAction('Schnellcheck abgeschlossen.', false);
+        setEasyLastAction('Quick check completed.', false);
         await loadEasyOverview();
       }
 
       async function easyAutoFixUi() {
         await runOpsMissionCommandQuickFixUi();
-        setEasyLastAction('Auto-Fix wurde ausgeführt.', false);
+        setEasyLastAction('Auto-fix executed.', false);
         await loadEasyOverview();
       }
 
       async function easyStrategyUi() {
         await executeOpsMissionCommandStrategyUi();
-        setEasyLastAction('Turbo-Strategie abgeschlossen.', false);
+        setEasyLastAction('Turbo strategy completed.', false);
         await loadEasyOverview();
       }
 
       async function easyPanicUi() {
         await runOpsStabilizeUi();
         await runWatchdogUi();
-        setEasyLastAction('Notfall-Stabilisierung abgeschlossen.', false);
+        setEasyLastAction('Emergency stabilization completed.', false);
         await loadEasyOverview();
+      }
+
+      let advancedUiStructured = false;
+
+      function structureAdvancedUi() {
+        if (advancedUiStructured || !$advancedGrid) {
+          return;
+        }
+
+        const cards = Array.from($advancedGrid.querySelectorAll('article.card.stack'));
+        const opsCard = cards.find(function (card) {
+          const title = card.querySelector('h2');
+          const text = title && title.textContent ? title.textContent.trim().toLowerCase() : '';
+          return text.includes('erweiterte steuerung') || text.includes('queue control');
+        });
+
+        if (!opsCard) {
+          advancedUiStructured = true;
+          return;
+        }
+
+        const titleNode = opsCard.querySelector('h2');
+        if (!titleNode) {
+          advancedUiStructured = true;
+          return;
+        }
+
+        const allChildren = Array.from(opsCard.children);
+        const contentNodes = allChildren.filter(function (node) {
+          return node !== titleNode && !(node instanceof HTMLElement && node.tagName.toLowerCase() === 'p' && node.classList.contains('muted'));
+        });
+
+        const groups = [];
+        let current = [];
+        for (const node of contentNodes) {
+          if (node instanceof HTMLElement && node.tagName.toLowerCase() === 'hr') {
+            if (current.length > 0) {
+              groups.push(current);
+              current = [];
+            }
+            continue;
+          }
+          current.push(node);
+        }
+        if (current.length > 0) {
+          groups.push(current);
+        }
+
+        const labels = [
+          'Immediate Actions: Queue, Smoke, Autopilot',
+          'Recorder: Capture & Replay',
+          'Presets & Heatmap',
+          'Policy, Runbook & Transactions',
+          'Queue Board & Schedules',
+          'Alert Rules',
+          'Import/Export, Baselines, Campaigns',
+          'Stabilization & Control Room',
+          'Policy Presets',
+          'Watchdog Profiles',
+          'Ops Action Queue',
+          'Gate Checks',
+          'Missions',
+          'Mission Schedules & Analytics',
+          'Mission Policy',
+          'Additional Tools',
+        ];
+
+        for (const node of contentNodes) {
+          if (node.parentNode === opsCard) {
+            opsCard.removeChild(node);
+          }
+        }
+
+        for (let index = 0; index < groups.length; index += 1) {
+          const details = document.createElement('details');
+          details.className = 'ops-group';
+          details.open = index < 2;
+
+          const summary = document.createElement('summary');
+          summary.textContent = labels[index] || ('Module ' + String(index + 1));
+          details.appendChild(summary);
+
+          const body = document.createElement('div');
+          body.className = 'ops-group-body';
+          for (const node of groups[index]) {
+            body.appendChild(node);
+          }
+
+          details.appendChild(body);
+          opsCard.appendChild(details);
+        }
+
+        advancedUiStructured = true;
+      }
+
+      function setOpsGroupsOpen(open) {
+        if (!$advancedGrid) {
+          return;
+        }
+        const groups = $advancedGrid.querySelectorAll('.ops-group');
+        for (const group of groups) {
+          group.open = open;
+        }
       }
 
       function toggleAdvancedUi() {
@@ -11856,7 +12068,10 @@ https://developer.android.com</textarea>
           return;
         }
         const hidden = $advancedGrid.classList.toggle('hidden');
-        $easyToggleAdvancedBtn.textContent = hidden ? 'Profi-Bereich einblenden' : 'Profi-Bereich ausblenden';
+        if (!hidden) {
+          structureAdvancedUi();
+        }
+        $easyToggleAdvancedBtn.textContent = hidden ? 'Show Expert Area' : 'Hide Expert Area';
       }
 
       function connectRealtime() {
@@ -11916,7 +12131,7 @@ https://developer.android.com</textarea>
         if ($easyUrlInput) {
           $easyUrlInput.value = url;
         }
-        setEasyLastAction('Website geöffnet: ' + url, false);
+        setEasyLastAction('Website opened: ' + url, false);
         setMessage('URL opened', false);
       }
 
@@ -14113,6 +14328,20 @@ https://developer.android.com</textarea>
           toggleAdvancedUi();
         });
       }
+      if ($advancedExpandAllBtn) {
+        $advancedExpandAllBtn.addEventListener('click', function () {
+          structureAdvancedUi();
+          setOpsGroupsOpen(true);
+          setMessage('Expanded all expert modules', false);
+        });
+      }
+      if ($advancedCollapseAllBtn) {
+        $advancedCollapseAllBtn.addEventListener('click', function () {
+          structureAdvancedUi();
+          setOpsGroupsOpen(false);
+          setMessage('Collapsed all expert modules', false);
+        });
+      }
 
       document.getElementById('open-url-btn').addEventListener('click', async function () {
         try { await openUrl($urlInput.value); } catch (error) { setMessage(String(error), true); }
@@ -14545,13 +14774,14 @@ https://developer.android.com</textarea>
 
       async function init() {
         try {
+          structureAdvancedUi();
           ensureOpsMissionCommandCenterUi();
           await refreshCore();
           if ($easyUrlInput && !$easyUrlInput.value) {
             $easyUrlInput.value = $urlInput.value || 'https://www.wikipedia.org';
           }
           await loadEasyOverview();
-          setEasyLastAction('Bereit. Wähle eine Aktion oben im Easy Mode.', false);
+          setEasyLastAction('Ready. Choose an action in Simple Mode above.', false);
           const history = await api('/api/history?limit=45');
           const events = Array.isArray(history.events) ? history.events : [];
           for (let i = events.length - 1; i >= 0; i -= 1) {

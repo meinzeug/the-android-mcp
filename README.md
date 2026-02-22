@@ -40,11 +40,14 @@ sequenceDiagram
 
 ## Web UI v3 (Local 50000)
 
-The local web cockpit is now designed for complete beginners first, with advanced controls hidden behind an explicit toggle.
+The local web cockpit is now English-first and beginner-first, with advanced controls hidden behind an explicit toggle.
 
 - URL: `http://127.0.0.1:50000`
 - Start command: `the-android-mcp-web-ui --serve --host 127.0.0.1 --port 50000`
-- UX direction: plain-language actions, large guided cards, futuristic gradients, and visual mission feedback.
+- UX direction: plain-language actions, large guided cards, and clearer operational feedback.
+- Structure: `Simple Mode` for daily actions, `Expert Area` for full controls.
+- Expert Area: large control sets are grouped into collapsible modules with `Expand All Modules` / `Collapse All Modules`.
+- Startup safety: schedule auto-resume is disabled by default; enable with `THE_ANDROID_MCP_RESUME_SCHEDULES_ON_START=1`.
 
 ### Screenshots
 
@@ -284,6 +287,10 @@ gemini mcp add the-android-mcp npx the-android-mcp
 ### Codex
 On install, the package auto-adds the server to `~/.codex/config.toml` if the file exists.
 To skip auto-setup, set `THE_ANDROID_MCP_NO_CODEX_SETUP=1`.
+To skip Web UI auto-start on install, set `THE_ANDROID_MCP_NO_WEB_UI_AUTOSTART=1`.
+
+Web UI schedule auto-resume on startup is disabled by default to prevent unintended background device actions.
+To explicitly restore active schedules on startup, set `THE_ANDROID_MCP_RESUME_SCHEDULES_ON_START=1`.
 
 If you need to add it manually, use:
 ```toml
